@@ -7,7 +7,7 @@ from typing import Any
 
 import streamlit as st
 
-from config import DEFAULT_MODEL
+from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS
 from deepseek_client import DeepSeekClientError, generate_text
 from file_manager import (
     ensure_directories,
@@ -54,6 +54,104 @@ REQUIRED_SETTING_EXPANSION_FIELDS = [
     "world_setting",
     "core_conflict",
 ]
+LEGACY_MODEL_MAP = {
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-reasoner": "deepseek-v4-pro",
+    "deepseek-coder": "deepseek-v4-flash",
+}
+TASK_MODEL_KEYS = {
+    "setting_expansion": ("setting_expansion_model", "custom_setting_expansion_model"),
+    "outline": ("outline_model", "custom_outline_model"),
+    "character": ("character_model", "custom_character_model"),
+    "chapter": ("chapter_model", "custom_chapter_model"),
+    "chapter_title": ("chapter_title_model", "custom_chapter_title_model"),
+    "summary": ("summary_model", "custom_summary_model"),
+}
+
+
+def _normalize_model_name(model_name: Any) -> str:
+    model_name = str(model_name or "").strip()
+    return LEGACY_MODEL_MAP.get(model_name, model_name)
+
+
+def normalize_model_settings(raw_settings: Any) -> dict[str, Any]:
+    raw_settings = raw_settings if isinstance(raw_settings, dict) else {}
+    settings = dict(DEFAULT_MODEL_SETTINGS)
+    settings["use_unified_model"] = bool(raw_settings.get("use_unified_model", settings["use_unified_model"]))
+
+    model_keys = ["unified_model"] + [model_key for model_key, _ in TASK_MODEL_KEYS.values()]
+    for model_key in model_keys:
+        custom_key = f"custom_{model_key}"
+        raw_choice = _normalize_model_name(raw_settings.get(model_key, settings[model_key]))
+        raw_custom = _normalize_model_name(raw_settings.get(custom_key, settings.get(custom_key, "")))
+
+        if raw_choice in DEEPSEEK_MODELS:
+            settings[model_key] = raw_choice
+            settings[custom_key] = raw_custom
+        elif raw_choice:
+            settings[model_key] = "custom"
+            settings[custom_key] = raw_custom or raw_choice
+        else:
+            settings[model_key] = DEFAULT_MODEL
+            settings[custom_key] = raw_custom
+
+    return settings
+
+
+def resolve_model(model_choice: str, custom_model: str, fallback: str = DEFAULT_MODEL) -> str:
+    model_choice = _normalize_model_name(model_choice)
+    custom_model = _normalize_model_name(custom_model)
+    fallback = _normalize_model_name(fallback) or DEFAULT_MODEL
+
+    if model_choice != "custom":
+        return model_choice or fallback
+    return custom_model.strip() or fallback
+
+
+def get_task_models_from_state() -> dict[str, str]:
+    if st.session_state.get("use_unified_model", True):
+        unified_model = resolve_model(
+            st.session_state.get("unified_model", DEFAULT_MODEL),
+            st.session_state.get("custom_unified_model", ""),
+        )
+        return {task_name: unified_model for task_name in TASK_MODEL_KEYS}
+
+    return {
+        task_name: resolve_model(
+            st.session_state.get(model_key, DEFAULT_MODEL),
+            st.session_state.get(custom_key, ""),
+        )
+        for task_name, (model_key, custom_key) in TASK_MODEL_KEYS.items()
+    }
+
+
+def _model_settings_from_state() -> dict[str, Any]:
+    settings = {}
+    for key in DEFAULT_MODEL_SETTINGS:
+        value = st.session_state.get(key, DEFAULT_MODEL_SETTINGS[key])
+        settings[key] = _normalize_model_name(value) if isinstance(value, str) else bool(value)
+    return normalize_model_settings(settings)
+
+
+def _load_model_settings_to_session(raw_settings: Any) -> None:
+    for key, value in normalize_model_settings(raw_settings).items():
+        st.session_state[key] = value
+
+
+def _model_for_mode(mode: str, task_models: dict[str, str]) -> str:
+    if mode == OUTLINE_MODE:
+        return task_models["outline"]
+    if mode == CHARACTER_MODE:
+        return task_models["character"]
+    return task_models["chapter"]
+
+
+def _render_model_choice(label: str, model_key: str, custom_key: str) -> None:
+    st.selectbox(label, DEEPSEEK_MODELS, key=model_key)
+    if st.session_state.get(model_key) == "custom":
+        st.text_input(f"自定义{label}", key=custom_key)
+        if not st.session_state.get(custom_key, "").strip():
+            st.warning(f"{label}已选择 custom，但未填写自定义模型名，将使用 {DEFAULT_MODEL}。")
 
 
 def _init_session_state() -> None:
@@ -93,9 +191,17 @@ def _init_session_state() -> None:
         "target_chapter_number": 3,
         "start_chapter_number": 1,
         "end_chapter_number": 3,
+        "current_model_info": {},
     }
+    defaults.update(DEFAULT_MODEL_SETTINGS)
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
+
+    normalized_settings = normalize_model_settings(
+        {key: st.session_state.get(key) for key in DEFAULT_MODEL_SETTINGS}
+    )
+    for key, value in normalized_settings.items():
+        st.session_state[key] = value
 
 
 def _effective_choice(choice: str, custom_value: str) -> str:
@@ -120,6 +226,7 @@ def _collect_project_config() -> dict[str, Any]:
         "target_readers": st.session_state.target_readers.strip(),
         "word_count_range": st.session_state.chapter_word_range.strip(),
         "extra_requirements": st.session_state.extra_requirements.strip(),
+        "model_settings": _model_settings_from_state(),
     }
 
 
@@ -144,6 +251,7 @@ def _load_config_to_session(config: dict[str, Any]) -> None:
     st.session_state.target_readers = config.get("target_readers", "")
     st.session_state.chapter_word_range = config.get("word_count_range", "3000-5000 字")
     st.session_state.extra_requirements = config.get("extra_requirements", "")
+    _load_model_settings_to_session(config.get("model_settings", DEFAULT_MODEL_SETTINGS))
 
 
 def _load_choice(option_value: Any, final_value: Any, custom_value: Any, options: list[str]) -> tuple[str, str]:
@@ -324,18 +432,28 @@ def _set_current_result(content: str, saved_path: Path) -> None:
     st.session_state.edited_saved_path = ""
 
 
+def _set_current_model_info(model_info: dict[str, str]) -> None:
+    st.session_state.current_model_info = model_info
+
+
 def generate_single_chapter_workflow(
     project_title: str,
     chapter_number: int,
     form_data: dict[str, Any],
-    model: str,
+    task_models: dict[str, str],
     temperature: float,
     max_tokens: int,
     use_previous_context: bool,
 ) -> dict[str, Any]:
+    chapter_model = task_models["chapter"]
+    chapter_title_model = task_models["chapter_title"]
+    summary_model = task_models["summary"]
     result: dict[str, Any] = {
         "chapter_number": int(chapter_number),
         "chapter_title": "未命名章节",
+        "chapter_model": chapter_model,
+        "chapter_title_model": chapter_title_model,
+        "summary_model": summary_model,
         "chapter_path": "",
         "summary": "",
         "summary_path": "",
@@ -358,7 +476,7 @@ def generate_single_chapter_workflow(
         result["notices"] = notices
         chapter_content = generate_text(
             messages=messages,
-            model=model,
+            model=chapter_model,
             temperature=temperature,
             max_tokens=int(max_tokens),
         )
@@ -376,7 +494,7 @@ def generate_single_chapter_workflow(
         )
         raw_title = generate_text(
             messages=title_messages,
-            model=model,
+            model=chapter_title_model,
             temperature=min(float(temperature), 0.7),
             max_tokens=128,
         )
@@ -402,7 +520,7 @@ def generate_single_chapter_workflow(
         summary_messages = build_summary_prompt(final_content, int(chapter_number))
         summary = generate_text(
             messages=summary_messages,
-            model=model,
+            model=summary_model,
             temperature=0.2,
             max_tokens=512,
         )
@@ -420,7 +538,7 @@ def generate_single_chapter_workflow(
             chapter_number=int(chapter_number),
             chapter_title=chapter_title,
             chapter_path=Path(chapter_path),
-            model=model,
+            model=chapter_model,
             summary=result["summary"],
         )
         result["index_path"] = str(index_path)
@@ -437,6 +555,13 @@ def _show_chapter_workflow_result(result: dict[str, Any]) -> bool:
 
     if chapter_path and result.get("content"):
         _set_current_result(result["content"], Path(chapter_path))
+        _set_current_model_info(
+            {
+                "正文模型": result.get("chapter_model", ""),
+                "标题模型": result.get("chapter_title_model", ""),
+                "摘要模型": result.get("summary_model", ""),
+            }
+        )
 
     if result.get("error"):
         st.error(f"第 {chapter_number} 章生成流程失败：{result['error']}")
@@ -444,6 +569,12 @@ def _show_chapter_workflow_result(result: dict[str, Any]) -> bool:
 
     st.success(f"第 {chapter_number} 章生成成功，已保存：{chapter_path}")
     st.info(f"章节标题：{chapter_title}")
+    st.info(
+        "使用模型："
+        f"正文 {result.get('chapter_model')}，"
+        f"标题 {result.get('chapter_title_model')}，"
+        f"摘要 {result.get('summary_model')}"
+    )
     if result.get("title_error"):
         st.warning(f"章节标题生成失败，已使用兜底标题：{result['title_error']}")
     if result.get("summary_path"):
@@ -486,7 +617,7 @@ def _generate_and_save(
     title: str,
     mode: str,
     messages: list[dict[str, str]],
-    model: str,
+    task_models: dict[str, str],
     temperature: float,
     max_tokens: int,
     chapter_number: int,
@@ -499,7 +630,7 @@ def _generate_and_save(
                 project_title=title,
                 chapter_number=chapter_number,
                 form_data=project_config or _collect_project_config(),
-                model=model,
+                task_models=task_models,
                 temperature=temperature,
                 max_tokens=int(max_tokens),
                 use_previous_context=use_previous_context,
@@ -508,9 +639,10 @@ def _generate_and_save(
 
     with st.spinner("正在请求 DeepSeek 生成内容..."):
         try:
+            selected_model = _model_for_mode(mode, task_models)
             result = generate_text(
                 messages=messages,
-                model=model,
+                model=selected_model,
                 temperature=temperature,
                 max_tokens=int(max_tokens),
             )
@@ -521,7 +653,9 @@ def _generate_and_save(
     saved_path = _save_result(title, mode, result, chapter_number)
     _save_pending_setting_expansion(title)
     _set_current_result(result, saved_path)
+    _set_current_model_info({"使用模型": selected_model})
     st.success(f"生成成功，已保存：{saved_path}")
+    st.info(f"使用模型：{selected_model}")
 
     return True
 
@@ -536,7 +670,6 @@ def main() -> None:
 
     with st.sidebar:
         st.header("生成参数")
-        model = st.text_input("model", value=DEFAULT_MODEL)
         temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
         max_tokens = st.number_input("max_tokens", min_value=512, max_value=32768, value=4000, step=256)
         use_previous_context = st.checkbox("使用上一章上下文", value=True)
@@ -569,6 +702,21 @@ def main() -> None:
             expansion_path = _save_pending_setting_expansion(_current_project_title())
             if expansion_path:
                 st.info(f"最近一次设定扩写已保存：{expansion_path}")
+
+    with st.sidebar:
+        st.header("模型设置")
+        st.checkbox("使用统一模型", key="use_unified_model")
+        if st.session_state.use_unified_model:
+            _render_model_choice("统一模型", "unified_model", "custom_unified_model")
+        else:
+            _render_model_choice("设定扩写模型", "setting_expansion_model", "custom_setting_expansion_model")
+            _render_model_choice("大纲生成模型", "outline_model", "custom_outline_model")
+            _render_model_choice("人物卡生成模型", "character_model", "custom_character_model")
+            _render_model_choice("章节正文生成模型", "chapter_model", "custom_chapter_model")
+            _render_model_choice("章节标题生成模型", "chapter_title_model", "custom_chapter_title_model")
+            _render_model_choice("章节摘要生成模型", "summary_model", "custom_summary_model")
+
+    task_models = get_task_models_from_state()
 
     st.subheader("白话设定自动扩写")
     st.text_area(
@@ -607,6 +755,7 @@ def main() -> None:
             st.warning("请先输入白话设定。")
         else:
             with st.expander("设定扩写 messages 预览", expanded=True):
+                st.info(f"使用模型：{task_models['setting_expansion']}")
                 st.json(expand_messages, expanded=False)
                 st.text_area("可复制设定扩写 Prompt", value=_format_messages_for_preview(expand_messages), height=420)
 
@@ -618,7 +767,7 @@ def main() -> None:
                 try:
                     raw_response = generate_text(
                         messages=expand_messages,
-                        model=model,
+                        model=task_models["setting_expansion"],
                         temperature=temperature,
                         max_tokens=int(max_tokens),
                     )
@@ -651,6 +800,7 @@ def main() -> None:
                         st.info("检测到你已有小说标题，未自动覆盖；可从标题候选中手动选择。")
 
                     st.success("设定已扩写并填入")
+                    st.info(f"设定扩写模型：{task_models['setting_expansion']}")
 
     if st.session_state.title_candidates:
         st.write("标题候选：")
@@ -722,6 +872,15 @@ def main() -> None:
 
     if preview_clicked:
         with st.expander("完整 messages 预览", expanded=True):
+            if mode == CHAPTER_MODE:
+                st.info(
+                    "本次任务模型："
+                    f"章节正文 {task_models['chapter']}，"
+                    f"章节标题 {task_models['chapter_title']}，"
+                    f"章节摘要 {task_models['summary']}"
+                )
+            else:
+                st.info(f"本次任务模型：{_model_for_mode(mode, task_models)}")
             st.json(messages, expanded=False)
             st.text_area("可复制 Prompt", value=_format_messages_for_preview(messages), height=420)
 
@@ -730,7 +889,7 @@ def main() -> None:
             title=project_title,
             mode=mode,
             messages=messages,
-            model=model,
+            task_models=task_models,
             temperature=temperature,
             max_tokens=int(max_tokens),
             chapter_number=chapter_number,
@@ -777,7 +936,7 @@ def main() -> None:
                 title=project_title,
                 mode=CHAPTER_MODE,
                 messages=continue_messages,
-                model=model,
+                task_models=task_models,
                 temperature=temperature,
                 max_tokens=int(max_tokens),
                 chapter_number=next_chapter_number,
@@ -817,7 +976,7 @@ def main() -> None:
                         project_title=project_title,
                         chapter_number=batch_chapter_number,
                         form_data=project_config,
-                        model=model,
+                        task_models=task_models,
                         temperature=temperature,
                         max_tokens=int(max_tokens),
                         use_previous_context=True,
@@ -831,6 +990,12 @@ def main() -> None:
                     successful_results.append(batch_result)
                     status.update(label=f"第 {batch_chapter_number} 章生成成功", state="complete")
                     st.write(f"章节标题：{batch_result['chapter_title']}")
+                    st.write(
+                        "使用模型："
+                        f"正文 {batch_result['chapter_model']}，"
+                        f"标题 {batch_result['chapter_title_model']}，"
+                        f"摘要 {batch_result['summary_model']}"
+                    )
                     st.write(f"保存路径：{batch_result['chapter_path']}")
                     if batch_result.get("summary_path"):
                         st.write(f"摘要已保存：{batch_result['summary_path']}")
@@ -844,7 +1009,10 @@ def main() -> None:
                 _set_current_result(last_result["content"], Path(last_result["chapter_path"]))
                 st.success(f"批量生成完成：成功生成 {len(successful_results)} 章。")
                 for item in successful_results:
-                    st.write(f"第 {item['chapter_number']} 章：{item['chapter_title']}，{item['chapter_path']}")
+                    st.write(
+                        f"第 {item['chapter_number']} 章：{item['chapter_title']}，"
+                        f"正文模型 {item['chapter_model']}，{item['chapter_path']}"
+                    )
             if failed_result:
                 st.warning(
                     f"批量生成已停止：第 {failed_result['chapter_number']} 章失败。"
@@ -853,6 +1021,14 @@ def main() -> None:
 
     if st.session_state.current_result:
         st.subheader("当前生成结果")
+        if st.session_state.current_model_info:
+            st.caption(
+                "；".join(
+                    f"{name}：{model_name}"
+                    for name, model_name in st.session_state.current_model_info.items()
+                    if model_name
+                )
+            )
         st.markdown(st.session_state.current_result)
 
         st.subheader("编辑生成结果")

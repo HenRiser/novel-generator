@@ -159,6 +159,26 @@ http://localhost:8501
 outputs/小说标题/setting_expansion_latest.json
 ```
 
+## 模型切换
+
+项目支持在侧边栏选择 DeepSeek 模型。默认模型为 `deepseek-v4-flash`。
+
+内置可选模型为：
+
+- `deepseek-v4-flash`
+- `deepseek-v4-pro`
+
+侧边栏默认开启“使用统一模型”，开启后所有任务共用同一个模型。关闭统一模型模式后，可以分别设置：
+
+- 设定扩写模型
+- 大纲生成模型
+- 人物卡生成模型
+- 章节正文生成模型
+- 章节标题生成模型
+- 章节摘要生成模型
+
+每个模型选择项都支持 `custom`。自定义模型名会直接传给 DeepSeek API；如果模型名无效，API 会返回错误，页面会显示错误信息。当前模型设置会保存进当前小说项目的 `project_config.json`。
+
 ## 输出目录结构
 
 输出内容会按小说标题分类保存：

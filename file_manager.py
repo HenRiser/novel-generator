@@ -283,7 +283,7 @@ def update_chapter_index(
         display_path = chapter_path.name
 
     if not path.exists():
-        header = "# 章节索引\n\n| 章节 | 标题 | 文件 | 生成时间 | 模型 | 摘要 |\n| --- | --- | --- | --- | --- | --- |\n"
+        header = "# 章节索引\n\n| 章节 | 标题 | 文件 | 生成时间 | 正文模型 | 摘要 |\n| --- | --- | --- | --- | --- | --- |\n"
         path.write_text(header, encoding="utf-8")
     elif "| 标题 |" not in path.read_text(encoding="utf-8"):
         with path.open("a", encoding="utf-8") as file:
