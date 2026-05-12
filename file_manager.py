@@ -265,6 +265,7 @@ def read_history_summaries(title: str, before_chapter: int | None = None) -> str
 def update_chapter_index(
     title: str,
     chapter_number: int,
+    chapter_title: str,
     chapter_path: Path,
     model: str,
     summary: str,
@@ -273,15 +274,24 @@ def update_chapter_index(
     dirs = ensure_project_dirs(title)
     path = dirs["project"] / CHAPTER_INDEX_NAME
     created_at = created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    chapter_title = " ".join((chapter_title or "未命名章节").split()).replace("|", "/")
     summary = " ".join((summary or "摘要生成失败，需手动补充。").split())
+    summary = summary.replace("|", "/")
+    try:
+        display_path = chapter_path.relative_to(dirs["project"]).as_posix()
+    except ValueError:
+        display_path = chapter_path.name
 
     if not path.exists():
-        header = "# 章节索引\n\n| 章节 | 文件名 | 生成时间 | 使用模型 | 章节摘要 |\n| --- | --- | --- | --- | --- |\n"
+        header = "# 章节索引\n\n| 章节 | 标题 | 文件 | 生成时间 | 模型 | 摘要 |\n| --- | --- | --- | --- | --- | --- |\n"
         path.write_text(header, encoding="utf-8")
+    elif "| 标题 |" not in path.read_text(encoding="utf-8"):
+        with path.open("a", encoding="utf-8") as file:
+            file.write("\n\n## 新索引格式\n\n| 章节 | 标题 | 文件 | 生成时间 | 模型 | 摘要 |\n| --- | --- | --- | --- | --- | --- |\n")
 
     row = (
-        f"| 第 {int(chapter_number)} 章 | {chapter_path.name} | {created_at} | "
-        f"{model} | {summary.replace('|', '/')} |\n"
+        f"| 第 {int(chapter_number)} 章 | {chapter_title} | {display_path} | {created_at} | "
+        f"{model} | {summary} |\n"
     )
     with path.open("a", encoding="utf-8") as file:
         file.write(row)

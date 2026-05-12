@@ -332,6 +332,45 @@ def build_chapter_prompt(
     return _messages(user_prompt)
 
 
+def build_chapter_title_prompt(
+    chapter_number: int,
+    chapter_content: str,
+    genre: str = "",
+    writing_style: str = "",
+    core_conflict: str = "",
+) -> list[dict[str, str]]:
+    chapter_number = max(1, int(chapter_number))
+    system_prompt = (
+        "你是一名专业小说编辑，擅长根据章节正文提炼准确、有吸引力、符合类型风格的章节标题。"
+        "你必须只输出章节标题本身，不要输出解释、编号、引号、Markdown 标记或多余内容。"
+    )
+    user_prompt = f"""
+根据以下章节正文，为第 {chapter_number} 章生成一个章节标题。
+
+要求：
+1. 标题要贴合本章核心事件。
+2. 标题要符合小说类型和写作风格。
+3. 标题不要剧透过度。
+4. 标题不要太泛泛，例如“新的开始”“危机降临”。
+5. 中文标题建议 4 到 12 个字。
+6. 如果是网文风，可以稍长，但不要超过 20 个中文字符。
+7. 只输出标题，不要输出“第 {chapter_number} 章”，不要输出冒号，不要输出解释。
+
+## 输入信息
+- 章节编号：第 {chapter_number} 章
+- 小说类型：{_clean(genre) or "未提供"}
+- 写作风格：{_clean(writing_style) or "未提供"}
+- 核心冲突：{_clean(core_conflict) or "未提供"}
+
+## 章节正文
+{_clip(chapter_content, 12000)}
+"""
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt.strip()},
+    ]
+
+
 def build_summary_prompt(chapter_text: str, chapter_number: int | None = None) -> list[dict[str, str]]:
     chapter_label = f"第 {chapter_number} 章" if chapter_number else "本章"
     user_prompt = f"""
