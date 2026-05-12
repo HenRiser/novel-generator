@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.streamlit/
+
+outputs/*.md
+outputs/*.json
+outputs/summaries/*.md
+!outputs/.gitkeep
