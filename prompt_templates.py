@@ -13,6 +13,17 @@ GLOBAL_SYSTEM_PROMPT = (
 )
 
 
+SETTING_EXPANSION_SYSTEM_PROMPT = (
+    "你是一名小说设定开发助手，擅长将用户白话、不完整、松散的故事想法，"
+    "扩写为结构化、可直接用于长篇小说创作的设定。"
+    "你必须保留用户原始想法的核心，不要随意改题材、主角目标和核心矛盾。"
+    "你可以补充合理细节，但不能覆盖用户明确给出的设定。"
+    "当用户没有明确给出小说标题时，你需要根据故事题材、主角目标、世界观关键词和核心冲突，"
+    "生成多个不同风格的小说标题候选，并选择一个最适合作为推荐标题。"
+    "请只输出严格 JSON，不要输出 Markdown，不要输出解释。"
+)
+
+
 PROJECT_FIELD_LABELS = {
     "title": "小说标题",
     "genre": "小说类型",
@@ -55,6 +66,144 @@ def format_project_brief(project_config: dict[str, Any]) -> str:
 def _messages(user_prompt: str) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": GLOBAL_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt.strip()},
+    ]
+
+
+def build_expand_setting_prompt(
+    raw_story_idea: str,
+    detail_level: str,
+    supplement_characters: bool,
+    supplement_conflict: bool,
+    supplement_world_rules: bool,
+) -> list[dict[str, str]]:
+    detail_level = _clean(detail_level) or "中"
+    if detail_level not in {"低", "中", "高"}:
+        detail_level = "中"
+
+    detail_guidance = {
+        "低": "每个字段约 150-250 字。",
+        "中": "每个字段约 300-500 字。",
+        "高": "每个字段约 600-900 字。",
+    }
+    character_guidance = (
+        "supporting_characters_setting 至少包含 3 个重要配角。"
+        if supplement_characters
+        else "supporting_characters_setting 只输出 1-2 个最必要配角，不主动扩展庞大角色群。"
+    )
+    conflict_guidance = (
+        "core_conflict 可以补充合理的反派、阻力、选择困境和长期推进方向。"
+        if supplement_conflict
+        else "core_conflict 只整理用户已提供的冲突，不主动增加复杂反转。"
+    )
+    world_guidance = (
+        "world_setting 可以补充合理的世界规则、社会规则、技术或魔法限制。"
+        if supplement_world_rules
+        else "world_setting 只整理背景，不主动增加复杂规则。"
+    )
+
+    user_prompt = f"""
+根据用户输入的白话设定，生成以下 JSON 字段：
+
+{{
+  "title_candidates": ["标题1", "标题2", "标题3", "标题4", "标题5"],
+  "recommended_title": "推荐标题",
+  "protagonist_setting": "...",
+  "supporting_characters_setting": "...",
+  "world_setting": "...",
+  "core_conflict": "..."
+}}
+
+## 用户白话设定
+{_clean(raw_story_idea)}
+
+## 扩写详细程度
+{detail_level}：{detail_guidance[detail_level]}
+
+## 开关要求
+- 是否补充配角：{supplement_characters}。{character_guidance}
+- 是否补充核心冲突：{supplement_conflict}。{conflict_guidance}
+- 是否补充世界规则：{supplement_world_rules}。{world_guidance}
+
+## 标题字段要求
+
+1. title_candidates
+- 必须是字符串数组。
+- 至少 5 个标题。
+- 每个标题不超过 15 个中文字符，除非是网文风长标题。
+- 5 个标题需要体现不同风格，例如短标题、网文风标题、文艺风标题、科幻或类型感强的标题、悬念感标题。
+- 尽量避免“未命名小说”“我的小说”“故事标题”等占位标题。
+- 尽量避免过于通用的标题。
+- 标题要能体现小说的核心卖点。
+
+2. recommended_title
+- 必须是字符串。
+- 必须从 title_candidates 中选择一个。
+- 如果用户原始输入明确包含标题，则优先使用用户给定标题。
+- 如果用户原始输入没有标题，则选择最贴合题材和主线冲突的标题。
+
+## 设定字段要求
+
+1. protagonist_setting
+- 包含姓名
+- 年龄
+- 身份
+- 外貌特征
+- 性格
+- 核心能力
+- 过去经历
+- 目标
+- 恐惧
+- 隐藏秘密
+- 说话风格
+
+2. supporting_characters_setting
+- 每个配角包含：
+  - 姓名
+  - 身份
+  - 外貌
+  - 性格
+  - 能力或作用
+  - 与主角关系
+  - 隐藏秘密
+- 如果用户明确说不需要配角，则可以减少数量。
+
+3. world_setting
+- 包含时代背景
+- 地点
+- 社会结构
+- 科技或魔法规则
+- 阶层矛盾
+- 日常生活状态
+- 禁忌或限制
+- 核心主题
+
+4. core_conflict
+- 包含表层冲突
+- 深层冲突
+- 反派或阻力来源
+- 主角必须做出的选择
+- 失败代价
+- 长篇连载推进方向
+
+## JSON 输出要求
+1. 必须是合法 JSON。
+2. 不要使用 Markdown 代码块。
+3. 不要在 JSON 前后添加解释。
+4. 字段名必须完全一致：
+   - title_candidates
+   - recommended_title
+   - protagonist_setting
+   - supporting_characters_setting
+   - world_setting
+   - core_conflict
+5. title_candidates 使用字符串数组。
+6. recommended_title 和四个设定字段使用字符串，不要使用对象，方便直接填入页面文本框。
+7. 字符串内部可以使用换行符。
+8. 如果用户原始描述中信息不足，请合理补充，但不要偏离原意。
+"""
+    return [
+        {"role": "system", "content": SETTING_EXPANSION_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt.strip()},
     ]
 
