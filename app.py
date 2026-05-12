@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
 
 import streamlit as st
+from dotenv import load_dotenv
 
-from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS
+from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, OUTPUT_DIR, PROJECT_ROOT
 from deepseek_client import DeepSeekClientError, generate_text
 from file_manager import (
     ensure_directories,
     find_latest_chapter,
     get_project_dir,
+    list_chapter_files,
     list_project_titles,
     load_project_config,
     read_history_summaries,
@@ -152,6 +155,66 @@ def _render_model_choice(label: str, model_key: str, custom_key: str) -> None:
         st.text_input(f"自定义{label}", key=custom_key)
         if not st.session_state.get(custom_key, "").strip():
             st.warning(f"{label}已选择 custom，但未填写自定义模型名，将使用 {DEFAULT_MODEL}。")
+
+
+def _is_api_key_configured() -> bool:
+    load_dotenv(PROJECT_ROOT / ".env")
+    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    return bool(api_key and api_key != "your_api_key_here")
+
+
+def _status_text(exists: bool) -> str:
+    return "已找到" if exists else "未找到"
+
+
+def _render_environment_status() -> None:
+    env_path = PROJECT_ROOT / ".env"
+    venv_path = PROJECT_ROOT / ".venv"
+    outputs_exists = OUTPUT_DIR.exists()
+    api_key_configured = _is_api_key_configured()
+
+    st.header("环境状态")
+    st.caption(f"项目根目录：{PROJECT_ROOT}")
+    st.write(f"- .env：{_status_text(env_path.exists())}")
+    st.write(f"- API Key：{'已配置' if api_key_configured else '未配置'}")
+    st.write(f"- outputs：{'已找到' if outputs_exists else '自动创建'}")
+    st.write(f"- 虚拟环境：{_status_text(venv_path.exists())}")
+    st.write("- Streamlit：已启动")
+
+    if not api_key_configured:
+        st.warning("未检测到 DEEPSEEK_API_KEY。请运行 setup.bat 后编辑 .env，填入 DeepSeek API Key。")
+
+
+def _count_summary_files(project_dir: Path) -> int:
+    summaries_dir = project_dir / "summaries"
+    if not summaries_dir.exists():
+        return 0
+    return len([path for path in summaries_dir.glob("chapter_*_summary*.md") if path.is_file()])
+
+
+def _render_project_status(project_title: str) -> None:
+    project_dir = get_project_dir(project_title)
+    st.header("当前项目状态")
+    st.write(f"- 小说标题：{project_title}")
+    st.write(f"- 项目目录：{project_dir}")
+    st.write(f"- 项目配置：{'已保存' if (project_dir / 'project_config.json').exists() else '未保存'}")
+    st.write(f"- 小说大纲：{'已生成' if (project_dir / 'novel_outline.md').exists() else '未生成'}")
+    st.write(f"- 人物卡：{'已生成' if (project_dir / 'characters.md').exists() else '未生成'}")
+    st.write(f"- 章节数量：{len(list_chapter_files(project_title))}")
+    st.write(f"- 摘要数量：{_count_summary_files(project_dir)}")
+    st.write(f"- 章节索引：{'已生成' if (project_dir / 'chapter_index.md').exists() else '未生成'}")
+
+    if st.button("打开当前小说输出目录", use_container_width=True):
+        try:
+            project_dir.mkdir(parents=True, exist_ok=True)
+            startfile = getattr(os, "startfile", None)
+            if startfile is None:
+                raise OSError("当前系统不支持 os.startfile")
+            startfile(str(project_dir))
+        except Exception:
+            st.warning(f"无法自动打开，请手动访问：{project_dir}")
+        else:
+            st.success("已打开当前小说输出目录。")
 
 
 def _init_session_state() -> None:
@@ -679,6 +742,10 @@ def main() -> None:
     if selected_project and st.session_state.selected_project_applied != selected_project:
         st.session_state.title = selected_project
         st.session_state.selected_project_applied = selected_project
+
+    with st.sidebar:
+        _render_environment_status()
+        _render_project_status(_current_project_title())
 
     load_col, save_col = st.columns(2)
     with load_col:

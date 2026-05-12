@@ -87,6 +87,55 @@ streamlit run app.py
 http://localhost:8501
 ```
 
+## 一键初始化与启动
+
+Windows 下可以直接使用项目根目录中的批处理脚本。
+
+初始化环境：
+
+```bat
+setup.bat
+```
+
+`setup.bat` 会创建 `.venv`、安装 `requirements.txt` 中的依赖，并在 `.env` 不存在时从 `.env.example` 生成 `.env`。如果 `.env` 已经存在，脚本不会覆盖它。
+
+填写 API Key：
+
+```env
+DEEPSEEK_API_KEY=your_api_key_here
+```
+
+启动应用：
+
+```bat
+start.bat
+```
+
+`start.bat` 会激活虚拟环境、启动 Streamlit，并自动打开：
+
+```text
+http://localhost:8501
+```
+
+如果启动失败：
+
+- 确认已经运行 `setup.bat`。
+- 确认 Python 已加入 PATH。
+- 确认 `.env` 中已填写 `DEEPSEEK_API_KEY`。
+- 如果 8501 端口被占用，可以手动运行：
+
+```bat
+streamlit run app.py --server.port 8502
+```
+
+仍然可以使用手动启动方式：
+
+```bat
+cd /d D:\vibecoding\novel-generator
+.venv\Scripts\activate
+streamlit run app.py
+```
+
 ## 示例输入
 
 小说标题：
