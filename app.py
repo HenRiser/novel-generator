@@ -33,7 +33,6 @@ from file_manager import (
 )
 from prompt_templates import (
     build_chapter_prompt,
-    build_chapter_title_prompt,
     build_character_prompt,
     build_expand_setting_prompt,
     build_outline_prompt,
@@ -438,6 +437,21 @@ def apply_chapter_heading(chapter_content: str, chapter_number: int, chapter_tit
     return f"{heading}\n\n{content}".rstrip() + "\n"
 
 
+def extract_chapter_title(chapter_content: str) -> str:
+    for line in (chapter_content or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        match = re.match(
+            r"^#{0,6}\s*第\s*[零一二三四五六七八九十百千万\d]+\s*章\s*[:：、.\-\s]+(.+)$",
+            line,
+        )
+        if match:
+            return clean_chapter_title(match.group(1))
+        break
+    return "未命名章节"
+
+
 def _build_messages(title: str, mode: str, project_config: dict[str, Any], chapter_number: int, use_previous_context: bool) -> tuple[list[dict[str, str]], list[str]]:
     notices = []
 
@@ -509,7 +523,7 @@ def generate_single_chapter_workflow(
     use_previous_context: bool,
 ) -> dict[str, Any]:
     chapter_model = task_models["chapter"]
-    chapter_title_model = task_models["chapter_title"]
+    chapter_title_model = chapter_model
     summary_model = task_models["summary"]
     result: dict[str, Any] = {
         "chapter_number": int(chapter_number),
@@ -547,26 +561,8 @@ def generate_single_chapter_workflow(
         result["error"] = str(exc)
         return result
 
-    try:
-        title_messages = build_chapter_title_prompt(
-            chapter_number=int(chapter_number),
-            chapter_content=chapter_content,
-            genre=form_data.get("genre", ""),
-            writing_style=form_data.get("style", ""),
-            core_conflict=form_data.get("core_conflict", ""),
-        )
-        raw_title = generate_text(
-            messages=title_messages,
-            model=chapter_title_model,
-            temperature=min(float(temperature), 0.7),
-            max_tokens=128,
-        )
-        chapter_title = clean_chapter_title(raw_title)
-    except DeepSeekClientError as exc:
-        chapter_title = "未命名章节"
-        result["title_error"] = str(exc)
-
-    final_content = apply_chapter_heading(chapter_content, int(chapter_number), chapter_title)
+    chapter_title = extract_chapter_title(chapter_content)
+    final_content = chapter_content
     result["chapter_title"] = chapter_title
     result["content"] = final_content
 
