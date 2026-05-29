@@ -76,6 +76,8 @@ def build_expand_setting_prompt(
     supplement_characters: bool,
     supplement_conflict: bool,
     supplement_world_rules: bool,
+    genre: str = "",
+    writing_style: str = "",
 ) -> list[dict[str, str]]:
     detail_level = _clean(detail_level) or "中"
     if detail_level not in {"低", "中", "高"}:
@@ -116,6 +118,10 @@ def build_expand_setting_prompt(
 
 ## 用户白话设定
 {_clean(raw_story_idea)}
+
+## 用户选择
+- 小说类型：{_clean(genre) or "未指定"}
+- 写作风格：{_clean(writing_style) or "未指定"}
 
 ## 扩写详细程度
 {detail_level}：{detail_guidance[detail_level]}
