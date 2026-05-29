@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, OUTPUT_DIR, PROJECT_ROOT
 from config_manager import (
@@ -25,6 +26,18 @@ from export_service import (
     build_single_chapter_txt,
     get_ordered_chapters,
     read_chapter_for_reader,
+)
+from generation_config import (
+    GENRE_OPTIONS as SETTING_GENRE_OPTIONS,
+    OUTLINE_GRANULARITY_OPTIONS,
+    PLOT_DENSITY_OPTIONS,
+    NARRATIVE_PACE_OPTIONS,
+    WORLD_COMPLEXITY_OPTIONS,
+    CHARACTER_SCALE_OPTIONS,
+    WRITING_MODE_OPTIONS,
+    WRITING_STYLE_OPTIONS as SETTING_WRITING_STYLE_OPTIONS,
+    normalize_setting_options,
+    setting_options_to_dict,
 )
 from file_manager import (
     ensure_directories,
@@ -401,6 +414,7 @@ def _render_reader_nav(numbers: list[int], current_index: int, key_prefix: str) 
     with prev_col:
         if st.button("上一章", disabled=current_index <= 0, use_container_width=True, key=f"{key_prefix}_prev"):
             st.session_state.reader_center_expanded = True
+            st.session_state.reader_should_scroll_top = True
             st.session_state.reader_chapter_number = numbers[current_index - 1]
             st.rerun()
     with next_col:
@@ -411,6 +425,7 @@ def _render_reader_nav(numbers: list[int], current_index: int, key_prefix: str) 
             key=f"{key_prefix}_next",
         ):
             st.session_state.reader_center_expanded = True
+            st.session_state.reader_should_scroll_top = True
             st.session_state.reader_chapter_number = numbers[current_index + 1]
             st.rerun()
 
@@ -421,6 +436,9 @@ def _render_reader_export_center(project_title: str) -> None:
         if not chapters:
             st.info("当前项目还没有章节，请先生成章节。")
             return
+
+        st.markdown('<div id="reader-top"></div>', unsafe_allow_html=True)
+        st.markdown("[回到阅读区顶部](#reader-top)")
 
         numbers = [int(chapter["chapter_number"]) for chapter in chapters]
         labels = {int(chapter["chapter_number"]): str(chapter["title"]) for chapter in chapters}
@@ -436,6 +454,8 @@ def _render_reader_export_center(project_title: str) -> None:
             format_func=lambda number: labels.get(int(number), f"第 {int(number)} 章"),
         )
         current_number = int(selected_number)
+        if current_number != st.session_state.get("reader_chapter_number"):
+            st.session_state.reader_should_scroll_top = True
         st.session_state.reader_chapter_number = current_number
         current_index = numbers.index(current_number)
 
@@ -449,6 +469,19 @@ def _render_reader_export_center(project_title: str) -> None:
 
         reader_html = build_reader_html(chapter["title"], chapter["content"])
         st.markdown(reader_html, unsafe_allow_html=True)
+        if st.session_state.get("reader_should_scroll_top"):
+            components.html(
+                """
+<script>
+const readerTop = window.parent.document.getElementById("reader-top");
+if (readerTop) {
+  readerTop.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+</script>
+""",
+                height=0,
+            )
+            st.session_state.reader_should_scroll_top = False
 
         _render_reader_nav(numbers, current_index, "reader_bottom")
 
@@ -522,6 +555,19 @@ def _init_session_state() -> None:
         "current_model_info": {},
         "reader_center_expanded": False,
         "reader_chapter_number": 1,
+        "reader_should_scroll_top": False,
+        "setting_generation_genre": "赛博朋克",
+        "custom_setting_generation_genre": "",
+        "setting_generation_writing_style": "阴郁电影感",
+        "custom_setting_generation_writing_style": "",
+        "setting_generation_writing_mode": "长篇连载",
+        "setting_expected_chapters": 12,
+        "setting_plot_density": "中：平衡",
+        "setting_narrative_pace": "中",
+        "setting_world_complexity": "中",
+        "setting_character_scale": "中等角色群",
+        "setting_outline_granularity": "标准",
+        "setting_extra_requirements": "",
         "show_quick_start": False,
         "quick_start_api_key": "",
         "quick_start_model_choice": default_model_choice,
@@ -546,6 +592,122 @@ def _effective_choice(choice: str, custom_value: str) -> str:
     return choice
 
 
+def _effective_setting_choice(choice: str, custom_value: str, default: str) -> str:
+    if choice == "自定义":
+        return custom_value.strip() or default
+    return choice or default
+
+
+def _setting_choice_from_value(value: Any, options: list[str], default: str) -> tuple[str, str]:
+    value = str(value or "").strip()
+    if value in options:
+        return value, ""
+    if value:
+        return "自定义", value
+    return default, ""
+
+
+def _setting_generation_options_from_state() -> dict[str, Any]:
+    raw_options = {
+        "genre": _effective_setting_choice(
+            st.session_state.setting_generation_genre,
+            st.session_state.custom_setting_generation_genre,
+            "赛博朋克",
+        ),
+        "writing_style": _effective_setting_choice(
+            st.session_state.setting_generation_writing_style,
+            st.session_state.custom_setting_generation_writing_style,
+            "阴郁电影感",
+        ),
+        "writing_mode": st.session_state.setting_generation_writing_mode,
+        "expected_chapters": int(st.session_state.setting_expected_chapters),
+        "plot_density": st.session_state.setting_plot_density,
+        "narrative_pace": st.session_state.setting_narrative_pace,
+        "world_complexity": st.session_state.setting_world_complexity,
+        "character_scale": st.session_state.setting_character_scale,
+        "outline_granularity": st.session_state.setting_outline_granularity,
+        "extra_requirements": st.session_state.setting_extra_requirements.strip(),
+    }
+    return setting_options_to_dict(raw_options)
+
+
+def _load_setting_generation_options_to_session(raw_options: Any) -> None:
+    options = normalize_setting_options(raw_options)
+    genre_choice, custom_genre = _setting_choice_from_value(options.genre, SETTING_GENRE_OPTIONS, "赛博朋克")
+    style_choice, custom_style = _setting_choice_from_value(
+        options.writing_style,
+        SETTING_WRITING_STYLE_OPTIONS,
+        "阴郁电影感",
+    )
+
+    st.session_state.setting_generation_genre = genre_choice
+    st.session_state.custom_setting_generation_genre = custom_genre
+    st.session_state.setting_generation_writing_style = style_choice
+    st.session_state.custom_setting_generation_writing_style = custom_style
+    st.session_state.setting_generation_writing_mode = options.writing_mode
+    st.session_state.setting_expected_chapters = options.expected_chapters
+    st.session_state.setting_plot_density = options.plot_density
+    st.session_state.setting_narrative_pace = options.narrative_pace
+    st.session_state.setting_world_complexity = options.world_complexity
+    st.session_state.setting_character_scale = options.character_scale
+    st.session_state.setting_outline_granularity = options.outline_granularity
+    st.session_state.setting_extra_requirements = options.extra_requirements
+
+
+def _render_setting_generation_config() -> None:
+    st.subheader("设定配置")
+    quick_cols = st.columns(4)
+    with quick_cols[0]:
+        st.selectbox("小说类型", SETTING_GENRE_OPTIONS, key="setting_generation_genre")
+    with quick_cols[1]:
+        st.selectbox("写作风格", SETTING_WRITING_STYLE_OPTIONS, key="setting_generation_writing_style")
+    with quick_cols[2]:
+        st.selectbox("写作模式", WRITING_MODE_OPTIONS, key="setting_generation_writing_mode")
+    with quick_cols[3]:
+        st.number_input("期望章节数", min_value=1, max_value=200, step=1, key="setting_expected_chapters")
+
+    custom_cols = st.columns(2)
+    if st.session_state.setting_generation_genre == "自定义":
+        with custom_cols[0]:
+            st.text_input("自定义小说类型", key="custom_setting_generation_genre")
+    if st.session_state.setting_generation_writing_style == "自定义":
+        with custom_cols[1]:
+            st.text_input("自定义写作风格", key="custom_setting_generation_writing_style")
+
+    expected_chapters = int(st.session_state.setting_expected_chapters)
+    if expected_chapters <= 5 and st.session_state.setting_generation_writing_mode == "长篇连载":
+        st.warning("期望章节数较少，将优先按短篇/单章结构处理。")
+    if expected_chapters > 40 and st.session_state.setting_generation_writing_mode == "单章完整故事":
+        st.warning("期望章节数较多，将优先按长篇连载结构处理。")
+
+    with st.expander("高级配置", expanded=False):
+        advanced_col1, advanced_col2, advanced_col3 = st.columns(3)
+        with advanced_col1:
+            st.selectbox("剧情密度", PLOT_DENSITY_OPTIONS, key="setting_plot_density")
+            st.selectbox("叙事节奏", NARRATIVE_PACE_OPTIONS, key="setting_narrative_pace")
+        with advanced_col2:
+            st.selectbox("世界观复杂度", WORLD_COMPLEXITY_OPTIONS, key="setting_world_complexity")
+            st.selectbox("角色规模", CHARACTER_SCALE_OPTIONS, key="setting_character_scale")
+        with advanced_col3:
+            st.selectbox("大纲粒度", OUTLINE_GRANULARITY_OPTIONS, key="setting_outline_granularity")
+            st.selectbox("扩写详细程度", EXPAND_DETAIL_OPTIONS, key="expand_detail_level")
+
+        supplement_col1, supplement_col2, supplement_col3 = st.columns(3)
+        with supplement_col1:
+            st.checkbox("是否补充配角", key="supplement_characters")
+        with supplement_col2:
+            st.checkbox("是否补充核心冲突", key="supplement_conflict")
+        with supplement_col3:
+            st.checkbox("是否补充世界规则", key="supplement_world_rules")
+
+        st.text_area(
+            "额外创作要求",
+            key="setting_extra_requirements",
+            height=90,
+            placeholder="可填写禁用内容、偏好桥段、叙事禁忌或特定参考方向。",
+        )
+
+
 def _collect_project_config() -> dict[str, Any]:
     return {
         "title": st.session_state.title.strip() or "未命名小说",
@@ -563,6 +725,7 @@ def _collect_project_config() -> dict[str, Any]:
         "word_count_range": st.session_state.chapter_word_range.strip(),
         "extra_requirements": st.session_state.extra_requirements.strip(),
         "model_settings": _model_settings_from_state(),
+        "setting_generation_options": _setting_generation_options_from_state(),
     }
 
 
@@ -588,6 +751,7 @@ def _load_config_to_session(config: dict[str, Any]) -> None:
     st.session_state.chapter_word_range = config.get("word_count_range", "3000-5000 字")
     st.session_state.extra_requirements = config.get("extra_requirements", "")
     _load_model_settings_to_session(config.get("model_settings", DEFAULT_MODEL_SETTINGS))
+    _load_setting_generation_options_to_session(config.get("setting_generation_options", {}))
 
 
 def _load_choice(option_value: Any, final_value: Any, custom_value: Any, options: list[str]) -> tuple[str, str]:
@@ -1082,15 +1246,7 @@ def main() -> None:
         placeholder="例如：我想写一个赛博朋克故事，主角是失忆黑客，妹妹失踪了，城市被大公司控制，记忆可以被修改，主角要查真相。",
     )
 
-    expand_col1, expand_col2, expand_col3, expand_col4 = st.columns(4)
-    with expand_col1:
-        st.selectbox("扩写详细程度", EXPAND_DETAIL_OPTIONS, key="expand_detail_level")
-    with expand_col2:
-        st.checkbox("是否补充配角", key="supplement_characters")
-    with expand_col3:
-        st.checkbox("是否补充核心冲突", key="supplement_conflict")
-    with expand_col4:
-        st.checkbox("是否补充世界规则", key="supplement_world_rules")
+    _render_setting_generation_config()
 
     expand_messages = build_expand_setting_prompt(
         raw_story_idea=st.session_state.raw_story_idea,
@@ -1098,6 +1254,7 @@ def main() -> None:
         supplement_characters=st.session_state.supplement_characters,
         supplement_conflict=st.session_state.supplement_conflict,
         supplement_world_rules=st.session_state.supplement_world_rules,
+        setting_options=_setting_generation_options_from_state(),
     )
 
     expand_action_col1, expand_action_col2 = st.columns(2)

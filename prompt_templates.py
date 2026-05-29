@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from config import MAX_PREVIOUS_CHAPTER_CHARS, MAX_REFERENCE_CHARS, MAX_SUMMARIES_CHARS
+from generation_config import format_setting_options_for_prompt, normalize_setting_options
 
 
 GLOBAL_SYSTEM_PROMPT = (
@@ -76,6 +77,7 @@ def build_expand_setting_prompt(
     supplement_characters: bool,
     supplement_conflict: bool,
     supplement_world_rules: bool,
+    setting_options: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     detail_level = _clean(detail_level) or "中"
     if detail_level not in {"低", "中", "高"}:
@@ -101,6 +103,8 @@ def build_expand_setting_prompt(
         if supplement_world_rules
         else "world_setting 只整理背景，不主动增加复杂规则。"
     )
+    normalized_options = normalize_setting_options(setting_options)
+    setting_options_prompt = format_setting_options_for_prompt(normalized_options)
 
     user_prompt = f"""
 根据用户输入的白话设定，生成以下 JSON 字段：
@@ -116,6 +120,17 @@ def build_expand_setting_prompt(
 
 ## 用户白话设定
 {_clean(raw_story_idea)}
+
+## 创作配置
+{setting_options_prompt}
+
+## 创作配置使用规则
+1. 期望章节数是最高优先级的规模控制器，必须优先于泛泛的长篇/短篇判断。
+2. 不要不顾期望章节数生成过长大纲、过多势力或过多配角。
+3. 如果期望章节数较小，压缩世界观、配角数量、冲突层级和伏笔数量，让故事可以在有限章节内完成。
+4. 如果期望章节数较大，才允许复杂势力、多阶段冲突、长期伏笔和更完整的世界观展开。
+5. 写作模式要和期望章节数共同作用；两者矛盾时，优先按期望章节数控制规模。
+6. 标题候选、主角设定、配角设定、世界观设定和核心冲突都必须体现小说类型、写作风格、剧情密度和叙事节奏。
 
 ## 扩写详细程度
 {detail_level}：{detail_guidance[detail_level]}
@@ -210,11 +225,22 @@ def build_expand_setting_prompt(
 
 def build_outline_prompt(project_config: dict[str, Any]) -> list[dict[str, str]]:
     project_brief = format_project_brief(project_config)
+    setting_options_prompt = format_setting_options_for_prompt(project_config.get("setting_generation_options"))
+    setting_options = normalize_setting_options(project_config.get("setting_generation_options"))
     user_prompt = f"""
 请根据以下小说项目设定，生成一份适合长期连载扩展的小说总纲。
 
 ## 项目设定
 {project_brief}
+
+## 创作配置
+{setting_options_prompt}
+
+## 章节规模控制
+1. 期望章节数为 {setting_options.expected_chapters} 章，大纲章节数量应尽量贴近该规模。
+2. 如果期望章节数较小，请输出紧凑大纲，不要强行设计多卷、多势力和复杂长期伏笔。
+3. 如果期望章节数较大，可以输出阶段性大纲，不必一次列满所有章节，但需要说明阶段目标和关键转折。
+4. 写作模式、剧情密度、叙事节奏会影响每章事件密度和反转频率。
 
 ## 输出要求
 请使用 Markdown，严格按照以下结构输出：
@@ -233,7 +259,7 @@ def build_outline_prompt(project_config: dict[str, Any]) -> list[dict[str, str]]
 
 ## 分卷规划
 
-## 前 10 章章节大纲
+## 章节大纲
 
 每章包含：
 - 章节标题
