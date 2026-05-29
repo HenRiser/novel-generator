@@ -7,9 +7,17 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
-from dotenv import load_dotenv
 
 from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, OUTPUT_DIR, PROJECT_ROOT
+from config_manager import (
+    get_api_key_status,
+    get_available_models,
+    get_current_default_model,
+    has_api_key,
+    resolve_selected_model,
+    save_api_config,
+    test_api_connection,
+)
 from deepseek_client import DeepSeekClientError, generate_text
 from file_manager import (
     ensure_directories,
@@ -110,6 +118,13 @@ def resolve_model(model_choice: str, custom_model: str, fallback: str = DEFAULT_
     return custom_model.strip() or fallback
 
 
+def _model_choice_from_model(model_name: str) -> tuple[str, str]:
+    model_name = _normalize_model_name(model_name)
+    if model_name in DEEPSEEK_MODELS and model_name != "custom":
+        return model_name, ""
+    return "custom", model_name if model_name else ""
+
+
 def get_task_models_from_state() -> dict[str, str]:
     if st.session_state.get("use_unified_model", True):
         unified_model = resolve_model(
@@ -157,9 +172,7 @@ def _render_model_choice(label: str, model_key: str, custom_key: str) -> None:
 
 
 def _is_api_key_configured() -> bool:
-    load_dotenv(PROJECT_ROOT / ".env")
-    api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
-    return bool(api_key and api_key != "your_api_key_here")
+    return has_api_key()
 
 
 def _status_text(exists: bool) -> str:
@@ -170,18 +183,171 @@ def _render_environment_status() -> None:
     env_path = PROJECT_ROOT / ".env"
     venv_path = PROJECT_ROOT / ".venv"
     outputs_exists = OUTPUT_DIR.exists()
-    api_key_configured = _is_api_key_configured()
+    api_status = get_api_key_status()
+    api_key_configured = bool(api_status["configured"])
 
     st.header("环境状态")
     st.caption(f"项目根目录：{PROJECT_ROOT}")
     st.write(f"- .env：{_status_text(env_path.exists())}")
     st.write(f"- API Key：{'已配置' if api_key_configured else '未配置'}")
+    st.write(f"- 默认模型：{api_status['default_model']}")
     st.write(f"- outputs：{'已找到' if outputs_exists else '自动创建'}")
     st.write(f"- 虚拟环境：{_status_text(venv_path.exists())}")
     st.write("- Streamlit：已启动")
 
     if not api_key_configured:
-        st.warning("未检测到 DEEPSEEK_API_KEY。请运行 setup.bat 后编辑 .env，填入 DeepSeek API Key。")
+        st.warning("未检测到 DEEPSEEK_API_KEY。请打开 Quick Start 配置 DeepSeek API Key。")
+
+
+def _apply_default_model_to_session(model_name: str) -> None:
+    model_choice, custom_model = _model_choice_from_model(model_name)
+    st.session_state.use_unified_model = True
+    st.session_state.unified_model = model_choice
+    st.session_state.custom_unified_model = custom_model
+
+    for model_key, custom_key in TASK_MODEL_KEYS.values():
+        st.session_state[model_key] = model_choice
+        st.session_state[custom_key] = custom_model
+
+
+def _render_help_content() -> None:
+    st.markdown(
+        """
+### API Key 配置
+
+本项目是本地单用户工具。DeepSeek API Key 默认保存到项目根目录的 `.env`，页面不会显示已有 Key 明文；需要更换时重新打开 Quick Start，输入新 Key 并保存。
+
+### 模型选择
+
+- `deepseek-v4-flash`：默认选项，优先速度和成本。
+- `deepseek-v4-pro`：优先质量，适合复杂设定、大纲和长上下文任务。
+- `custom`：自行输入模型名，测试和生成时会直接传给 DeepSeek API。
+
+### 第一本小说快速流程
+
+1. 输入小说标题。
+2. 输入白话设定。
+3. 选择小说类型和写作风格。
+4. 点击白话扩写。
+5. 生成大纲。
+6. 生成人物卡。
+7. 生成第 1 章。
+8. 使用一键继续下一章。
+
+### 文件位置
+
+生成结果保存在 `outputs/小说标题/`，包含 `project_config.json`、大纲、人物卡、章节、摘要和章节索引。当前版本没有引入数据库，也不会把 API Key 写入 `project_config.json`。
+
+### 常见问题
+
+- API Key 未配置：打开 Quick Start，在密码输入框填写 DeepSeek API Key 后保存。
+- 修改 API Key：重新打开 Quick Start，输入新 Key 并保存覆盖本地 `.env`。
+- 连接测试失败：检查 Key 是否有效、模型名是否正确，以及本机网络或代理是否能访问 DeepSeek。
+- 重新打开 Quick Start：使用侧边栏的“打开 Quick Start / Help”按钮。
+- `.env` 在哪里：位于项目根目录 `D:\\vibecoding\\novel-generator\\.env`，已被 Git 忽略。
+"""
+    )
+
+
+def _render_quick_start_wizard() -> None:
+    api_status = get_api_key_status()
+    models = get_available_models()
+    current_model = get_current_default_model()
+    default_choice, default_custom = _model_choice_from_model(current_model)
+
+    if st.session_state.get("quick_start_model_choice") not in models:
+        st.session_state.quick_start_model_choice = default_choice
+    st.session_state.setdefault("quick_start_custom_model", default_custom)
+
+    st.subheader("Quick Start Wizard")
+    st.caption("配置 DeepSeek API Key、默认模型并做一次最小连接测试。")
+
+    tab_welcome, tab_api, tab_model, tab_test, tab_save, tab_help = st.tabs(
+        ["1 欢迎", "2 API Key", "3 模型", "4 连接测试", "5 保存", "6 教程"]
+    )
+
+    with tab_welcome:
+        st.write("这是本地优先的 AI 小说生成工具，面向单用户本地运行。")
+        st.write("你需要使用自己的 DeepSeek API Key。API Key 会保存到本地 `.env`，不会写入 Git、页面明文或项目配置文件。")
+
+    with tab_api:
+        if api_status["configured"]:
+            st.success("本地已配置 API Key。页面不会显示已有 Key 明文。")
+        else:
+            st.warning("尚未检测到可用的 DeepSeek API Key。")
+
+        st.text_input(
+            "DeepSeek API Key",
+            key="quick_start_api_key",
+            type="password",
+            placeholder="输入新的 API Key；已有 Key 不会明文回显",
+        )
+
+    with tab_model:
+        st.selectbox("默认模型", models, key="quick_start_model_choice")
+        if st.session_state.quick_start_model_choice == "custom":
+            st.text_input(
+                "自定义模型名",
+                key="quick_start_custom_model",
+                placeholder="例如：deepseek-v4-flash",
+            )
+
+        selected_model = resolve_selected_model(
+            st.session_state.quick_start_model_choice,
+            st.session_state.get("quick_start_custom_model", ""),
+        )
+        st.info(f"当前将使用模型：{selected_model}")
+
+    with tab_test:
+        selected_model = resolve_selected_model(
+            st.session_state.quick_start_model_choice,
+            st.session_state.get("quick_start_custom_model", ""),
+        )
+        if st.button("测试连接", use_container_width=True):
+            with st.spinner("正在测试 DeepSeek 连接..."):
+                ok, message = test_api_connection(
+                    api_key=st.session_state.get("quick_start_api_key", ""),
+                    model=selected_model,
+                )
+            st.session_state.quick_start_connection_ok = ok
+            st.session_state.quick_start_connection_message = message
+
+        if st.session_state.get("quick_start_connection_message"):
+            if st.session_state.get("quick_start_connection_ok"):
+                st.success(st.session_state.quick_start_connection_message)
+            else:
+                st.error(st.session_state.quick_start_connection_message)
+
+        st.caption("如果输入框为空但本地 `.env` 已配置 API Key，将使用本地 Key 做测试；失败不会保存配置。")
+
+    with tab_save:
+        st.write("保存会更新本地 `.env` 中的 `DEEPSEEK_API_KEY` 和 `DEFAULT_MODEL`，不会删除其他字段。")
+        if st.button("保存 API 与模型配置", type="primary", use_container_width=True):
+            api_key = st.session_state.get("quick_start_api_key", "").strip()
+            if not api_key:
+                st.warning("保存配置需要重新输入 API Key；已有 Key 不会明文回显。")
+            else:
+                try:
+                    saved_model = save_api_config(
+                        api_key=api_key,
+                        default_model=st.session_state.quick_start_model_choice,
+                        custom_model=st.session_state.get("quick_start_custom_model", ""),
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    _apply_default_model_to_session(saved_model)
+                    st.session_state.show_quick_start = False
+                    st.session_state.quick_start_connection_message = ""
+                    st.success("配置已保存到本地 .env，页面将刷新以使用新配置。")
+                    st.rerun()
+
+        if api_status["configured"] and st.button("完成并进入主界面", use_container_width=True):
+            st.session_state.show_quick_start = False
+            st.rerun()
+
+    with tab_help:
+        _render_help_content()
 
 
 def _count_summary_files(project_dir: Path) -> int:
@@ -217,6 +383,15 @@ def _render_project_status(project_title: str) -> None:
 
 
 def _init_session_state() -> None:
+    default_model = get_current_default_model()
+    default_model_choice, default_custom_model = _model_choice_from_model(default_model)
+    default_model_settings = dict(DEFAULT_MODEL_SETTINGS)
+    default_model_settings["unified_model"] = default_model_choice
+    default_model_settings["custom_unified_model"] = default_custom_model
+    for model_key, custom_key in TASK_MODEL_KEYS.values():
+        default_model_settings[model_key] = default_model_choice
+        default_model_settings[custom_key] = default_custom_model
+
     defaults = {
         "title": "",
         "genre": "玄幻",
@@ -254,8 +429,14 @@ def _init_session_state() -> None:
         "start_chapter_number": 1,
         "end_chapter_number": 3,
         "current_model_info": {},
+        "show_quick_start": False,
+        "quick_start_api_key": "",
+        "quick_start_model_choice": default_model_choice,
+        "quick_start_custom_model": default_custom_model,
+        "quick_start_connection_ok": False,
+        "quick_start_connection_message": "",
     }
-    defaults.update(DEFAULT_MODEL_SETTINGS)
+    defaults.update(default_model_settings)
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
@@ -727,6 +908,13 @@ def main() -> None:
     st.title("AI 小说生成器")
     st.caption("本地运行的轻量小说创作工具：大纲、人物卡、章节正文、续写和上下文管理。")
 
+    api_key_configured = _is_api_key_configured()
+    if not api_key_configured:
+        st.warning("未检测到 DeepSeek API Key。请先完成 Quick Start 配置后再调用生成。")
+        _render_quick_start_wizard()
+    elif st.session_state.get("show_quick_start"):
+        _render_quick_start_wizard()
+
     with st.sidebar:
         st.header("生成参数")
         temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
@@ -734,6 +922,14 @@ def main() -> None:
         use_previous_context = st.checkbox("使用上一章上下文", value=True)
         project_options = [""] + list_project_titles()
         selected_project = st.selectbox("选择已有小说项目", project_options, key="selected_project_title")
+
+    with st.sidebar:
+        st.header("帮助 / Quick Start")
+        if st.button("打开 Quick Start / Help", use_container_width=True):
+            st.session_state.show_quick_start = True
+            st.rerun()
+        with st.expander("Docs / Help", expanded=False):
+            _render_help_content()
 
     if selected_project and st.session_state.selected_project_applied != selected_project:
         st.session_state.title = selected_project

@@ -19,6 +19,13 @@ class DeepSeekClientError(Exception):
     """Raised when the DeepSeek request cannot be completed safely."""
 
 
+def _sanitize_error_message(exc: Exception, api_key: str) -> str:
+    message = str(exc)
+    if api_key:
+        message = message.replace(api_key, "[redacted]")
+    return message
+
+
 def _get_api_key() -> str:
     load_dotenv()
     api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -29,6 +36,48 @@ def _get_api_key() -> str:
         )
 
     return api_key
+
+
+def test_deepseek_connection(api_key: str, model: str) -> tuple[bool, str]:
+    """Test DeepSeek with a temporary API key without reading or writing .env."""
+    safe_api_key = (api_key or "").strip()
+    safe_model = (model or DEFAULT_MODEL).strip() or DEFAULT_MODEL
+    if not safe_api_key or safe_api_key == "your_api_key_here":
+        return False, "请先填写有效的 DeepSeek API Key。"
+
+    client = OpenAI(api_key=safe_api_key, base_url=DEEPSEEK_BASE_URL)
+
+    try:
+        response: Any = client.chat.completions.create(
+            model=safe_model,
+            messages=[{"role": "user", "content": "请只回复 OK"}],
+            temperature=0,
+            max_tokens=16,
+        )
+    except AuthenticationError:
+        return False, "DeepSeek API Key 校验失败，请检查 Key 是否正确。"
+    except RateLimitError:
+        return False, "DeepSeek API 请求过于频繁或额度受限，请稍后再试。"
+    except BadRequestError as exc:
+        return False, f"DeepSeek API 拒绝了测试请求：{_sanitize_error_message(exc, safe_api_key)}"
+    except APIConnectionError:
+        return False, "无法连接 DeepSeek API，请检查网络连接或代理设置。"
+    except APIError as exc:
+        return False, f"DeepSeek API 返回异常：{_sanitize_error_message(exc, safe_api_key)}"
+    except OpenAIError as exc:
+        return False, f"OpenAI SDK 调用 DeepSeek 时发生错误：{_sanitize_error_message(exc, safe_api_key)}"
+    except Exception as exc:
+        return False, f"连接测试失败：{_sanitize_error_message(exc, safe_api_key)}"
+
+    if not getattr(response, "choices", None):
+        return False, "API 请求完成，但模型没有返回候选结果。"
+
+    message = response.choices[0].message
+    content = message.content or getattr(message, "reasoning_content", "")
+    if not content or not content.strip():
+        return False, "API 请求完成，但模型返回内容为空。"
+
+    return True, f"连接成功，模型 {safe_model} 返回了有效响应。"
 
 
 def generate_text(

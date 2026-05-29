@@ -15,6 +15,7 @@
 - 支持白话设定自动扩写，将松散想法拆分为主角、配角、世界观和核心冲突。
 - 支持 Prompt 预览，不调用 API，方便调试。
 - 支持保存和加载 `outputs/小说标题/project_config.json`。
+- 支持 Quick Start Wizard，在 UI 中配置 DeepSeek API Key、默认模型并测试连接。
 - API Key 只从环境变量读取，不会写入代码、日志或输出文件。
 
 ## 项目结构
@@ -23,6 +24,7 @@
 novel-generator
 ├── app.py
 ├── config.py
+├── config_manager.py
 ├── deepseek_client.py
 ├── prompt_templates.py
 ├── file_manager.py
@@ -73,6 +75,7 @@ copy .env.example .env
 
 ```env
 DEEPSEEK_API_KEY=your_api_key_here
+DEFAULT_MODEL=deepseek-v4-flash
 ```
 
 启动应用：
@@ -103,6 +106,7 @@ setup.bat
 
 ```env
 DEEPSEEK_API_KEY=your_api_key_here
+DEFAULT_MODEL=deepseek-v4-flash
 ```
 
 启动应用：
@@ -135,6 +139,31 @@ cd /d D:\vibecoding\novel-generator
 .venv\Scripts\activate
 streamlit run app.py
 ```
+
+## Quick Start
+
+首次启动后，如果没有检测到有效的 DeepSeek API Key，页面会自动显示 Quick Start Wizard。
+
+Quick Start 支持：
+
+1. 在 UI 中输入 DeepSeek API Key。
+2. 选择 `deepseek-v4-flash`、`deepseek-v4-pro` 或 `custom` 模型。
+3. 点击“测试连接”验证 API Key 和模型是否可用。
+4. 测试成功后保存配置。
+5. 将 API Key 保存到本地 `.env`。
+6. 将默认模型写入 `.env` 中的 `DEFAULT_MODEL`。
+
+`.env` 只应保存在本地，不应提交到 Git。
+
+## API Key 安全说明
+
+本项目定位为本地单用户工具，不包含用户系统和公网多用户部署配置。
+
+- API Key 默认保存到本地 `.env`。
+- `.env` 已被 `.gitignore` 排除，不应提交到仓库。
+- 页面不会显示已有 API Key 明文。
+- API Key 不会写入 `project_config.json`。
+- 如果需要更换 API Key，可以重新打开 Quick Start，输入新 Key 并保存。
 
 ## 示例输入
 

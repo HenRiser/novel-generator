@@ -4,5 +4,7 @@ __pycache__/
 *.py[cod]
 .streamlit/
 
+outputs/
+!outputs/
 outputs/*
 !outputs/.gitkeep
