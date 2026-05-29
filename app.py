@@ -19,6 +19,13 @@ from config_manager import (
     test_api_connection,
 )
 from deepseek_client import DeepSeekClientError, generate_text
+from export_service import (
+    build_full_novel_txt,
+    build_reader_html,
+    build_single_chapter_txt,
+    get_ordered_chapters,
+    read_chapter_for_reader,
+)
 from file_manager import (
     ensure_directories,
     find_latest_chapter,
@@ -377,9 +384,93 @@ def _render_project_status(project_title: str) -> None:
                 raise OSError("当前系统不支持 os.startfile")
             startfile(str(project_dir))
         except Exception:
-            st.warning(f"无法自动打开，请手动访问：{project_dir}")
+            st.warning("当前运行环境无法直接打开你本机文件夹。可以使用“导出与阅读”区域在线阅读或下载 TXT。")
+            st.caption(f"服务器/本地项目路径：{project_dir}")
         else:
             st.success("已打开当前小说输出目录。")
+
+
+def _safe_download_filename(name: str) -> str:
+    safe_name = re.sub(r'[<>:"/\\|?*\s]+', "_", str(name or "").strip())
+    safe_name = safe_name.strip("._")
+    return safe_name or "未命名小说"
+
+
+def _render_reader_nav(numbers: list[int], current_index: int, key_prefix: str) -> None:
+    prev_col, next_col = st.columns(2)
+    with prev_col:
+        if st.button("上一章", disabled=current_index <= 0, use_container_width=True, key=f"{key_prefix}_prev"):
+            st.session_state.reader_center_expanded = True
+            st.session_state.reader_chapter_number = numbers[current_index - 1]
+            st.rerun()
+    with next_col:
+        if st.button(
+            "下一章",
+            disabled=current_index >= len(numbers) - 1,
+            use_container_width=True,
+            key=f"{key_prefix}_next",
+        ):
+            st.session_state.reader_center_expanded = True
+            st.session_state.reader_chapter_number = numbers[current_index + 1]
+            st.rerun()
+
+
+def _render_reader_export_center(project_title: str) -> None:
+    with st.expander("导出与阅读", expanded=bool(st.session_state.get("reader_center_expanded", False))):
+        chapters = get_ordered_chapters(project_title)
+        if not chapters:
+            st.info("当前项目还没有章节，请先生成章节。")
+            return
+
+        numbers = [int(chapter["chapter_number"]) for chapter in chapters]
+        labels = {int(chapter["chapter_number"]): str(chapter["title"]) for chapter in chapters}
+        current_number = int(st.session_state.get("reader_chapter_number", numbers[0]))
+        if current_number not in numbers:
+            current_number = numbers[0]
+            st.session_state.reader_chapter_number = current_number
+
+        selected_number = st.selectbox(
+            "选择章节",
+            numbers,
+            index=numbers.index(current_number),
+            format_func=lambda number: labels.get(int(number), f"第 {int(number)} 章"),
+        )
+        current_number = int(selected_number)
+        st.session_state.reader_chapter_number = current_number
+        current_index = numbers.index(current_number)
+
+        _render_reader_nav(numbers, current_index, "reader_top")
+
+        try:
+            chapter = read_chapter_for_reader(project_title, current_number)
+        except FileNotFoundError as exc:
+            st.warning(str(exc))
+            return
+
+        reader_html = build_reader_html(chapter["title"], chapter["content"])
+        st.markdown(reader_html, unsafe_allow_html=True)
+
+        _render_reader_nav(numbers, current_index, "reader_bottom")
+
+        safe_project_name = _safe_download_filename(project_title)
+        current_txt = build_single_chapter_txt(chapter["title"], chapter["content"])
+        st.download_button(
+            "下载当前章节 TXT",
+            data=current_txt,
+            file_name=f"{safe_project_name}_chapter_{current_number:03d}.txt",
+            mime="text/plain",
+            use_container_width=True,
+        )
+
+        full_txt = build_full_novel_txt(project_title)
+        st.download_button(
+            "下载整本正文 TXT",
+            data=full_txt,
+            file_name=f"{safe_project_name}_全文.txt",
+            mime="text/plain",
+            disabled=not bool(full_txt.strip()),
+            use_container_width=True,
+        )
 
 
 def _init_session_state() -> None:
@@ -429,6 +520,8 @@ def _init_session_state() -> None:
         "start_chapter_number": 1,
         "end_chapter_number": 3,
         "current_model_info": {},
+        "reader_center_expanded": False,
+        "reader_chapter_number": 1,
         "show_quick_start": False,
         "quick_start_api_key": "",
         "quick_start_model_choice": default_model_choice,
@@ -931,7 +1024,9 @@ def main() -> None:
         with st.expander("Docs / Help", expanded=False):
             _render_help_content()
 
-    if selected_project and st.session_state.selected_project_applied != selected_project:
+    if selected_project and (
+        st.session_state.selected_project_applied != selected_project or st.session_state.title != selected_project
+    ):
         st.session_state.title = selected_project
         st.session_state.selected_project_applied = selected_project
 
@@ -961,6 +1056,8 @@ def main() -> None:
             expansion_path = _save_pending_setting_expansion(_current_project_title())
             if expansion_path:
                 st.info(f"最近一次设定扩写已保存：{expansion_path}")
+
+    _render_reader_export_center(_current_project_title())
 
     with st.sidebar:
         st.header("模型设置")
