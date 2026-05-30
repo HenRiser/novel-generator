@@ -7,34 +7,20 @@ from pathlib import Path
 from typing import Any
 
 from config import DOCS_DIR, OUTPUT_DIR
-
-
-UNNAMED_PROJECT_TITLE = "未命名小说"
-PROJECT_CONFIG_NAME = "project_config.json"
-OUTLINE_NAME = "novel_outline.md"
-CHARACTERS_NAME = "characters.md"
-CHAPTER_INDEX_NAME = "chapter_index.md"
-SETTING_EXPANSION_NAME = "setting_expansion_latest.json"
-
-
-def sanitize_project_title(title: str) -> str:
-    safe_title = str(title or "").strip()
-    safe_title = re.sub(r'[<>:"/\\|?*]', "_", safe_title)
-    safe_title = re.sub(r"\s+", " ", safe_title).strip()
-    safe_title = safe_title.strip(" .")
-
-    if not safe_title or safe_title in {".", ".."}:
-        safe_title = UNNAMED_PROJECT_TITLE
-
-    safe_title = safe_title[:80].strip(" .")
-    if not safe_title or safe_title in {".", ".."}:
-        return UNNAMED_PROJECT_TITLE
-
-    return safe_title
+from project_context import (
+    CHARACTERS_NAME,
+    CHAPTER_INDEX_NAME,
+    OUTLINE_NAME,
+    PROJECT_CONFIG_NAME,
+    SETTING_EXPANSION_NAME,
+    UNNAMED_PROJECT_TITLE,
+    get_project_context,
+    sanitize_project_title,
+)
 
 
 def get_project_dir(title: str) -> Path:
-    return OUTPUT_DIR / sanitize_project_title(title)
+    return get_project_context(title).project_dir
 
 
 def ensure_directories() -> None:
@@ -44,18 +30,13 @@ def ensure_directories() -> None:
 
 def ensure_project_dirs(title: str) -> dict[str, Path]:
     ensure_directories()
-    project_dir = get_project_dir(title)
-    chapters_dir = project_dir / "chapters"
-    summaries_dir = project_dir / "summaries"
-
-    project_dir.mkdir(parents=True, exist_ok=True)
-    chapters_dir.mkdir(parents=True, exist_ok=True)
-    summaries_dir.mkdir(parents=True, exist_ok=True)
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
 
     return {
-        "project": project_dir,
-        "chapters": chapters_dir,
-        "summaries": summaries_dir,
+        "project": ctx.project_dir,
+        "chapters": ctx.chapters_dir,
+        "summaries": ctx.summaries_dir,
     }
 
 
@@ -126,7 +107,7 @@ def save_project_config(title: str, config_data: dict[str, Any]) -> Path:
 
 def load_project_config(title: str) -> dict[str, Any] | None:
     ensure_directories()
-    path = get_project_dir(title) / PROJECT_CONFIG_NAME
+    path = get_project_context(title).config_path
     if not path.exists():
         return None
 
@@ -137,17 +118,18 @@ def load_project_config(title: str) -> dict[str, Any] | None:
 
 
 def save_outline(title: str, content: str) -> Path:
-    dirs = ensure_project_dirs(title)
-    return _write_text(_resolve_unique_path(dirs["project"] / OUTLINE_NAME), content)
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
+    return _write_text(_resolve_unique_path(ctx.outline_path), content)
 
 
 def read_outline(title: str) -> str:
-    path = get_project_dir(title) / OUTLINE_NAME
+    path = get_project_context(title).outline_path
     return _read_text(path) if path.exists() else ""
 
 
 def read_latest_outline(title: str) -> tuple[str, Path] | tuple[None, None]:
-    project_dir = get_project_dir(title)
+    project_dir = get_project_context(title).project_dir
     files = [path for path in project_dir.glob("novel_outline*.md") if path.is_file()]
     if not files:
         return None, None
@@ -156,17 +138,18 @@ def read_latest_outline(title: str) -> tuple[str, Path] | tuple[None, None]:
 
 
 def save_characters(title: str, content: str) -> Path:
-    dirs = ensure_project_dirs(title)
-    return _write_text(_resolve_unique_path(dirs["project"] / CHARACTERS_NAME), content)
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
+    return _write_text(_resolve_unique_path(ctx.characters_path), content)
 
 
 def read_characters(title: str) -> str:
-    path = get_project_dir(title) / CHARACTERS_NAME
+    path = get_project_context(title).characters_path
     return _read_text(path) if path.exists() else ""
 
 
 def read_latest_characters(title: str) -> tuple[str, Path] | tuple[None, None]:
-    project_dir = get_project_dir(title)
+    project_dir = get_project_context(title).project_dir
     files = [path for path in project_dir.glob("characters*.md") if path.is_file()]
     if not files:
         return None, None
@@ -175,14 +158,14 @@ def read_latest_characters(title: str) -> tuple[str, Path] | tuple[None, None]:
 
 
 def save_chapter(title: str, chapter_number: int, content: str) -> Path:
-    dirs = ensure_project_dirs(title)
-    chapter_number = max(1, int(chapter_number))
-    path = dirs["chapters"] / f"chapter_{chapter_number:03d}.md"
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
+    path = ctx.get_chapter_path(chapter_number)
     return _write_text(_resolve_unique_path(path), content)
 
 
 def list_chapter_files(title: str) -> list[Path]:
-    chapters_dir = get_project_dir(title) / "chapters"
+    chapters_dir = get_project_context(title).chapters_dir
     if not chapters_dir.exists():
         return []
 
@@ -228,14 +211,14 @@ def find_latest_chapter(title: str) -> tuple[int, Path] | tuple[None, None]:
 
 
 def save_summary(title: str, chapter_number: int, summary: str) -> Path:
-    dirs = ensure_project_dirs(title)
-    chapter_number = max(1, int(chapter_number))
-    path = dirs["summaries"] / f"chapter_{chapter_number:03d}_summary.md"
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
+    path = ctx.get_summary_path(chapter_number)
     return _write_text(_resolve_unique_path(path), summary)
 
 
 def read_all_summaries(title: str, before_chapter: int | None = None) -> str:
-    summaries_dir = get_project_dir(title) / "summaries"
+    summaries_dir = get_project_context(title).summaries_dir
     if not summaries_dir.exists():
         return ""
 
@@ -271,14 +254,15 @@ def update_chapter_index(
     summary: str,
     created_at: str | None = None,
 ) -> Path:
-    dirs = ensure_project_dirs(title)
-    path = dirs["project"] / CHAPTER_INDEX_NAME
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
+    path = ctx.chapter_index_path
     created_at = created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     chapter_title = " ".join((chapter_title or "未命名章节").split()).replace("|", "/")
     summary = " ".join((summary or "摘要生成失败，需手动补充。").split())
     summary = summary.replace("|", "/")
     try:
-        display_path = chapter_path.relative_to(dirs["project"]).as_posix()
+        display_path = chapter_path.relative_to(ctx.project_dir).as_posix()
     except ValueError:
         display_path = chapter_path.name
 
@@ -300,8 +284,9 @@ def update_chapter_index(
 
 
 def save_setting_expansion(title: str, raw_story_idea: str, expanded_data: dict[str, Any]) -> Path:
-    dirs = ensure_project_dirs(title)
-    path = dirs["project"] / SETTING_EXPANSION_NAME
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
+    path = ctx.setting_expansion_path
     data = {
         "raw_story_idea": raw_story_idea,
         "expanded": expanded_data,

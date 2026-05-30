@@ -64,6 +64,7 @@ from prompt_templates import (
     build_outline_prompt,
     build_summary_prompt,
 )
+from project_context import get_project_context
 from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
 
 
@@ -368,24 +369,24 @@ def _render_quick_start_wizard() -> None:
         _render_help_content()
 
 
-def _count_summary_files(project_dir: Path) -> int:
-    summaries_dir = project_dir / "summaries"
+def _count_summary_files(summaries_dir: Path) -> int:
     if not summaries_dir.exists():
         return 0
     return len([path for path in summaries_dir.glob("chapter_*_summary*.md") if path.is_file()])
 
 
 def _render_project_status(project_title: str) -> None:
-    project_dir = get_project_dir(project_title)
+    ctx = get_project_context(project_title)
+    project_dir = ctx.project_dir
     st.header("当前项目状态")
     st.write(f"- 小说标题：{project_title}")
     st.write(f"- 项目目录：{project_dir}")
-    st.write(f"- 项目配置：{'已保存' if (project_dir / 'project_config.json').exists() else '未保存'}")
-    st.write(f"- 小说大纲：{'已生成' if (project_dir / 'novel_outline.md').exists() else '未生成'}")
-    st.write(f"- 人物卡：{'已生成' if (project_dir / 'characters.md').exists() else '未生成'}")
+    st.write(f"- 项目配置：{'已保存' if ctx.config_path.exists() else '未保存'}")
+    st.write(f"- 小说大纲：{'已生成' if ctx.outline_path.exists() else '未生成'}")
+    st.write(f"- 人物卡：{'已生成' if ctx.characters_path.exists() else '未生成'}")
     st.write(f"- 章节数量：{len(list_chapter_files(project_title))}")
-    st.write(f"- 摘要数量：{_count_summary_files(project_dir)}")
-    st.write(f"- 章节索引：{'已生成' if (project_dir / 'chapter_index.md').exists() else '未生成'}")
+    st.write(f"- 摘要数量：{_count_summary_files(ctx.summaries_dir)}")
+    st.write(f"- 章节索引：{'已生成' if ctx.chapter_index_path.exists() else '未生成'}")
 
     if st.button("打开当前小说输出目录", use_container_width=True):
         try:

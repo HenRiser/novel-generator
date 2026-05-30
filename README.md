@@ -28,6 +28,7 @@ novel-generator
 ├── deepseek_client.py
 ├── prompt_templates.py
 ├── file_manager.py
+├── project_context.py
 ├── export_service.py
 ├── generation_config.py
 ├── ui_options.py
@@ -291,6 +292,12 @@ outputs/
 ```
 
 不同小说的数据互相隔离。一键继续下一章只会读取当前小说项目的 `chapters/`、`summaries/`、`novel_outline.md` 和 `characters.md`。标题中的 Windows 非法路径字符会被自动替换为 `_`，标题为空时使用“未命名小说”。
+
+## 项目路径管理
+
+当前仍使用 `outputs/{小说标题}/` 存储小说项目。项目内部新增 `ProjectContext` 作为统一项目路径入口，用于集中表达项目目录、配置文件、章节目录、摘要目录、章节索引、大纲和人物卡等路径。
+
+普通用户无需关心该内部实现。后续如果迁移到 `workspace/books`，会优先从 `ProjectContext` 和 `file_manager.py` 调整路径规则。
 
 ## 自动章节标题
 
