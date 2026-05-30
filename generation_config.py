@@ -6,7 +6,7 @@ from typing import Any
 
 GENRE_OPTIONS = ["赛博朋克", "玄幻", "科幻", "悬疑", "都市", "仙侠", "奇幻", "末日废土", "自定义"]
 WRITING_STYLE_OPTIONS = ["阴郁电影感", "轻小说", "网文爽文", "硬科幻", "黑暗成人向", "克制文学感", "日式赛博朋克", "自定义"]
-WRITING_MODE_OPTIONS = ["长篇连载", "中篇故事", "单章完整故事", "电影式强剧情", "慢热铺陈", "高密度剧情推进"]
+WRITING_MODE_OPTIONS = ["电影式长剧情", "慢热铺陈", "高密度剧情推进"]
 PLOT_DENSITY_OPTIONS = ["低：重氛围", "中：平衡", "高：高事件密度"]
 NARRATIVE_PACE_OPTIONS = ["慢", "中", "快"]
 WORLD_COMPLEXITY_OPTIONS = ["低", "中", "高"]
@@ -18,7 +18,7 @@ OUTLINE_GRANULARITY_OPTIONS = ["简略", "标准", "详细"]
 class SettingExpansionOptions:
     genre: str = "赛博朋克"
     writing_style: str = "阴郁电影感"
-    writing_mode: str = "长篇连载"
+    writing_mode: str = "电影式长剧情"
     expected_chapters: int = 12
     plot_density: str = "中：平衡"
     narrative_pace: str = "中"
@@ -44,47 +44,41 @@ def _free_text_or_default(value: Any, default: str) -> str:
     return cleaned
 
 
+def normalize_writing_mode(value: Any, default: str = "电影式长剧情") -> str:
+    legacy_map = {
+        "长篇连载": "电影式长剧情",
+        "中篇故事": "电影式长剧情",
+        "单章完整故事": "高密度剧情推进",
+        "电影式强剧情": "电影式长剧情",
+    }
+    cleaned = _clean(value)
+    cleaned = legacy_map.get(cleaned, cleaned)
+    return cleaned if cleaned in WRITING_MODE_OPTIONS else default
+
+
 def infer_story_scale(expected_chapters: int) -> dict[str, str]:
     chapters = max(1, int(expected_chapters or 12))
-    if chapters == 1:
+    if chapters <= 10:
         return {
-            "scale": "单章完整故事",
-            "rhythm": "高剧情压缩，开端、转折和收束必须集中完成",
-            "characters": "少量核心角色，避免庞大配角群",
-            "world": "世界观点到为止，只保留服务主线的规则",
-            "subplot": "弱支线或无支线",
-            "outline": "只规划单章内部的关键场景和情绪转折",
-        }
-    if chapters <= 5:
-        return {
-            "scale": "短篇",
-            "rhythm": "结构紧凑，尽快进入核心冲突",
+            "scale": "短篇小说",
+            "rhythm": "结构紧凑，尽快进入核心冲突，并在有限章节内完成主要收束",
             "characters": "少量核心角色",
             "world": "只展开必要背景与规则",
             "subplot": "少支线，支线必须反哺主线",
             "outline": "按有限章节规划清晰起承转合",
         }
-    if chapters <= 15:
+    if chapters <= 40:
         return {
-            "scale": "中篇",
+            "scale": "中篇小说",
             "rhythm": "允许阶段反转，节奏保持稳步推进",
             "characters": "中等角色数量",
             "world": "可逐步展开一组核心规则",
             "subplot": "可有一条副线",
             "outline": "规划主要阶段和关键章节点",
         }
-    if chapters <= 40:
-        return {
-            "scale": "长篇",
-            "rhythm": "多阶段推进，允许铺垫与回收",
-            "characters": "可多势力和多层关系",
-            "world": "可建立较完整世界观",
-            "subplot": "可铺设伏笔和多条辅助线",
-            "outline": "规划分阶段主线、反转和阶段目标",
-        }
     return {
-        "scale": "超长连载",
-        "rhythm": "多卷结构，长期成长线与阶段高潮交替",
+        "scale": "长篇小说",
+        "rhythm": "多阶段推进，允许铺垫、回收、长期成长线与阶段高潮交替",
         "characters": "多势力群像，但需要主次清晰",
         "world": "复杂世界观，可分层揭示",
         "subplot": "允许长线伏笔、多势力冲突和长期目标",
@@ -105,7 +99,7 @@ def normalize_setting_options(raw_options: Any | None = None) -> SettingExpansio
     return SettingExpansionOptions(
         genre=_free_text_or_default(raw.get("genre"), defaults.genre),
         writing_style=_free_text_or_default(raw.get("writing_style"), defaults.writing_style),
-        writing_mode=_option_value(raw.get("writing_mode"), WRITING_MODE_OPTIONS, defaults.writing_mode),
+        writing_mode=normalize_writing_mode(raw.get("writing_mode"), defaults.writing_mode),
         expected_chapters=expected_chapters,
         plot_density=_option_value(raw.get("plot_density"), PLOT_DENSITY_OPTIONS, defaults.plot_density),
         narrative_pace=_option_value(raw.get("narrative_pace"), NARRATIVE_PACE_OPTIONS, defaults.narrative_pace),

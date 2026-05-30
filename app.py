@@ -34,6 +34,7 @@ from generation_config import (
     WORLD_COMPLEXITY_OPTIONS,
     CHARACTER_SCALE_OPTIONS,
     WRITING_MODE_OPTIONS,
+    infer_story_scale,
     normalize_setting_options,
     setting_options_to_dict,
 )
@@ -71,12 +72,9 @@ from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
 
 
 STYLE_OPTIONS = WRITING_STYLE_OPTIONS
-MODE_OPTIONS = ["生成小说大纲", "生成人物卡", "生成指定章节正文"]
-OUTLINE_MODE = MODE_OPTIONS[0]
-CHARACTER_MODE = MODE_OPTIONS[1]
-CHAPTER_MODE = MODE_OPTIONS[2]
-BATCH_MODE_CONTINUE_TO_TARGET = "自动续写到第 N 章"
-BATCH_MODE_RANGE = "生成指定章节范围"
+OUTLINE_MODE = "outline"
+CHARACTER_MODE = "character"
+CHAPTER_MODE = "chapter"
 BATCH_MAX_CHAPTERS = 5
 EXPAND_DETAIL_OPTIONS = ["低", "中", "高"]
 REQUIRED_SETTING_EXPANSION_FIELDS = [
@@ -252,10 +250,9 @@ def _render_help_content() -> None:
 2. 输入故事设定、灵感或企划内容。
 3. 选择小说类型和写作风格。
 4. 点击整理并扩写设定。
-5. 生成大纲。
-6. 生成人物卡。
-7. 生成第 1 章。
-8. 使用一键继续下一章。
+5. 生成 / 更新大纲与人物卡。
+6. 生成第 1 章。
+7. 使用一键继续下一章。
 
 ### 文件位置
 
@@ -623,8 +620,6 @@ def _init_session_state() -> None:
         "editable_result": "",
         "editable_source_path": "",
         "edited_saved_path": "",
-        "batch_generation_mode": BATCH_MODE_CONTINUE_TO_TARGET,
-        "target_chapter_number": 3,
         "start_chapter_number": 1,
         "end_chapter_number": 3,
         "current_model_info": {},
@@ -637,7 +632,7 @@ def _init_session_state() -> None:
         "custom_setting_generation_genre": "",
         "setting_generation_writing_style": "阴郁电影感",
         "custom_setting_generation_writing_style": "",
-        "setting_generation_writing_mode": "长篇连载",
+        "setting_generation_writing_mode": "电影式长剧情",
         "setting_expected_chapters": 12,
         "setting_plot_density": "中：平衡",
         "setting_narrative_pace": "中",
@@ -822,6 +817,10 @@ def _load_setting_generation_options_to_session(raw_options: Any) -> None:
 
 def _render_setting_generation_config() -> None:
     st.subheader("设定配置")
+    if st.session_state.setting_generation_writing_mode not in WRITING_MODE_OPTIONS:
+        st.session_state.setting_generation_writing_mode = normalize_setting_options(
+            {"writing_mode": st.session_state.setting_generation_writing_mode}
+        ).writing_mode
     quick_cols = st.columns(4)
     with quick_cols[0]:
         st.selectbox(
@@ -863,10 +862,8 @@ def _render_setting_generation_config() -> None:
             )
 
     expected_chapters = int(st.session_state.setting_expected_chapters)
-    if expected_chapters <= 5 and st.session_state.setting_generation_writing_mode == "长篇连载":
-        st.warning("期望章节数较少，将优先按短篇/单章结构处理。")
-    if expected_chapters > 40 and st.session_state.setting_generation_writing_mode == "单章完整故事":
-        st.warning("期望章节数较多，将优先按长篇连载结构处理。")
+    story_scale = infer_story_scale(expected_chapters)["scale"]
+    st.caption(f"篇幅类型将根据期望章节数自动推导：{story_scale}")
 
     with st.expander("高级配置", expanded=False):
         advanced_col1, advanced_col2, advanced_col3 = st.columns(3)
@@ -1133,6 +1130,48 @@ def _save_result(project_key: str, mode: str, content: str, chapter_number: int)
     return save_chapter(project_key, chapter_number, content)
 
 
+def _generate_setting_assets(
+    project_key: str,
+    project_config: dict[str, Any],
+    task_models: dict[str, str],
+    temperature: float,
+    max_tokens: int,
+) -> bool:
+    try:
+        outline = generate_text(
+            messages=build_outline_prompt(project_config),
+            model=task_models["outline"],
+            temperature=temperature,
+            max_tokens=int(max_tokens),
+        )
+        outline_path = save_outline(project_key, outline)
+
+        characters = generate_text(
+            messages=build_character_prompt(project_config),
+            model=task_models["character"],
+            temperature=temperature,
+            max_tokens=int(max_tokens),
+        )
+        characters_path = save_characters(project_key, characters)
+        _save_pending_setting_expansion(project_key)
+    except DeepSeekClientError as exc:
+        st.error(str(exc))
+        return False
+    except Exception as exc:
+        st.error(f"设定资产保存失败：{exc}")
+        return False
+
+    st.success("大纲与人物卡已生成并保存。")
+    st.info(f"大纲：{outline_path}")
+    st.info(f"人物卡：{characters_path}")
+    st.info(f"使用模型：大纲 {task_models['outline']}，人物卡 {task_models['character']}")
+    with st.expander("本次生成的大纲", expanded=True):
+        st.markdown(outline)
+    with st.expander("本次生成的人物卡", expanded=False):
+        st.markdown(characters)
+    return True
+
+
 def _set_current_result(content: str, saved_path: Path) -> None:
     st.session_state.current_result = content
     st.session_state.current_file_name = saved_path.name
@@ -1283,21 +1322,13 @@ def _plan_batch_chapters(project_key: str) -> tuple[list[int], str | None]:
     latest_chapter_number, _ = find_latest_chapter(project_key)
     latest_chapter_number = int(latest_chapter_number or 0)
     expected_start = latest_chapter_number + 1 if latest_chapter_number else 1
-    batch_mode = st.session_state.batch_generation_mode
-
-    if batch_mode == BATCH_MODE_CONTINUE_TO_TARGET:
-        target = int(st.session_state.target_chapter_number)
-        if target < expected_start:
-            return [], f"当前最新章节是第 {latest_chapter_number} 章，目标章节号必须至少为第 {expected_start} 章。"
-        chapters = list(range(expected_start, target + 1))
-    else:
-        start = int(st.session_state.start_chapter_number)
-        end = int(st.session_state.end_chapter_number)
-        if end < start:
-            return [], "结束章节号不能小于起始章节号。"
-        if start != expected_start:
-            return [], f"为避免跳章，起始章节必须是第 {expected_start} 章。"
-        chapters = list(range(start, end + 1))
+    start = int(st.session_state.start_chapter_number)
+    end = int(st.session_state.end_chapter_number)
+    if end < start:
+        return [], "结束章节号不能小于起始章节号。"
+    if start != expected_start:
+        return [], f"为避免跳章，起始章节必须是第 {expected_start} 章。"
+    chapters = list(range(start, end + 1))
 
     if len(chapters) > BATCH_MAX_CHAPTERS:
         return [], f"一次最多生成 {BATCH_MAX_CHAPTERS} 章，请缩小范围。"
@@ -1578,9 +1609,8 @@ def main() -> None:
     col3, col4 = st.columns(2)
     with col3:
         st.text_input("目标读者", key="target_readers")
-        st.text_input("单章字数范围", key="chapter_word_range")
     with col4:
-        st.number_input("想生成的章节编号", min_value=1, step=1, key="chapter_number")
+        st.text_input("单章字数范围", key="chapter_word_range")
 
     st.text_area(
         "额外要求",
@@ -1589,21 +1619,97 @@ def main() -> None:
         placeholder="例如：第三人称、多对话、节奏快、禁止出现的内容、希望出现的桥段。",
     )
 
-    st.subheader("生成模式")
-    mode = st.radio("选择要生成的内容", MODE_OPTIONS, horizontal=True)
-
     project_ref = _current_project_ref()
     project_config = _collect_project_config()
-    chapter_number = int(st.session_state.chapter_number)
-    messages, notices = _build_messages(project_ref, mode, project_config, chapter_number, use_previous_context)
+    st.subheader("小说设定 / 大纲与人物")
+    st.caption("大纲和人物卡是正文生成前的设定资产；本阶段不强制锁定章节生成，但建议先保存或生成。")
+    asset_col1, asset_col2, asset_col3, asset_col4 = st.columns(4)
+    with asset_col1:
+        generate_assets_clicked = st.button("生成 / 更新大纲与人物卡", use_container_width=True)
+    with asset_col2:
+        view_outline_clicked = st.button("查看大纲", use_container_width=True)
+    with asset_col3:
+        view_characters_clicked = st.button("查看人物卡", use_container_width=True)
+    with asset_col4:
+        save_setting_assets_clicked = st.button("保存设定资产", use_container_width=True)
 
-    action_col1, action_col2, action_col3 = st.columns(3)
-    with action_col1:
-        preview_clicked = st.button("预览 Prompt", use_container_width=True)
-    with action_col2:
-        generate_clicked = st.button("开始生成", type="primary", use_container_width=True)
-    with action_col3:
-        continue_clicked = st.button("一键继续下一章", use_container_width=True)
+    if save_setting_assets_clicked:
+        project_ref = _ensure_current_project_ref()
+        config_path = save_project_config(project_ref, project_config)
+        expansion_path = _save_pending_setting_expansion(project_ref)
+        st.success(f"设定资产已保存：{config_path}")
+        if expansion_path:
+            st.info(f"设定扩写结果已保存：{expansion_path}")
+
+    if generate_assets_clicked:
+        project_ref = _ensure_current_project_ref()
+        save_project_config(project_ref, project_config)
+        with st.spinner("正在生成大纲与人物卡..."):
+            _generate_setting_assets(
+                project_key=project_ref,
+                project_config=project_config,
+                task_models=task_models,
+                temperature=temperature,
+                max_tokens=int(max_tokens),
+            )
+
+    if view_outline_clicked:
+        if not project_ref:
+            st.info("当前还没有已保存项目，请先保存设定资产或生成内容。")
+        else:
+            outline, outline_path = read_latest_outline(project_ref)
+            if outline_path:
+                with st.expander(f"大纲：{outline_path.name}", expanded=True):
+                    st.markdown(outline)
+            else:
+                st.info("当前项目还没有大纲。")
+
+    if view_characters_clicked:
+        if not project_ref:
+            st.info("当前还没有已保存项目，请先保存设定资产或生成内容。")
+        else:
+            characters, characters_path = read_latest_characters(project_ref)
+            if characters_path:
+                with st.expander(f"人物卡：{characters_path.name}", expanded=True):
+                    st.markdown(characters)
+            else:
+                st.info("当前项目还没有人物卡。")
+
+    project_ref = _current_project_ref()
+    latest_chapter_number = 0
+    latest_chapter_path = None
+    if project_ref:
+        latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
+        latest_chapter_number = int(latest_chapter_number or 0)
+    recommended_next_chapter = latest_chapter_number + 1
+
+    st.subheader("章节创作")
+    st.write(f"当前最新章节：{'第 ' + str(latest_chapter_number) + ' 章' if latest_chapter_path else '暂无'}")
+    st.write(f"推荐下一章：第 {recommended_next_chapter} 章")
+
+    continue_clicked = st.button("一键继续下一章", type="primary", use_container_width=True)
+    st.caption("一键继续会扫描当前项目已有章节，并生成最大章节号 + 1。")
+
+    chapter_col, batch_col = st.columns(2)
+    with chapter_col:
+        st.markdown("#### 指定章节")
+        st.number_input("指定章节编号", min_value=1, step=1, key="chapter_number")
+        st.caption("如同编号章节已存在，会自动保存为新版本文件，不会覆盖原文件。")
+        generate_clicked = st.button("生成指定章节", use_container_width=True)
+
+    with batch_col:
+        st.markdown("#### 批量章节")
+        batch_start_col, batch_end_col = st.columns(2)
+        with batch_start_col:
+            st.number_input("起始章节", min_value=1, step=1, key="start_chapter_number")
+        with batch_end_col:
+            st.number_input("结束章节", min_value=1, step=1, key="end_chapter_number")
+        st.caption("批量生成会从当前最新章节的下一章开始，避免跳章。")
+        batch_clicked = st.button("批量生成章节", use_container_width=True)
+
+    chapter_number = int(st.session_state.chapter_number)
+    messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
+    preview_clicked = st.button("预览 Prompt", use_container_width=True)
 
     if notices:
         with st.expander("本次上下文提示", expanded=False):
@@ -1611,25 +1717,22 @@ def main() -> None:
                 st.write(notice)
 
     if preview_clicked:
-        with st.expander("完整 messages 预览", expanded=True):
-            if mode == CHAPTER_MODE:
-                st.info(
-                    "本次任务模型："
-                    f"章节正文 {task_models['chapter']}，"
-                    f"章节标题 {task_models['chapter_title']}，"
-                    f"章节摘要 {task_models['summary']}"
-                )
-            else:
-                st.info(f"本次任务模型：{_model_for_mode(mode, task_models)}")
+        with st.expander("章节正文 messages 预览", expanded=True):
+            st.info(
+                "本次任务模型："
+                f"章节正文 {task_models['chapter']}，"
+                f"章节标题 {task_models['chapter_title']}，"
+                f"章节摘要 {task_models['summary']}"
+            )
             st.json(messages, expanded=False)
             st.text_area("可复制 Prompt", value=_format_messages_for_preview(messages), height=420)
 
     if generate_clicked:
         project_ref = _ensure_current_project_ref()
-        messages, notices = _build_messages(project_ref, mode, project_config, chapter_number, use_previous_context)
+        messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
         _generate_and_save(
             project_key=project_ref,
-            mode=mode,
+            mode=CHAPTER_MODE,
             messages=messages,
             task_models=task_models,
             temperature=temperature,
@@ -1640,72 +1743,53 @@ def main() -> None:
         )
 
     if continue_clicked:
-        project_ref = _current_project_ref()
-        if not project_ref:
-            st.warning("当前还没有已保存项目，请先生成第 1 章。")
+        project_ref = _ensure_current_project_ref()
+        latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
+        next_chapter_number = int(latest_chapter_number or 0) + 1
+        continue_project_config = project_config
+
+        try:
+            saved_project_config = load_project_config(project_ref)
+        except (FileNotFoundError, ValueError) as exc:
+            st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
         else:
-            latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
-            if latest_chapter_path is None:
-                st.warning("当前小说项目还没有章节，请先生成第 1 章。")
+            if saved_project_config:
+                continue_project_config = saved_project_config
+                st.info(f"已读取当前小说项目配置：{resolve_project_context(project_ref).project_dir}")
             else:
-                next_chapter_number = latest_chapter_number + 1
-                continue_project_config = project_config
+                st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
 
-                try:
-                    saved_project_config = load_project_config(project_ref)
-                except (FileNotFoundError, ValueError) as exc:
-                    st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
-                else:
-                    if saved_project_config:
-                        continue_project_config = saved_project_config
-                        st.info(f"已读取当前小说项目配置：{resolve_project_context(project_ref).project_dir}")
-                    else:
-                        st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
+        continue_messages, continue_notices = _build_messages(
+            project_key=project_ref,
+            mode=CHAPTER_MODE,
+            project_config=continue_project_config,
+            chapter_number=next_chapter_number,
+            use_previous_context=True,
+        )
+        if latest_chapter_path:
+            st.info(
+                f"将从 {latest_chapter_path.name} 继续生成第 {next_chapter_number} 章，"
+                "并已自动启用上一章上下文。"
+            )
+        else:
+            st.info("当前项目还没有章节，将生成第 1 章。")
+        if continue_notices:
+            with st.expander("一键继续使用的上下文", expanded=False):
+                for notice in continue_notices:
+                    st.write(notice)
 
-                continue_messages, continue_notices = _build_messages(
-                    project_key=project_ref,
-                    mode=CHAPTER_MODE,
-                    project_config=continue_project_config,
-                    chapter_number=next_chapter_number,
-                    use_previous_context=True,
-                )
-                st.info(
-                    f"将从 {latest_chapter_path.name} 继续生成第 {next_chapter_number} 章，"
-                    "并已自动启用上一章上下文。"
-                )
-                if continue_notices:
-                    with st.expander("一键继续使用的上下文", expanded=False):
-                        for notice in continue_notices:
-                            st.write(notice)
+        _generate_and_save(
+            project_key=project_ref,
+            mode=CHAPTER_MODE,
+            messages=continue_messages,
+            task_models=task_models,
+            temperature=temperature,
+            max_tokens=int(max_tokens),
+            chapter_number=next_chapter_number,
+            project_config=continue_project_config,
+            use_previous_context=True,
+        )
 
-                _generate_and_save(
-                    project_key=project_ref,
-                    mode=CHAPTER_MODE,
-                    messages=continue_messages,
-                    task_models=task_models,
-                    temperature=temperature,
-                    max_tokens=int(max_tokens),
-                    chapter_number=next_chapter_number,
-                    project_config=continue_project_config,
-                    use_previous_context=True,
-                )
-
-    st.subheader("批量章节生成")
-    batch_mode = st.selectbox(
-        "批量生成模式",
-        [BATCH_MODE_CONTINUE_TO_TARGET, BATCH_MODE_RANGE],
-        key="batch_generation_mode",
-    )
-    if batch_mode == BATCH_MODE_CONTINUE_TO_TARGET:
-        st.number_input("目标章节号", min_value=1, step=1, key="target_chapter_number")
-    else:
-        batch_start_col, batch_end_col = st.columns(2)
-        with batch_start_col:
-            st.number_input("起始章节号", min_value=1, step=1, key="start_chapter_number")
-        with batch_end_col:
-            st.number_input("结束章节号", min_value=1, step=1, key="end_chapter_number")
-
-    batch_clicked = st.button("批量生成章节", use_container_width=True)
     if batch_clicked:
         project_ref = _ensure_current_project_ref()
         chapters_to_generate, batch_error = _plan_batch_chapters(project_ref)
