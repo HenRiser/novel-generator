@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -10,14 +11,31 @@ from config import DOCS_DIR
 from project_context import (
     CHARACTERS_NAME,
     CHAPTER_INDEX_NAME,
+    LEGACY_STORAGE_KIND,
     OUTLINE_NAME,
     PROJECT_CONFIG_NAME,
+    ProjectContext,
     SETTING_EXPANSION_NAME,
     UNNAMED_PROJECT_TITLE,
+    WORKSPACE_STORAGE_KIND,
+    get_books_root,
     get_outputs_root,
     get_project_context,
+    read_book_metadata,
     sanitize_project_title,
 )
+
+
+@dataclass(frozen=True)
+class ProjectRecord:
+    ref: str
+    kind: str
+    title: str
+    project_dir: Path
+    book_id: str | None = None
+    legacy_dir_name: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 def get_project_dir(title: str) -> Path:
@@ -44,6 +62,145 @@ def ensure_project_dirs(title: str) -> dict[str, Path]:
 def list_project_titles() -> list[str]:
     ensure_directories()
     return sorted(path.name for path in get_outputs_root().iterdir() if path.is_dir())
+
+
+def project_ref_from_legacy_title(title: str) -> str:
+    return f"legacy:{sanitize_project_title(title)}"
+
+
+def parse_project_ref(project_ref: str) -> tuple[str, str]:
+    ref = str(project_ref or "").strip()
+    if ":" not in ref:
+        raise ValueError(f"Invalid project_ref, expected '<kind>:<id>': {project_ref}")
+
+    kind, value = ref.split(":", 1)
+    kind = kind.strip()
+    value = value.strip()
+    if not value:
+        raise ValueError(f"Invalid project_ref, missing identifier: {project_ref}")
+    if kind not in {"legacy", "book"}:
+        raise ValueError(f"Unsupported project_ref kind '{kind}': {project_ref}")
+
+    return kind, value
+
+
+def resolve_project_context(
+    project_ref: str,
+    outputs_root: Path | None = None,
+    books_root: Path | None = None,
+) -> ProjectContext:
+    kind, value = parse_project_ref(project_ref)
+
+    if kind == "legacy":
+        root = Path(outputs_root) if outputs_root is not None else get_outputs_root()
+        ctx = ProjectContext.from_title(value, outputs_root=root)
+        if not ctx.project_dir.exists():
+            raise FileNotFoundError(f"Legacy project not found: {ctx.project_dir}")
+        return ctx
+
+    root = Path(books_root) if books_root is not None else get_books_root()
+    return ProjectContext.from_book_id(value, books_root=root)
+
+
+def _timestamp_from_path(path: Path) -> str | None:
+    try:
+        return datetime.fromtimestamp(path.stat().st_mtime).astimezone().isoformat(timespec="seconds")
+    except OSError:
+        return None
+
+
+def _read_legacy_project_config(project_dir: Path) -> dict[str, Any]:
+    path = project_dir / PROJECT_CONFIG_NAME
+    if not path.exists():
+        return {}
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _list_legacy_projects(outputs_root: Path) -> list[ProjectRecord]:
+    if not outputs_root.exists():
+        return []
+
+    records: list[ProjectRecord] = []
+    for path in outputs_root.iterdir():
+        if not path.is_dir() or path.name.startswith(".") or path.name == "__pycache__":
+            continue
+
+        config = _read_legacy_project_config(path)
+        title = str(config.get("title") or "").strip() or path.name
+        updated_at = str(config.get("updated_at") or "").strip() or _timestamp_from_path(path)
+        records.append(
+            ProjectRecord(
+                ref=f"legacy:{path.name}",
+                kind=LEGACY_STORAGE_KIND,
+                title=title,
+                project_dir=path,
+                legacy_dir_name=path.name,
+                updated_at=updated_at,
+            )
+        )
+
+    return records
+
+
+def _list_workspace_projects(books_root: Path) -> list[ProjectRecord]:
+    if not books_root.exists():
+        return []
+
+    records: list[ProjectRecord] = []
+    for path in books_root.iterdir():
+        if not path.is_dir() or path.name.startswith(".") or path.name == "__pycache__":
+            continue
+
+        try:
+            metadata = read_book_metadata(path)
+        except (FileNotFoundError, ValueError):
+            continue
+
+        book_id = str(metadata["book_id"])
+        if book_id != path.name:
+            continue
+
+        records.append(
+            ProjectRecord(
+                ref=f"book:{book_id}",
+                kind=WORKSPACE_STORAGE_KIND,
+                title=str(metadata["title"]).strip(),
+                project_dir=path,
+                book_id=book_id,
+                created_at=str(metadata.get("created_at") or "").strip() or None,
+                updated_at=str(metadata.get("updated_at") or "").strip() or _timestamp_from_path(path),
+            )
+        )
+
+    return records
+
+
+def list_projects(
+    outputs_root: Path | None = None,
+    books_root: Path | None = None,
+) -> list[ProjectRecord]:
+    if outputs_root is None:
+        ensure_directories()
+    resolved_outputs_root = Path(outputs_root) if outputs_root is not None else get_outputs_root()
+    resolved_books_root = Path(books_root) if books_root is not None else get_books_root()
+
+    records = _list_legacy_projects(resolved_outputs_root)
+    records.extend(_list_workspace_projects(resolved_books_root))
+
+    return sorted(
+        records,
+        key=lambda record: (
+            record.updated_at or "",
+            record.title.casefold(),
+            record.ref,
+        ),
+        reverse=True,
+    )
 
 
 def _read_text(path: Path) -> str:
