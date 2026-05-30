@@ -306,6 +306,27 @@ list_projects()
 - 可选地将 legacy 标记为只读，但不应作为第一阶段行为。
 - 仍不做静默自动迁移。
 
+## 当前实现进度
+
+阶段 1 基础设施已完成：
+
+- 已新增 `WORKSPACE_DIR` 和 `BOOKS_DIR` 常量。
+- 已新增 `book_id` 生成器。
+- 已新增 `book.json` metadata 构造、读取、写入、校验和更新时间能力。
+- `ProjectContext` 已具备 legacy / workspace 双模式表达能力。
+- `ProjectContext.from_title()` 仍保持 legacy 行为。
+- `ProjectContext.from_book_id()` 可读取 workspace book metadata。
+
+阶段 2 基础能力已完成：
+
+- 已新增 `ProjectRecord` 轻量项目记录。
+- 已新增 `list_projects()`，可合并 legacy outputs 项目和 workspace books 项目。
+- 已新增 project ref 解析能力，支持 `legacy:<legacy_dir_name>` 和 `book:<book_id>`。
+- 已新增从 project ref 解析 `ProjectContext` 的能力。
+- `list_project_titles()` 仍作为 legacy compatibility API 保留，旧 UI 行为不变。
+
+当前仍未启用完整迁移；新项目默认保存位置仍是 `outputs/{小说标题}/`，旧 `outputs` 项目不会被自动迁移。
+
 ## 10. 影响面分析
 
 ### ProjectContext
