@@ -38,15 +38,18 @@ from generation_config import (
     setting_options_to_dict,
 )
 from file_manager import (
+    create_workspace_project,
     ensure_directories,
     find_latest_chapter,
     list_chapter_files,
-    list_project_titles,
+    list_projects,
     load_project_config,
+    project_ref_from_context,
     read_history_summaries,
     read_latest_characters,
     read_latest_outline,
     read_previous_chapter,
+    resolve_project_context,
     save_chapter,
     save_characters,
     save_edited_result,
@@ -63,7 +66,7 @@ from prompt_templates import (
     build_outline_prompt,
     build_summary_prompt,
 )
-from project_context import get_outputs_root, get_project_context
+from project_context import get_books_root, get_outputs_root
 from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
 
 
@@ -201,6 +204,7 @@ def _render_environment_status() -> None:
     env_path = PROJECT_ROOT / ".env"
     venv_path = PROJECT_ROOT / ".venv"
     outputs_exists = get_outputs_root().exists()
+    books_exists = get_books_root().exists()
     api_status = get_api_key_status()
     api_key_configured = bool(api_status["configured"])
 
@@ -209,6 +213,7 @@ def _render_environment_status() -> None:
     st.write(f"- .env：{_status_text(env_path.exists())}")
     st.write(f"- API Key：{'已配置' if api_key_configured else '未配置'}")
     st.write(f"- 默认模型：{api_status['default_model']}")
+    st.write(f"- workspace/books：{'已找到' if books_exists else '首次保存时创建'}")
     st.write(f"- outputs：{'已找到' if outputs_exists else '自动创建'}")
     st.write(f"- 虚拟环境：{_status_text(venv_path.exists())}")
     st.write("- Streamlit：已启动")
@@ -254,7 +259,7 @@ def _render_help_content() -> None:
 
 ### 文件位置
 
-生成结果保存在 `outputs/小说标题/`，包含 `project_config.json`、大纲、人物卡、章节、摘要和章节索引。当前版本没有引入数据库，也不会把 API Key 写入 `project_config.json`。
+新项目生成结果保存在 `workspace/books/{book_id}/`，旧 `outputs/小说标题/` 项目仍会兼容读写。项目目录包含 `project_config.json`、大纲、人物卡、章节、摘要和章节索引。当前版本没有引入数据库，也不会把 API Key 写入 `project_config.json`。
 
 ### 常见问题
 
@@ -351,7 +356,7 @@ def _render_quick_start_wizard() -> None:
                         default_model=st.session_state.quick_start_model_choice,
                         custom_model=st.session_state.get("quick_start_custom_model", ""),
                     )
-                except ValueError as exc:
+                except (FileNotFoundError, ValueError) as exc:
                     st.error(str(exc))
                 else:
                     _apply_default_model_to_session(saved_model)
@@ -374,16 +379,63 @@ def _count_summary_files(summaries_dir: Path) -> int:
     return len([path for path in summaries_dir.glob("chapter_*_summary*.md") if path.is_file()])
 
 
-def _render_project_status(project_title: str) -> None:
-    ctx = get_project_context(project_title)
-    project_dir = ctx.project_dir
+def _current_project_ref() -> str:
+    return str(st.session_state.get("current_project_ref") or "").strip()
+
+
+def _set_current_project(ref: str, title: str) -> None:
+    st.session_state.current_project_ref = ref
+    st.session_state.current_project_title = title
+    st.session_state.title = title
+
+
+def _ensure_current_project_ref() -> str:
+    current_ref = _current_project_ref()
+    if current_ref:
+        return current_ref
+
+    ctx = create_workspace_project(_current_project_title())
+    project_ref = project_ref_from_context(ctx)
+    _set_current_project(project_ref, ctx.title)
+    return project_ref
+
+
+def _project_option_label(project_ref: str, project_map: dict) -> str:
+    if not project_ref:
+        return ""
+    record = project_map.get(project_ref)
+    if record is None:
+        return project_ref
+    return f"{record.title} [{record.kind}]"
+
+
+def _render_project_status(project_ref: str, project_title: str) -> None:
+    try:
+        ctx = resolve_project_context(project_ref) if project_ref else None
+    except (FileNotFoundError, ValueError) as exc:
+        st.warning(f"当前项目读取失败：{exc}")
+        ctx = None
     st.header("当前项目状态")
     st.write(f"- 小说标题：{project_title}")
+    if ctx is None:
+        st.write("- 项目身份：尚未创建")
+        st.write("- 项目目录：首次保存或生成时将创建到 workspace/books/{book_id}/")
+        st.write("- 项目配置：未保存")
+        st.write("- 小说大纲：未生成")
+        st.write("- 人物卡：未生成")
+        st.write("- 章节数量：0")
+        st.write("- 摘要数量：0")
+        st.write("- 章节索引：未生成")
+        st.button("打开当前小说输出目录", use_container_width=True, disabled=True)
+        return
+
+    project_dir = ctx.project_dir
+    st.write(f"- 项目身份：{project_ref}")
     st.write(f"- 项目目录：{project_dir}")
     st.write(f"- 项目配置：{'已保存' if ctx.config_path.exists() else '未保存'}")
     st.write(f"- 小说大纲：{'已生成' if ctx.outline_path.exists() else '未生成'}")
     st.write(f"- 人物卡：{'已生成' if ctx.characters_path.exists() else '未生成'}")
-    st.write(f"- 章节数量：{len(list_chapter_files(project_title))}")
+    st.write(f"- 章节数量：{len(list_chapter_files(project_ref))}")
     st.write(f"- 摘要数量：{_count_summary_files(ctx.summaries_dir)}")
     st.write(f"- 章节索引：{'已生成' if ctx.chapter_index_path.exists() else '未生成'}")
 
@@ -436,9 +488,13 @@ def _mark_reader_refresh(chapter_number: int | None = None) -> None:
         st.session_state.reader_chapter_number = int(chapter_number)
 
 
-def _render_reader_export_center(project_title: str) -> None:
+def _render_reader_export_center(project_ref: str, project_title: str) -> None:
     with st.expander("导出与阅读", expanded=bool(st.session_state.get("reader_center_expanded", False))):
-        chapters = get_ordered_chapters(project_title)
+        if not project_ref:
+            st.info("当前项目还没有章节，请先保存项目或生成章节。")
+            return
+
+        chapters = get_ordered_chapters(project_ref)
         if st.session_state.get("reader_needs_refresh") and not chapters:
             st.session_state.reader_needs_refresh = False
             st.session_state.reader_selected_chapter = None
@@ -479,7 +535,7 @@ def _render_reader_export_center(project_title: str) -> None:
         _render_reader_nav(numbers, current_index, "reader_top")
 
         try:
-            chapter = read_chapter_for_reader(project_title, current_number)
+            chapter = read_chapter_for_reader(project_ref, current_number)
         except FileNotFoundError as exc:
             st.warning(str(exc))
             return
@@ -512,7 +568,7 @@ if (readerTop) {
             use_container_width=True,
         )
 
-        full_txt = build_full_novel_txt(project_title)
+        full_txt = build_full_novel_txt(project_ref, display_title=project_title)
         st.download_button(
             "下载整本正文 TXT",
             data=full_txt,
@@ -557,7 +613,9 @@ def _init_session_state() -> None:
         "selected_title_candidate": "",
         "last_raw_story_idea": "",
         "last_setting_expansion_data": {},
-        "selected_project_title": "",
+        "current_project_ref": "",
+        "current_project_title": "",
+        "selected_project_ref": "",
         "selected_project_applied": "",
         "current_result": "",
         "current_file_name": "generated.md",
@@ -912,13 +970,13 @@ def _format_messages_for_preview(messages: list[dict[str, str]]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _save_pending_setting_expansion(title: str) -> Path | None:
+def _save_pending_setting_expansion(project_key: str) -> Path | None:
     expanded_data = st.session_state.get("last_setting_expansion_data")
     raw_story_idea = st.session_state.get("last_raw_story_idea", "")
     if not raw_story_idea or not isinstance(expanded_data, dict) or not expanded_data:
         return None
 
-    return save_setting_expansion(title, raw_story_idea, expanded_data)
+    return save_setting_expansion(project_key, raw_story_idea, expanded_data)
 
 
 def parse_setting_expansion_response(raw_text: str) -> dict[str, Any]:
@@ -1021,7 +1079,7 @@ def extract_chapter_title(chapter_content: str) -> str:
     return "未命名章节"
 
 
-def _build_messages(title: str, mode: str, project_config: dict[str, Any], chapter_number: int, use_previous_context: bool) -> tuple[list[dict[str, str]], list[str]]:
+def _build_messages(project_key: str, mode: str, project_config: dict[str, Any], chapter_number: int, use_previous_context: bool) -> tuple[list[dict[str, str]], list[str]]:
     notices = []
 
     if mode == OUTLINE_MODE:
@@ -1030,11 +1088,16 @@ def _build_messages(title: str, mode: str, project_config: dict[str, Any], chapt
     if mode == CHARACTER_MODE:
         return build_character_prompt(project_config), notices
 
-    outline, outline_path = read_latest_outline(title)
-    characters, characters_path = read_latest_characters(title)
+    outline, outline_path = (None, None)
+    characters, characters_path = (None, None)
     previous_chapter = None
     previous_path = None
-    summaries = read_history_summaries(title, before_chapter=chapter_number)
+    summaries = ""
+
+    if project_key:
+        outline, outline_path = read_latest_outline(project_key)
+        characters, characters_path = read_latest_characters(project_key)
+        summaries = read_history_summaries(project_key, before_chapter=chapter_number)
 
     if outline_path:
         notices.append(f"已加入大纲上下文：{outline_path.name}")
@@ -1044,7 +1107,8 @@ def _build_messages(title: str, mode: str, project_config: dict[str, Any], chapt
         notices.append("已加入历史章节摘要。")
 
     if use_previous_context:
-        previous_chapter, previous_path = read_previous_chapter(title, chapter_number)
+        if project_key:
+            previous_chapter, previous_path = read_previous_chapter(project_key, chapter_number)
         if previous_path:
             notices.append(f"已加入上一章正文：{previous_path.name}")
         else:
@@ -1061,12 +1125,12 @@ def _build_messages(title: str, mode: str, project_config: dict[str, Any], chapt
     return messages, notices
 
 
-def _save_result(title: str, mode: str, content: str, chapter_number: int) -> Path:
+def _save_result(project_key: str, mode: str, content: str, chapter_number: int) -> Path:
     if mode == OUTLINE_MODE:
-        return save_outline(title, content)
+        return save_outline(project_key, content)
     if mode == CHARACTER_MODE:
-        return save_characters(title, content)
-    return save_chapter(title, chapter_number, content)
+        return save_characters(project_key, content)
+    return save_chapter(project_key, chapter_number, content)
 
 
 def _set_current_result(content: str, saved_path: Path) -> None:
@@ -1083,7 +1147,7 @@ def _set_current_model_info(model_info: dict[str, str]) -> None:
 
 
 def generate_single_chapter_workflow(
-    project_title: str,
+    project_key: str,
     chapter_number: int,
     form_data: dict[str, Any],
     task_models: dict[str, str],
@@ -1113,7 +1177,7 @@ def generate_single_chapter_workflow(
 
     try:
         messages, notices = _build_messages(
-            title=project_title,
+            project_key=project_key,
             mode=CHAPTER_MODE,
             project_config=form_data,
             chapter_number=int(chapter_number),
@@ -1136,8 +1200,8 @@ def generate_single_chapter_workflow(
     result["content"] = final_content
 
     try:
-        chapter_path = save_chapter(project_title, int(chapter_number), final_content)
-        _save_pending_setting_expansion(project_title)
+        chapter_path = save_chapter(project_key, int(chapter_number), final_content)
+        _save_pending_setting_expansion(project_key)
     except Exception as exc:
         result["error"] = f"章节保存失败：{exc}"
         return result
@@ -1152,7 +1216,7 @@ def generate_single_chapter_workflow(
             temperature=0.2,
             max_tokens=512,
         )
-        summary_path = save_summary(project_title, int(chapter_number), summary)
+        summary_path = save_summary(project_key, int(chapter_number), summary)
         result["summary"] = summary
         result["summary_path"] = str(summary_path)
     except DeepSeekClientError as exc:
@@ -1162,7 +1226,7 @@ def generate_single_chapter_workflow(
 
     try:
         index_path = update_chapter_index(
-            title=project_title,
+            title=project_key,
             chapter_number=int(chapter_number),
             chapter_title=chapter_title,
             chapter_path=Path(chapter_path),
@@ -1215,8 +1279,8 @@ def _show_chapter_workflow_result(result: dict[str, Any]) -> bool:
     return True
 
 
-def _plan_batch_chapters(project_title: str) -> tuple[list[int], str | None]:
-    latest_chapter_number, _ = find_latest_chapter(project_title)
+def _plan_batch_chapters(project_key: str) -> tuple[list[int], str | None]:
+    latest_chapter_number, _ = find_latest_chapter(project_key)
     latest_chapter_number = int(latest_chapter_number or 0)
     expected_start = latest_chapter_number + 1 if latest_chapter_number else 1
     batch_mode = st.session_state.batch_generation_mode
@@ -1243,7 +1307,7 @@ def _plan_batch_chapters(project_title: str) -> tuple[list[int], str | None]:
 
 
 def _generate_and_save(
-    title: str,
+    project_key: str,
     mode: str,
     messages: list[dict[str, str]],
     task_models: dict[str, str],
@@ -1256,7 +1320,7 @@ def _generate_and_save(
     if mode == CHAPTER_MODE:
         with st.spinner("正在生成章节正文、章节标题和摘要..."):
             chapter_result = generate_single_chapter_workflow(
-                project_title=title,
+                project_key=project_key,
                 chapter_number=chapter_number,
                 form_data=project_config or _collect_project_config(),
                 task_models=task_models,
@@ -1279,8 +1343,8 @@ def _generate_and_save(
             st.error(str(exc))
             return False
 
-    saved_path = _save_result(title, mode, result, chapter_number)
-    _save_pending_setting_expansion(title)
+    saved_path = _save_result(project_key, mode, result, chapter_number)
+    _save_pending_setting_expansion(project_key)
     _set_current_result(result, saved_path)
     _set_current_model_info({"使用模型": selected_model})
     st.success(f"生成成功，已保存：{saved_path}")
@@ -1309,8 +1373,17 @@ def main() -> None:
         temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
         max_tokens = st.number_input("max_tokens", min_value=512, max_value=32768, value=4000, step=256)
         use_previous_context = st.checkbox("使用上一章上下文", value=True)
-        project_options = [""] + list_project_titles()
-        selected_project = st.selectbox("选择已有小说项目", project_options, key="selected_project_title")
+        project_records = list_projects()
+        project_map = {record.ref: record for record in project_records}
+        project_options = [""] + [record.ref for record in project_records]
+        if st.session_state.selected_project_ref not in project_options:
+            st.session_state.selected_project_ref = ""
+        selected_project_ref = st.selectbox(
+            "选择已有小说项目",
+            project_options,
+            key="selected_project_ref",
+            format_func=lambda ref: _project_option_label(ref, project_map),
+        )
 
     with st.sidebar:
         st.header("帮助 / Quick Start")
@@ -1320,36 +1393,48 @@ def main() -> None:
         with st.expander("Docs / Help", expanded=False):
             _render_help_content()
 
-    if selected_project and (
-        st.session_state.selected_project_applied != selected_project or st.session_state.title != selected_project
-    ):
-        st.session_state.title = selected_project
-        st.session_state.selected_project_applied = selected_project
+    if selected_project_ref and st.session_state.selected_project_applied != selected_project_ref:
+        try:
+            selected_ctx = resolve_project_context(selected_project_ref)
+        except (FileNotFoundError, ValueError) as exc:
+            st.warning(f"项目读取失败：{exc}")
+        else:
+            _set_current_project(selected_project_ref, selected_ctx.title)
+            st.session_state.selected_project_applied = selected_project_ref
+    elif not selected_project_ref and st.session_state.selected_project_applied:
+        st.session_state.current_project_ref = ""
+        st.session_state.current_project_title = ""
+        st.session_state.selected_project_applied = ""
 
     with st.sidebar:
         _render_environment_status()
-        _render_project_status(_current_project_title())
+        _render_project_status(_current_project_ref(), _current_project_title())
 
     load_col, save_col = st.columns(2)
     with load_col:
         if st.button("加载项目配置", use_container_width=True):
-            try:
-                config = load_project_config(_current_project_title())
-            except ValueError as exc:
-                st.error(str(exc))
+            project_ref = _current_project_ref()
+            if not project_ref:
+                st.info("当前还没有已保存项目，请先保存项目配置或生成内容。")
             else:
-                if config is None:
-                    st.info(f"还没有找到当前小说项目的 project_config.json：{get_project_context(_current_project_title()).project_dir}")
+                try:
+                    config = load_project_config(project_ref)
+                except ValueError as exc:
+                    st.error(str(exc))
                 else:
-                    _load_config_to_session(config)
-                    st.success("项目配置已加载。")
-                    st.rerun()
+                    if config is None:
+                        st.info(f"还没有找到当前小说项目的 project_config.json：{resolve_project_context(project_ref).project_dir}")
+                    else:
+                        _load_config_to_session(config)
+                        st.success("项目配置已加载。")
+                        st.rerun()
 
     with save_col:
         if st.button("保存项目配置", use_container_width=True):
-            path = save_project_config(_current_project_title(), _collect_project_config())
+            project_ref = _ensure_current_project_ref()
+            path = save_project_config(project_ref, _collect_project_config())
             st.success(f"项目配置已保存：{path}")
-            expansion_path = _save_pending_setting_expansion(_current_project_title())
+            expansion_path = _save_pending_setting_expansion(project_ref)
             if expansion_path:
                 st.info(f"最近一次设定扩写已保存：{expansion_path}")
 
@@ -1472,7 +1557,16 @@ def main() -> None:
 
     st.subheader("小说设定")
     st.text_input("小说标题", key="title")
-    st.caption(f"当前项目目录：{get_project_context(_current_project_title()).project_dir}")
+    current_ref_for_caption = _current_project_ref()
+    if current_ref_for_caption:
+        try:
+            current_ctx_for_caption = resolve_project_context(current_ref_for_caption)
+        except (FileNotFoundError, ValueError) as exc:
+            st.caption(f"当前项目目录：无法读取当前项目（{exc}）")
+        else:
+            st.caption(f"当前项目目录：{current_ctx_for_caption.project_dir}")
+    else:
+        st.caption("当前项目目录：首次保存或生成时将创建到 workspace/books/{book_id}/")
 
     _render_genre_style_controls("project_setting")
 
@@ -1498,10 +1592,10 @@ def main() -> None:
     st.subheader("生成模式")
     mode = st.radio("选择要生成的内容", MODE_OPTIONS, horizontal=True)
 
-    project_title = _current_project_title()
+    project_ref = _current_project_ref()
     project_config = _collect_project_config()
     chapter_number = int(st.session_state.chapter_number)
-    messages, notices = _build_messages(project_title, mode, project_config, chapter_number, use_previous_context)
+    messages, notices = _build_messages(project_ref, mode, project_config, chapter_number, use_previous_context)
 
     action_col1, action_col2, action_col3 = st.columns(3)
     with action_col1:
@@ -1531,8 +1625,10 @@ def main() -> None:
             st.text_area("可复制 Prompt", value=_format_messages_for_preview(messages), height=420)
 
     if generate_clicked:
+        project_ref = _ensure_current_project_ref()
+        messages, notices = _build_messages(project_ref, mode, project_config, chapter_number, use_previous_context)
         _generate_and_save(
-            title=project_title,
+            project_key=project_ref,
             mode=mode,
             messages=messages,
             task_models=task_models,
@@ -1544,51 +1640,55 @@ def main() -> None:
         )
 
     if continue_clicked:
-        latest_chapter_number, latest_chapter_path = find_latest_chapter(project_title)
-        if latest_chapter_path is None:
-            st.warning("当前小说项目还没有章节，请先生成第 1 章。")
+        project_ref = _current_project_ref()
+        if not project_ref:
+            st.warning("当前还没有已保存项目，请先生成第 1 章。")
         else:
-            next_chapter_number = latest_chapter_number + 1
-            continue_project_config = project_config
-
-            try:
-                saved_project_config = load_project_config(project_title)
-            except ValueError as exc:
-                st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
+            latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
+            if latest_chapter_path is None:
+                st.warning("当前小说项目还没有章节，请先生成第 1 章。")
             else:
-                if saved_project_config:
-                    continue_project_config = saved_project_config
-                    st.info(f"已读取当前小说项目配置：{get_project_context(project_title).project_dir}")
+                next_chapter_number = latest_chapter_number + 1
+                continue_project_config = project_config
+
+                try:
+                    saved_project_config = load_project_config(project_ref)
+                except (FileNotFoundError, ValueError) as exc:
+                    st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
                 else:
-                    st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
+                    if saved_project_config:
+                        continue_project_config = saved_project_config
+                        st.info(f"已读取当前小说项目配置：{resolve_project_context(project_ref).project_dir}")
+                    else:
+                        st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
 
-            continue_messages, continue_notices = _build_messages(
-                title=project_title,
-                mode=CHAPTER_MODE,
-                project_config=continue_project_config,
-                chapter_number=next_chapter_number,
-                use_previous_context=True,
-            )
-            st.info(
-                f"将从 {latest_chapter_path.name} 继续生成第 {next_chapter_number} 章，"
-                "并已自动启用上一章上下文。"
-            )
-            if continue_notices:
-                with st.expander("一键继续使用的上下文", expanded=False):
-                    for notice in continue_notices:
-                        st.write(notice)
+                continue_messages, continue_notices = _build_messages(
+                    project_key=project_ref,
+                    mode=CHAPTER_MODE,
+                    project_config=continue_project_config,
+                    chapter_number=next_chapter_number,
+                    use_previous_context=True,
+                )
+                st.info(
+                    f"将从 {latest_chapter_path.name} 继续生成第 {next_chapter_number} 章，"
+                    "并已自动启用上一章上下文。"
+                )
+                if continue_notices:
+                    with st.expander("一键继续使用的上下文", expanded=False):
+                        for notice in continue_notices:
+                            st.write(notice)
 
-            _generate_and_save(
-                title=project_title,
-                mode=CHAPTER_MODE,
-                messages=continue_messages,
-                task_models=task_models,
-                temperature=temperature,
-                max_tokens=int(max_tokens),
-                chapter_number=next_chapter_number,
-                project_config=continue_project_config,
-                use_previous_context=True,
-            )
+                _generate_and_save(
+                    project_key=project_ref,
+                    mode=CHAPTER_MODE,
+                    messages=continue_messages,
+                    task_models=task_models,
+                    temperature=temperature,
+                    max_tokens=int(max_tokens),
+                    chapter_number=next_chapter_number,
+                    project_config=continue_project_config,
+                    use_previous_context=True,
+                )
 
     st.subheader("批量章节生成")
     batch_mode = st.selectbox(
@@ -1607,7 +1707,8 @@ def main() -> None:
 
     batch_clicked = st.button("批量生成章节", use_container_width=True)
     if batch_clicked:
-        chapters_to_generate, batch_error = _plan_batch_chapters(project_title)
+        project_ref = _ensure_current_project_ref()
+        chapters_to_generate, batch_error = _plan_batch_chapters(project_ref)
         if batch_error:
             st.warning(batch_error)
         else:
@@ -1619,7 +1720,7 @@ def main() -> None:
             for index, batch_chapter_number in enumerate(chapters_to_generate, start=1):
                 with st.status(f"正在生成第 {batch_chapter_number} 章", expanded=True) as status:
                     batch_result = generate_single_chapter_workflow(
-                        project_title=project_title,
+                        project_key=project_ref,
                         chapter_number=batch_chapter_number,
                         form_data=project_config,
                         task_models=task_models,
@@ -1667,7 +1768,7 @@ def main() -> None:
                 )
 
     with reader_placeholder.container():
-        _render_reader_export_center(_current_project_title())
+        _render_reader_export_center(_current_project_ref(), _current_project_title())
 
     if st.session_state.current_result:
         st.subheader("当前生成结果")
@@ -1693,9 +1794,11 @@ def main() -> None:
                 st.warning("还没有可保存的原始生成文件，请先生成内容。")
             elif not st.session_state.editable_result.strip():
                 st.warning("编辑内容为空，未保存。")
+            elif not _current_project_ref():
+                st.warning("当前还没有已保存项目，无法保存编辑后的版本。")
             else:
                 edited_path = save_edited_result(
-                    project_title,
+                    _current_project_ref(),
                     st.session_state.editable_source_path,
                     st.session_state.editable_result,
                 )

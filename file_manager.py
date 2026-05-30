@@ -18,11 +18,14 @@ from project_context import (
     SETTING_EXPANSION_NAME,
     UNNAMED_PROJECT_TITLE,
     WORKSPACE_STORAGE_KIND,
+    create_workspace_book,
     get_books_root,
     get_outputs_root,
     get_project_context,
     read_book_metadata,
     sanitize_project_title,
+    update_book_metadata_timestamp,
+    write_book_metadata,
 )
 
 
@@ -39,7 +42,7 @@ class ProjectRecord:
 
 
 def get_project_dir(title: str) -> Path:
-    return get_project_context(title).project_dir
+    return _get_project_context(title).project_dir
 
 
 def ensure_directories() -> None:
@@ -49,7 +52,7 @@ def ensure_directories() -> None:
 
 def ensure_project_dirs(title: str) -> dict[str, Path]:
     ensure_directories()
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
 
     return {
@@ -100,6 +103,41 @@ def resolve_project_context(
 
     root = Path(books_root) if books_root is not None else get_books_root()
     return ProjectContext.from_book_id(value, books_root=root)
+
+
+def _is_project_ref(value: str) -> bool:
+    ref = str(value or "").strip()
+    return ref.startswith("book:") or ref.startswith("legacy:")
+
+
+def _get_project_context(project_key: str) -> ProjectContext:
+    if _is_project_ref(project_key):
+        return resolve_project_context(project_key)
+    return get_project_context(project_key)
+
+
+def project_ref_from_context(ctx: ProjectContext) -> str:
+    if ctx.storage_kind == WORKSPACE_STORAGE_KIND and ctx.book_id:
+        return f"book:{ctx.book_id}"
+    if ctx.storage_kind == LEGACY_STORAGE_KIND and ctx.legacy_dir_name:
+        return f"legacy:{ctx.legacy_dir_name}"
+    raise ValueError("ProjectContext does not contain enough identity data.")
+
+
+def create_workspace_project(title: str, books_root: Path | None = None) -> ProjectContext:
+    if books_root is None:
+        return create_workspace_book(title)
+    return create_workspace_book(title, books_root=books_root)
+
+
+def _sync_book_metadata_from_config(ctx: ProjectContext, config_data: dict[str, Any]) -> None:
+    title = str(config_data.get("title") or "").strip()
+    if not title:
+        return
+
+    metadata = read_book_metadata(ctx.project_dir)
+    metadata = update_book_metadata_timestamp({**metadata, "title": title})
+    write_book_metadata(ctx.project_dir, metadata)
 
 
 def _timestamp_from_path(path: Path) -> str | None:
@@ -255,18 +293,20 @@ def _summary_sort_key(path: Path) -> tuple[int, int, float]:
 
 
 def save_project_config(title: str, config_data: dict[str, Any]) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     data = dict(config_data)
     data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     path = ctx.config_path
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if ctx.storage_kind == WORKSPACE_STORAGE_KIND:
+        _sync_book_metadata_from_config(ctx, data)
     return path
 
 
 def load_project_config(title: str) -> dict[str, Any] | None:
     ensure_directories()
-    path = get_project_context(title).config_path
+    path = _get_project_context(title).config_path
     if not path.exists():
         return None
 
@@ -277,18 +317,18 @@ def load_project_config(title: str) -> dict[str, Any] | None:
 
 
 def save_outline(title: str, content: str) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     return _write_text(_resolve_unique_path(ctx.outline_path), content)
 
 
 def read_outline(title: str) -> str:
-    path = get_project_context(title).outline_path
+    path = _get_project_context(title).outline_path
     return _read_text(path) if path.exists() else ""
 
 
 def read_latest_outline(title: str) -> tuple[str, Path] | tuple[None, None]:
-    project_dir = get_project_context(title).project_dir
+    project_dir = _get_project_context(title).project_dir
     files = [path for path in project_dir.glob("novel_outline*.md") if path.is_file()]
     if not files:
         return None, None
@@ -297,18 +337,18 @@ def read_latest_outline(title: str) -> tuple[str, Path] | tuple[None, None]:
 
 
 def save_characters(title: str, content: str) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     return _write_text(_resolve_unique_path(ctx.characters_path), content)
 
 
 def read_characters(title: str) -> str:
-    path = get_project_context(title).characters_path
+    path = _get_project_context(title).characters_path
     return _read_text(path) if path.exists() else ""
 
 
 def read_latest_characters(title: str) -> tuple[str, Path] | tuple[None, None]:
-    project_dir = get_project_context(title).project_dir
+    project_dir = _get_project_context(title).project_dir
     files = [path for path in project_dir.glob("characters*.md") if path.is_file()]
     if not files:
         return None, None
@@ -317,14 +357,14 @@ def read_latest_characters(title: str) -> tuple[str, Path] | tuple[None, None]:
 
 
 def save_chapter(title: str, chapter_number: int, content: str) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     path = ctx.get_chapter_path(chapter_number)
     return _write_text(_resolve_unique_path(path), content)
 
 
 def list_chapter_files(title: str) -> list[Path]:
-    chapters_dir = get_project_context(title).chapters_dir
+    chapters_dir = _get_project_context(title).chapters_dir
     if not chapters_dir.exists():
         return []
 
@@ -370,14 +410,14 @@ def find_latest_chapter(title: str) -> tuple[int, Path] | tuple[None, None]:
 
 
 def save_summary(title: str, chapter_number: int, summary: str) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     path = ctx.get_summary_path(chapter_number)
     return _write_text(_resolve_unique_path(path), summary)
 
 
 def read_all_summaries(title: str, before_chapter: int | None = None) -> str:
-    summaries_dir = get_project_context(title).summaries_dir
+    summaries_dir = _get_project_context(title).summaries_dir
     if not summaries_dir.exists():
         return ""
 
@@ -413,7 +453,7 @@ def update_chapter_index(
     summary: str,
     created_at: str | None = None,
 ) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     path = ctx.chapter_index_path
     created_at = created_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -443,7 +483,7 @@ def update_chapter_index(
 
 
 def save_setting_expansion(title: str, raw_story_idea: str, expanded_data: dict[str, Any]) -> Path:
-    ctx = get_project_context(title)
+    ctx = _get_project_context(title)
     ctx.ensure_project_dirs()
     path = ctx.setting_expansion_path
     data = {

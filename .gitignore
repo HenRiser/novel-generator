@@ -8,4 +8,5 @@ outputs/
 !outputs/
 outputs/*
 !outputs/.gitkeep
+workspace/
 reports/

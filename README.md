@@ -5,16 +5,16 @@
 ## 功能列表
 
 - 输入小说标题、类型、风格、人物、世界观、核心冲突、目标读者和额外要求。
-- 生成小说大纲，保存到 `outputs/小说标题/novel_outline.md` 或自动追加版本号。
-- 生成人物卡，保存到 `outputs/小说标题/characters.md` 或自动追加版本号。
-- 生成指定章节正文，保存为 `outputs/小说标题/chapters/chapter_001.md`、`chapter_002.md` 等。
+- 生成小说大纲，新项目保存到 `workspace/books/{book_id}/novel_outline.md`，旧项目继续兼容 `outputs/小说标题/novel_outline.md`，并自动追加版本号。
+- 生成人物卡，新项目保存到 `workspace/books/{book_id}/characters.md`，旧项目继续兼容 `outputs/小说标题/characters.md`，并自动追加版本号。
+- 生成指定章节正文，新项目保存为 `workspace/books/{book_id}/chapters/chapter_001.md`、`chapter_002.md` 等，旧项目继续兼容 `outputs/小说标题/chapters/`。
 - 自动避免覆盖已有文件，例如生成 `chapter_001_v2.md`。
-- 章节生成后自动生成 100 字以内摘要，保存到 `outputs/小说标题/summaries/`。
-- 自动维护 `outputs/小说标题/chapter_index.md`。
+- 章节生成后自动生成 100 字以内摘要，保存到当前项目的 `summaries/`。
+- 自动维护当前项目的 `chapter_index.md`。
 - 支持续写上一章，读取最近一章正文、历史摘要、大纲和人物卡作为上下文。
 - 支持设定输入与智能扩写，可将一句话灵感、白话梗概或完整企划整理为主角、配角、世界观和核心冲突。
 - 支持 Prompt 预览，不调用 API，方便调试。
-- 支持保存和加载 `outputs/小说标题/project_config.json`。
+- 支持保存和加载当前项目的 `project_config.json`；新项目默认位于 `workspace/books/{book_id}/`。
 - 支持 Quick Start Wizard，在 UI 中配置 DeepSeek API Key、默认模型并测试连接。
 - API Key 从环境变量或本地 `.env` 读取；Quick Start 可将 Key 保存到本地 `.env`，不会写入代码、日志或输出文件。
 
@@ -37,6 +37,8 @@ novel-generator
 ├── .env.example
 ├── outputs/
 │   └── .gitkeep
+├── workspace/
+│   └── books/
 └── docs/
     └── prompt_design.md
 ```
@@ -239,12 +241,12 @@ Quick Start 支持：
 
 你可以先点击“预览设定扩写 Prompt”检查即将发送的 messages。确认后点击“整理并扩写设定”，扩写结果会自动填入页面对应输入框。之后可以继续手动修改，再生成大纲、人物卡或章节正文。
 
-如果没有填写小说标题，系统会根据输入的设定内容自动生成多个标题候选，并选择一个推荐标题填入标题输入框。如果你已经填写标题，系统不会覆盖，只会展示候选标题供参考。最终 `outputs` 子目录会根据当前标题创建。
+如果没有填写小说标题，系统会根据输入的设定内容自动生成多个标题候选，并选择一个推荐标题填入标题输入框。如果你已经填写标题，系统不会覆盖，只会展示候选标题供参考。新项目首次保存或生成时会创建到 `workspace/books/{book_id}/`，标题只作为显示名称保存。
 
 如果启用了保存扩写结果，最近一次结果会写入：
 
 ```text
-outputs/小说标题/setting_expansion_latest.json
+workspace/books/{book_id}/setting_expansion_latest.json
 ```
 
 ## 设定扩写配置
@@ -275,29 +277,31 @@ outputs/小说标题/setting_expansion_latest.json
 
 ## 输出目录结构
 
-输出内容会按小说标题分类保存：
+新建小说项目会保存到稳定的 `book_id` 目录，中文标题写入 `book.json`，不再作为真实目录名：
 
 ```text
-outputs/
-├── 小说标题/
-│   ├── project_config.json
-│   ├── novel_outline.md
-│   ├── characters.md
-│   ├── chapter_index.md
-│   ├── setting_expansion_latest.json
-│   ├── chapters/
-│   │   └── chapter_001.md
-│   └── summaries/
-│       └── chapter_001_summary.md
+workspace/
+└── books/
+    └── bk_YYYYMMDD_HHMMSS_xxxxxxxx/
+        ├── book.json
+        ├── project_config.json
+        ├── novel_outline.md
+        ├── characters.md
+        ├── chapter_index.md
+        ├── setting_expansion_latest.json
+        ├── chapters/
+        │   └── chapter_001.md
+        └── summaries/
+            └── chapter_001_summary.md
 ```
 
-不同小说的数据互相隔离。一键继续下一章只会读取当前小说项目的 `chapters/`、`summaries/`、`novel_outline.md` 和 `characters.md`。标题中的 Windows 非法路径字符会被自动替换为 `_`，标题为空时使用“未命名小说”。
+旧版 `outputs/小说标题/` 项目仍会出现在项目列表中，并继续按原目录读写；系统不会自动迁移、删除或改名旧项目。不同小说的数据互相隔离。一键继续下一章只会读取当前小说项目的 `chapters/`、`summaries/`、`novel_outline.md` 和 `characters.md`。新项目标题为空时使用“未命名小说”作为显示标题。
 
 ## 项目路径管理
 
-当前仍使用 `outputs/{小说标题}/` 存储小说项目。项目内部新增 `ProjectContext` 作为统一项目路径入口，用于集中表达项目目录、配置文件、章节目录、摘要目录、章节索引、大纲和人物卡等路径。
+当前新项目默认使用 `workspace/books/{book_id}/` 存储，旧 `outputs/{小说标题}/` 项目保留兼容。项目内部通过 `ProjectContext` 和 `file_manager.py` 统一表达项目目录、配置文件、章节目录、摘要目录、章节索引、大纲和人物卡等路径。
 
-普通用户无需关心该内部实现。后续如果迁移到 `workspace/books`，会优先从 `ProjectContext` 和 `file_manager.py` 调整路径规则。
+普通用户主要看到小说标题；系统内部使用 `book:<book_id>` 或 `legacy:<legacy_dir_name>` 区分真实项目身份，避免中文标题、同名书籍或标题修改影响目录定位。
 
 ## 自动章节标题
 
