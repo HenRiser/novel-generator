@@ -78,6 +78,8 @@ def build_expand_setting_prompt(
     supplement_conflict: bool,
     supplement_world_rules: bool,
     setting_options: dict[str, Any] | None = None,
+    genre: str = "",
+    writing_style: str = "",
 ) -> list[dict[str, str]]:
     detail_level = _clean(detail_level) or "中"
     if detail_level not in {"低", "中", "高"}:

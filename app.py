@@ -28,14 +28,12 @@ from export_service import (
     read_chapter_for_reader,
 )
 from generation_config import (
-    GENRE_OPTIONS as SETTING_GENRE_OPTIONS,
     OUTLINE_GRANULARITY_OPTIONS,
     PLOT_DENSITY_OPTIONS,
     NARRATIVE_PACE_OPTIONS,
     WORLD_COMPLEXITY_OPTIONS,
     CHARACTER_SCALE_OPTIONS,
     WRITING_MODE_OPTIONS,
-    WRITING_STYLE_OPTIONS as SETTING_WRITING_STYLE_OPTIONS,
     normalize_setting_options,
     setting_options_to_dict,
 )
@@ -66,10 +64,10 @@ from prompt_templates import (
     build_outline_prompt,
     build_summary_prompt,
 )
+from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
 
 
-GENRE_OPTIONS = ["玄幻", "科幻", "悬疑", "校园", "都市", "赛博朋克", "克苏鲁", "武侠", "奇幻", "自定义"]
-STYLE_OPTIONS = ["热血", "冷峻", "轻松", "黑暗", "文艺", "网文爽文", "日式轻小说", "细腻现实主义", "自定义"]
+STYLE_OPTIONS = WRITING_STYLE_OPTIONS
 MODE_OPTIONS = ["生成小说大纲", "生成人物卡", "生成指定章节正文"]
 OUTLINE_MODE = MODE_OPTIONS[0]
 CHARACTER_MODE = MODE_OPTIONS[1]
@@ -430,9 +428,20 @@ def _render_reader_nav(numbers: list[int], current_index: int, key_prefix: str) 
             st.rerun()
 
 
+def _mark_reader_refresh(chapter_number: int | None = None) -> None:
+    st.session_state.reader_center_expanded = True
+    st.session_state.reader_needs_refresh = True
+    if chapter_number is not None:
+        st.session_state.reader_selected_chapter = int(chapter_number)
+        st.session_state.reader_chapter_number = int(chapter_number)
+
+
 def _render_reader_export_center(project_title: str) -> None:
     with st.expander("导出与阅读", expanded=bool(st.session_state.get("reader_center_expanded", False))):
         chapters = get_ordered_chapters(project_title)
+        if st.session_state.get("reader_needs_refresh") and not chapters:
+            st.session_state.reader_needs_refresh = False
+            st.session_state.reader_selected_chapter = None
         if not chapters:
             st.info("当前项目还没有章节，请先生成章节。")
             return
@@ -442,9 +451,17 @@ def _render_reader_export_center(project_title: str) -> None:
 
         numbers = [int(chapter["chapter_number"]) for chapter in chapters]
         labels = {int(chapter["chapter_number"]): str(chapter["title"]) for chapter in chapters}
-        current_number = int(st.session_state.get("reader_chapter_number", numbers[0]))
+        current_number = int(st.session_state.get("reader_chapter_number", numbers[-1]))
+        if st.session_state.get("reader_needs_refresh"):
+            try:
+                requested_number = int(st.session_state.get("reader_selected_chapter"))
+            except (TypeError, ValueError):
+                requested_number = None
+            current_number = int(requested_number) if requested_number in numbers else numbers[-1]
+            st.session_state.reader_needs_refresh = False
+            st.session_state.reader_selected_chapter = None
         if current_number not in numbers:
-            current_number = numbers[0]
+            current_number = numbers[-1]
             st.session_state.reader_chapter_number = current_number
 
         selected_number = st.selectbox(
@@ -556,6 +573,8 @@ def _init_session_state() -> None:
         "reader_center_expanded": False,
         "reader_chapter_number": 1,
         "reader_should_scroll_top": False,
+        "reader_needs_refresh": False,
+        "reader_selected_chapter": None,
         "setting_generation_genre": "赛博朋克",
         "custom_setting_generation_genre": "",
         "setting_generation_writing_style": "阴郁电影感",
@@ -584,16 +603,17 @@ def _init_session_state() -> None:
     )
     for key, value in normalized_settings.items():
         st.session_state[key] = value
+    _sync_genre_style_widget_state()
 
 
 def _effective_choice(choice: str, custom_value: str) -> str:
-    if choice == "自定义":
-        return custom_value.strip() or "自定义"
+    if choice == CUSTOM_OPTION:
+        return custom_value.strip()
     return choice
 
 
 def _effective_setting_choice(choice: str, custom_value: str, default: str) -> str:
-    if choice == "自定义":
+    if choice == CUSTOM_OPTION:
         return custom_value.strip() or default
     return choice or default
 
@@ -603,8 +623,96 @@ def _setting_choice_from_value(value: Any, options: list[str], default: str) -> 
     if value in options:
         return value, ""
     if value:
-        return "自定义", value
+        return CUSTOM_OPTION, value
     return default, ""
+
+
+def _normalize_option_pair(option_value: Any, custom_value: Any, options: list[str]) -> tuple[str, str]:
+    option = str(option_value or "").strip()
+    custom = str(custom_value or "").strip()
+    if option in options:
+        return option, custom if option == CUSTOM_OPTION else ""
+    if option:
+        return CUSTOM_OPTION, option
+    return options[0], ""
+
+
+def _sync_genre_style_widget_state() -> None:
+    genre, custom_genre = _normalize_option_pair(
+        st.session_state.get("genre"),
+        st.session_state.get("custom_genre"),
+        GENRE_OPTIONS,
+    )
+    writing_style, custom_style = _normalize_option_pair(
+        st.session_state.get("writing_style"),
+        st.session_state.get("custom_style"),
+        STYLE_OPTIONS,
+    )
+    st.session_state.genre = genre
+    st.session_state.custom_genre = custom_genre
+    st.session_state.writing_style = writing_style
+    st.session_state.custom_style = custom_style
+    _copy_genre_style_to_widgets()
+
+
+def _copy_genre_style_to_widgets() -> None:
+    for prefix in ("setting_generation", "project_setting"):
+        st.session_state[f"{prefix}_genre"] = st.session_state.genre
+        st.session_state[f"{prefix}_custom_genre"] = st.session_state.custom_genre
+        st.session_state[f"{prefix}_writing_style"] = st.session_state.writing_style
+        st.session_state[f"{prefix}_custom_style"] = st.session_state.custom_style
+
+
+def _apply_genre_style_from_widget(prefix: str) -> None:
+    genre, custom_genre = _normalize_option_pair(
+        st.session_state.get(f"{prefix}_genre"),
+        st.session_state.get(f"{prefix}_custom_genre"),
+        GENRE_OPTIONS,
+    )
+    writing_style, custom_style = _normalize_option_pair(
+        st.session_state.get(f"{prefix}_writing_style"),
+        st.session_state.get(f"{prefix}_custom_style"),
+        STYLE_OPTIONS,
+    )
+    st.session_state.genre = genre
+    st.session_state.custom_genre = custom_genre
+    st.session_state.writing_style = writing_style
+    st.session_state.custom_style = custom_style
+    _copy_genre_style_to_widgets()
+
+
+def _render_genre_style_controls(prefix: str) -> None:
+    cols = st.columns(2)
+    with cols[0]:
+        st.selectbox(
+            "小说类型",
+            GENRE_OPTIONS,
+            key=f"{prefix}_genre",
+            on_change=_apply_genre_style_from_widget,
+            args=(prefix,),
+        )
+        if st.session_state.get(f"{prefix}_genre") == CUSTOM_OPTION:
+            st.text_input(
+                "自定义小说类型",
+                key=f"{prefix}_custom_genre",
+                on_change=_apply_genre_style_from_widget,
+                args=(prefix,),
+            )
+    with cols[1]:
+        st.selectbox(
+            "写作风格",
+            STYLE_OPTIONS,
+            key=f"{prefix}_writing_style",
+            on_change=_apply_genre_style_from_widget,
+            args=(prefix,),
+        )
+        if st.session_state.get(f"{prefix}_writing_style") == CUSTOM_OPTION:
+            st.text_input(
+                "自定义写作风格",
+                key=f"{prefix}_custom_style",
+                on_change=_apply_genre_style_from_widget,
+                args=(prefix,),
+            )
 
 
 def _setting_generation_options_from_state() -> dict[str, Any]:
@@ -633,10 +741,10 @@ def _setting_generation_options_from_state() -> dict[str, Any]:
 
 def _load_setting_generation_options_to_session(raw_options: Any) -> None:
     options = normalize_setting_options(raw_options)
-    genre_choice, custom_genre = _setting_choice_from_value(options.genre, SETTING_GENRE_OPTIONS, "赛博朋克")
+    genre_choice, custom_genre = _setting_choice_from_value(options.genre, GENRE_OPTIONS, "赛博朋克")
     style_choice, custom_style = _setting_choice_from_value(
         options.writing_style,
-        SETTING_WRITING_STYLE_OPTIONS,
+        STYLE_OPTIONS,
         "阴郁电影感",
     )
 
@@ -658,21 +766,43 @@ def _render_setting_generation_config() -> None:
     st.subheader("设定配置")
     quick_cols = st.columns(4)
     with quick_cols[0]:
-        st.selectbox("小说类型", SETTING_GENRE_OPTIONS, key="setting_generation_genre")
+        st.selectbox(
+            "小说类型",
+            GENRE_OPTIONS,
+            key="setting_generation_genre",
+            on_change=_apply_genre_style_from_widget,
+            args=("setting_generation",),
+        )
     with quick_cols[1]:
-        st.selectbox("写作风格", SETTING_WRITING_STYLE_OPTIONS, key="setting_generation_writing_style")
+        st.selectbox(
+            "写作风格",
+            STYLE_OPTIONS,
+            key="setting_generation_writing_style",
+            on_change=_apply_genre_style_from_widget,
+            args=("setting_generation",),
+        )
     with quick_cols[2]:
         st.selectbox("写作模式", WRITING_MODE_OPTIONS, key="setting_generation_writing_mode")
     with quick_cols[3]:
         st.number_input("期望章节数", min_value=1, max_value=200, step=1, key="setting_expected_chapters")
 
     custom_cols = st.columns(2)
-    if st.session_state.setting_generation_genre == "自定义":
+    if st.session_state.setting_generation_genre == CUSTOM_OPTION:
         with custom_cols[0]:
-            st.text_input("自定义小说类型", key="custom_setting_generation_genre")
-    if st.session_state.setting_generation_writing_style == "自定义":
+            st.text_input(
+                "自定义小说类型",
+                key="custom_setting_generation_genre",
+                on_change=_apply_genre_style_from_widget,
+                args=("setting_generation",),
+            )
+    if st.session_state.setting_generation_writing_style == CUSTOM_OPTION:
         with custom_cols[1]:
-            st.text_input("自定义写作风格", key="custom_setting_generation_writing_style")
+            st.text_input(
+                "自定义写作风格",
+                key="custom_setting_generation_writing_style",
+                on_change=_apply_genre_style_from_widget,
+                args=("setting_generation",),
+            )
 
     expected_chapters = int(st.session_state.setting_expected_chapters)
     if expected_chapters <= 5 and st.session_state.setting_generation_writing_mode == "长篇连载":
@@ -711,10 +841,10 @@ def _render_setting_generation_config() -> None:
 def _collect_project_config() -> dict[str, Any]:
     return {
         "title": st.session_state.title.strip() or "未命名小说",
-        "genre": _effective_choice(st.session_state.genre, st.session_state.custom_genre),
+        "genre": _effective_choice(st.session_state.genre, st.session_state.custom_genre) or GENRE_OPTIONS[0],
         "genre_option": st.session_state.genre,
         "custom_genre": st.session_state.custom_genre.strip(),
-        "style": _effective_choice(st.session_state.writing_style, st.session_state.custom_style),
+        "style": _effective_choice(st.session_state.writing_style, st.session_state.custom_style) or STYLE_OPTIONS[0],
         "style_option": st.session_state.writing_style,
         "custom_style": st.session_state.custom_style.strip(),
         "protagonist": st.session_state.protagonist_setting.strip(),
@@ -752,6 +882,7 @@ def _load_config_to_session(config: dict[str, Any]) -> None:
     st.session_state.extra_requirements = config.get("extra_requirements", "")
     _load_model_settings_to_session(config.get("model_settings", DEFAULT_MODEL_SETTINGS))
     _load_setting_generation_options_to_session(config.get("setting_generation_options", {}))
+    _sync_genre_style_widget_state()
 
 
 def _load_choice(option_value: Any, final_value: Any, custom_value: Any, options: list[str]) -> tuple[str, str]:
@@ -764,7 +895,7 @@ def _load_choice(option_value: Any, final_value: Any, custom_value: Any, options
     if final_value in options:
         return final_value, custom_value
     if final_value:
-        return "自定义", custom_value or final_value
+        return CUSTOM_OPTION, custom_value or final_value
     return options[0], custom_value
 
 
@@ -1064,6 +1195,7 @@ def _show_chapter_workflow_result(result: dict[str, Any]) -> bool:
         st.error(f"第 {chapter_number} 章生成流程失败：{result['error']}")
         return False
 
+    _mark_reader_refresh(int(chapter_number))
     st.success(f"第 {chapter_number} 章生成成功，已保存：{chapter_path}")
     st.info(f"章节标题：{chapter_title}")
     st.info(
@@ -1221,7 +1353,7 @@ def main() -> None:
             if expansion_path:
                 st.info(f"最近一次设定扩写已保存：{expansion_path}")
 
-    _render_reader_export_center(_current_project_title())
+    reader_placeholder = st.empty()
 
     with st.sidebar:
         st.header("模型设置")
@@ -1250,6 +1382,8 @@ def main() -> None:
 
     expand_messages = build_expand_setting_prompt(
         raw_story_idea=st.session_state.raw_story_idea,
+        genre=_effective_choice(st.session_state.genre, st.session_state.custom_genre),
+        writing_style=_effective_choice(st.session_state.writing_style, st.session_state.custom_style),
         detail_level=st.session_state.expand_detail_level,
         supplement_characters=st.session_state.supplement_characters,
         supplement_conflict=st.session_state.supplement_conflict,
@@ -1333,15 +1467,7 @@ def main() -> None:
     st.text_input("小说标题", key="title")
     st.caption(f"当前项目目录：{get_project_dir(_current_project_title())}")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.selectbox("小说类型", GENRE_OPTIONS, key="genre")
-        if st.session_state.genre == "自定义":
-            st.text_input("自定义小说类型", key="custom_genre")
-    with col2:
-        st.selectbox("写作风格", STYLE_OPTIONS, key="writing_style")
-        if st.session_state.writing_style == "自定义":
-            st.text_input("自定义写作风格", key="custom_style")
+    _render_genre_style_controls("project_setting")
 
     st.text_area("主角设定", key="protagonist_setting", height=110)
     st.text_area("重要配角设定", key="supporting_characters_setting", height=110)
@@ -1520,6 +1646,7 @@ def main() -> None:
             if successful_results:
                 last_result = successful_results[-1]
                 _set_current_result(last_result["content"], Path(last_result["chapter_path"]))
+                _mark_reader_refresh(int(last_result["chapter_number"]))
                 st.success(f"批量生成完成：成功生成 {len(successful_results)} 章。")
                 for item in successful_results:
                     st.write(
@@ -1531,6 +1658,9 @@ def main() -> None:
                     f"批量生成已停止：第 {failed_result['chapter_number']} 章失败。"
                     f"已成功生成 {len(successful_results)} 章。"
                 )
+
+    with reader_placeholder.container():
+        _render_reader_export_center(_current_project_title())
 
     if st.session_state.current_result:
         st.subheader("当前生成结果")
