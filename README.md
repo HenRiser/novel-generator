@@ -1,12 +1,12 @@
 # novel-generator
 
-一个本地运行的轻量 AI 小说生成器，使用 Streamlit 提供 Web 页面，通过 OpenAI Python SDK 调用 DeepSeek API。项目面向个人写作和长期迭代：结构清晰、没有数据库、没有用户系统，方便继续扩展 Prompt、生成模式和文件管理能力。
+一个本地运行的轻量 AI 小说生成器，使用 Streamlit 提供 Web 页面，通过 OpenAI Python SDK 调用 DeepSeek API。项目面向个人写作和长期迭代：结构清晰、没有数据库、没有用户系统，方便继续扩展 Prompt、章节创作流程和文件管理能力。
 
 ## 功能列表
 
 - 输入小说标题、类型、风格、人物、世界观、核心冲突、目标读者和额外要求。
-- 生成小说大纲，新项目保存到 `workspace/books/{book_id}/novel_outline.md`，旧项目继续兼容 `outputs/小说标题/novel_outline.md`，并自动追加版本号。
-- 生成人物卡，新项目保存到 `workspace/books/{book_id}/characters.md`，旧项目继续兼容 `outputs/小说标题/characters.md`，并自动追加版本号。
+- 大纲生成，新项目保存到 `workspace/books/{book_id}/novel_outline.md`，旧项目继续兼容 `outputs/小说标题/novel_outline.md`，并自动追加版本号。
+- 人物卡生成，新项目保存到 `workspace/books/{book_id}/characters.md`，旧项目继续兼容 `outputs/小说标题/characters.md`，并自动追加版本号。
 - 生成指定章节正文，新项目保存为 `workspace/books/{book_id}/chapters/chapter_001.md`、`chapter_002.md` 等，旧项目继续兼容 `outputs/小说标题/chapters/`。
 - 自动避免覆盖已有文件，例如生成 `chapter_001_v2.md`。
 - 章节生成后自动生成 100 字以内摘要，保存到当前项目的 `summaries/`。

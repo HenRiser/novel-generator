@@ -3,26 +3,39 @@ from __future__ import annotations
 from typing import Any
 
 from config import MAX_PREVIOUS_CHAPTER_CHARS, MAX_REFERENCE_CHARS, MAX_SUMMARIES_CHARS
-from generation_config import format_setting_options_for_prompt, normalize_setting_options
+from generation_config import format_setting_options_for_prompt, infer_story_scale, normalize_setting_options
 
 
-GLOBAL_SYSTEM_PROMPT = (
-    "你是一名专业小说创作助手，擅长根据用户给定的题材、人物、世界观和叙事风格创作长篇小说。"
-    "你必须严格遵守用户设定，保持人物性格一致、世界观规则一致、叙事节奏稳定。"
-    "不要自称 AI，不要解释创作过程，直接输出作品内容。"
-    "除非用户明确要求，否则不要输出分析、说明或与作品无关的列表。"
-)
+def _story_scale_label(expected_chapters: int | None) -> str:
+    return infer_story_scale(int(expected_chapters or 12))["scale"]
 
 
-SETTING_EXPANSION_SYSTEM_PROMPT = (
-    "你是一名小说设定开发助手，擅长将用户的一句话灵感、白话梗概、完整设定或松散故事想法，"
-    "扩写为结构化、可直接用于长篇小说创作的设定。"
-    "你必须保留用户原始想法的核心，不要随意改题材、主角目标和核心矛盾。"
-    "你可以补充合理细节，但不能覆盖用户明确给出的设定。"
-    "当用户没有明确给出小说标题时，你需要根据故事题材、主角目标、世界观关键词和核心冲突，"
-    "生成多个不同风格的小说标题候选，并选择一个最适合作为推荐标题。"
-    "请只输出严格 JSON，不要输出 Markdown，不要输出解释。"
-)
+def _story_scale_from_project_config(project_config: dict[str, Any]) -> str:
+    setting_options = normalize_setting_options(project_config.get("setting_generation_options"))
+    return _story_scale_label(setting_options.expected_chapters)
+
+
+def _global_system_prompt(story_scale: str) -> str:
+    scale = _clean(story_scale) or "中篇小说"
+    return (
+        f"你是一名专业小说创作助手，擅长根据用户给定的题材、人物、世界观和叙事风格创作{scale}。"
+        "你必须严格遵守用户设定，保持人物性格一致、世界观规则一致、叙事节奏稳定。"
+        "不要自称 AI，不要解释创作过程，直接输出作品内容。"
+        "除非用户明确要求，否则不要输出分析、说明或与作品无关的列表。"
+    )
+
+
+def _setting_expansion_system_prompt(story_scale: str) -> str:
+    scale = _clean(story_scale) or "中篇小说"
+    return (
+        "你是一名小说设定开发助手，擅长将用户的一句话灵感、白话梗概、完整设定或松散故事想法，"
+        f"扩写为结构化、可直接用于{scale}创作的设定。"
+        "你必须保留用户原始想法的核心，不要随意改题材、主角目标和核心矛盾。"
+        "你可以补充合理细节，但不能覆盖用户明确给出的设定。"
+        "当用户没有明确给出小说标题时，你需要根据故事题材、主角目标、世界观关键词和核心冲突，"
+        "生成多个不同风格的小说标题候选，并选择一个最适合作为推荐标题。"
+        "请只输出严格 JSON，不要输出 Markdown，不要输出解释。"
+    )
 
 
 PROJECT_FIELD_LABELS = {
@@ -64,9 +77,9 @@ def format_project_brief(project_config: dict[str, Any]) -> str:
     return "\n".join(lines) if lines else "- 用户尚未填写详细设定，请根据标题和类型补足合理内容。"
 
 
-def _messages(user_prompt: str) -> list[dict[str, str]]:
+def _messages(user_prompt: str, story_scale: str = "") -> list[dict[str, str]]:
     return [
-        {"role": "system", "content": GLOBAL_SYSTEM_PROMPT},
+        {"role": "system", "content": _global_system_prompt(story_scale)},
         {"role": "user", "content": user_prompt.strip()},
     ]
 
@@ -107,6 +120,7 @@ def build_expand_setting_prompt(
     )
     normalized_options = normalize_setting_options(setting_options)
     setting_options_prompt = format_setting_options_for_prompt(normalized_options)
+    story_scale = _story_scale_label(normalized_options.expected_chapters)
 
     user_prompt = f"""
 根据用户输入的故事设定、灵感或企划内容，生成以下 JSON 字段：
@@ -201,7 +215,7 @@ def build_expand_setting_prompt(
 - 反派或阻力来源
 - 主角必须做出的选择
 - 失败代价
-- 长篇连载推进方向
+- 后续推进方向
 
 ## JSON 输出要求
 1. 必须是合法 JSON。
@@ -220,7 +234,7 @@ def build_expand_setting_prompt(
 8. 如果用户原始描述中信息不足，请合理补充，但不要偏离原意。
 """
     return [
-        {"role": "system", "content": SETTING_EXPANSION_SYSTEM_PROMPT},
+        {"role": "system", "content": _setting_expansion_system_prompt(story_scale)},
         {"role": "user", "content": user_prompt.strip()},
     ]
 
@@ -229,8 +243,9 @@ def build_outline_prompt(project_config: dict[str, Any]) -> list[dict[str, str]]
     project_brief = format_project_brief(project_config)
     setting_options_prompt = format_setting_options_for_prompt(project_config.get("setting_generation_options"))
     setting_options = normalize_setting_options(project_config.get("setting_generation_options"))
+    story_scale = _story_scale_label(setting_options.expected_chapters)
     user_prompt = f"""
-请根据以下小说项目设定，生成一份适合长期连载扩展的小说总纲。
+请根据以下小说项目设定，生成一份适合{story_scale}规模的小说总纲。
 
 ## 项目设定
 {project_brief}
@@ -271,11 +286,12 @@ def build_outline_prompt(project_config: dict[str, Any]) -> list[dict[str, str]]
 
 请让设定有后续扩展空间，但不要过度复杂。
 """
-    return _messages(user_prompt)
+    return _messages(user_prompt, story_scale)
 
 
 def build_character_prompt(project_config: dict[str, Any]) -> list[dict[str, str]]:
     project_brief = format_project_brief(project_config)
+    story_scale = _story_scale_from_project_config(project_config)
     user_prompt = f"""
 请根据以下小说项目设定，生成主要角色与关键配角的人物设定表。
 
@@ -301,7 +317,7 @@ def build_character_prompt(project_config: dict[str, Any]) -> list[dict[str, str
 
 请保持角色之间的欲望、矛盾和关系具有戏剧张力。
 """
-    return _messages(user_prompt)
+    return _messages(user_prompt, story_scale)
 
 
 def build_chapter_prompt(
@@ -313,6 +329,7 @@ def build_chapter_prompt(
     summaries: str | None = None,
 ) -> list[dict[str, str]]:
     project_brief = format_project_brief(project_config)
+    story_scale = _story_scale_from_project_config(project_config)
     chapter_number = max(1, int(chapter_number))
 
     context_blocks = []
@@ -363,7 +380,7 @@ def build_chapter_prompt(
 12. 不要突然引入没有铺垫的设定。
 13. 不要把故事写成总结，要写成具体场景。
 """
-    return _messages(user_prompt)
+    return _messages(user_prompt, story_scale)
 
 
 def build_chapter_title_prompt(
