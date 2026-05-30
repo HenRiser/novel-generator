@@ -244,9 +244,9 @@ def _render_help_content() -> None:
 ### 第一本小说快速流程
 
 1. 输入小说标题。
-2. 输入白话设定。
+2. 输入故事设定、灵感或企划内容。
 3. 选择小说类型和写作风格。
-4. 点击白话扩写。
+4. 点击整理并扩写设定。
 5. 生成大纲。
 6. 生成人物卡。
 7. 生成第 1 章。
@@ -1370,12 +1370,19 @@ def main() -> None:
 
     task_models = get_task_models_from_state()
 
-    st.subheader("白话设定自动扩写")
+    st.subheader("设定输入与智能扩写")
     st.text_area(
-        "输入你的白话设定",
+        "故事设定 / 灵感 / 企划内容",
         key="raw_story_idea",
         height=120,
-        placeholder="例如：我想写一个赛博朋克故事，主角是失忆黑客，妹妹失踪了，城市被大公司控制，记忆可以被修改，主角要查真相。",
+        placeholder=(
+            "可以输入一句话脑洞，也可以粘贴较完整的人物、世界观、剧情冲突等设定。"
+            "系统会结合小说类型、写作风格、写作模式和期望章节数，自动整理、补全并拆分为主角、配角、世界观和核心冲突。"
+        ),
+        help="支持输入简短白话，也支持粘贴较完整的设定文档或小说企划。",
+    )
+    st.caption(
+        "支持输入简短白话，也支持粘贴较完整的设定文档。系统会根据下方配置自动整理、补全并拆分为项目所需的结构化设定。"
     )
 
     _render_setting_generation_config()
@@ -1395,11 +1402,11 @@ def main() -> None:
     with expand_action_col1:
         preview_expand_clicked = st.button("预览设定扩写 Prompt", use_container_width=True)
     with expand_action_col2:
-        expand_and_fill_clicked = st.button("自动扩写并填入设定", use_container_width=True)
+        expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True)
 
     if preview_expand_clicked:
         if not st.session_state.raw_story_idea.strip():
-            st.warning("请先输入白话设定。")
+            st.warning("请先输入故事设定、灵感或企划内容。")
         else:
             with st.expander("设定扩写 messages 预览", expanded=True):
                 st.info(f"使用模型：{task_models['setting_expansion']}")
@@ -1408,9 +1415,9 @@ def main() -> None:
 
     if expand_and_fill_clicked:
         if not st.session_state.raw_story_idea.strip():
-            st.warning("请先输入白话设定。")
+            st.warning("请先输入故事设定、灵感或企划内容。")
         else:
-            with st.spinner("正在扩写并拆分设定..."):
+            with st.spinner("正在整理、补全并拆分设定..."):
                 try:
                     raw_response = generate_text(
                         messages=expand_messages,
@@ -1442,11 +1449,11 @@ def main() -> None:
                     if should_fill_title:
                         auto_title = recommended_title or (title_candidates[0] if title_candidates else "未命名小说")
                         st.session_state.title = auto_title
-                        st.success(f"已根据白话设定自动生成并填入推荐标题：{auto_title}")
+                        st.success(f"已根据设定内容自动生成并填入推荐标题：{auto_title}")
                     elif title_candidates:
                         st.info("检测到你已有小说标题，未自动覆盖；可从标题候选中手动选择。")
 
-                    st.success("设定已扩写并填入")
+                    st.success("设定已整理、扩写并填入")
                     st.info(f"设定扩写模型：{task_models['setting_expansion']}")
 
     if st.session_state.title_candidates:
