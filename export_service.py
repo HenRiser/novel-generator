@@ -27,7 +27,7 @@ def _is_display_title_line(line: str, chapter_number: int | None = None) -> bool
     return bool(re.match(r"^第\s*[\d零一二三四五六七八九十百千万]+\s*章(?:\s*[：:].*)?$", stripped))
 
 
-def _split_first_display_title(text: str, chapter_number: int) -> tuple[str | None, str]:
+def _split_first_display_title(text: str, chapter_number: int | None = None) -> tuple[str | None, str]:
     lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     for index, line in enumerate(lines):
         if not line.strip():
@@ -38,6 +38,12 @@ def _split_first_display_title(text: str, chapter_number: int) -> tuple[str | No
             return title, remaining
         break
     return None, text or ""
+
+
+def strip_leading_chapter_heading(text: str, chapter_number: int | None = None) -> str:
+    """Remove an existing chapter heading from the first non-empty line."""
+    _, body = _split_first_display_title(text, chapter_number)
+    return body.strip()
 
 
 def extract_display_title(chapter_content: str, chapter_number: int) -> str:
@@ -171,9 +177,8 @@ def build_reader_html(chapter_title: str, chapter_content: str) -> str:
 
 
 def build_single_chapter_txt(chapter_title: str, chapter_content: str) -> str:
-    _, body = _split_first_display_title(chapter_content, 0)
     title = _strip_heading_marker(chapter_title).strip()
-    body = body.strip()
+    body = strip_leading_chapter_heading(chapter_content)
     return f"{title}\n\n{body}\n" if body else f"{title}\n"
 
 

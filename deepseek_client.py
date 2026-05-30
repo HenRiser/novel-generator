@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Any
 
 from dotenv import load_dotenv
@@ -23,7 +24,18 @@ def _sanitize_error_message(exc: Exception, api_key: str) -> str:
     message = str(exc)
     if api_key:
         message = message.replace(api_key, "[redacted]")
+    message = re.sub(
+        r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;)}\]]+",
+        r"\1[redacted]",
+        message,
+    )
+    message = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+", r"\1[redacted]", message)
+    message = re.sub(r"(?i)(api[-_ ]?key\s*[:=]\s*)[^\s,;)}\]]+", r"\1[redacted]", message)
     return message
+
+
+def _message_detail(message: str) -> str:
+    return f"：{message}" if message else ""
 
 
 def _get_api_key() -> str:
@@ -101,19 +113,28 @@ def generate_text(
             max_tokens=int(max_tokens),
         )
     except AuthenticationError as exc:
-        raise DeepSeekClientError("DeepSeek API Key 校验失败，请检查 .env 中的 DEEPSEEK_API_KEY。") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(
+            f"DeepSeek API Key 校验失败，请检查 .env 中的 DEEPSEEK_API_KEY。{_message_detail(safe_message)}"
+        ) from exc
     except RateLimitError as exc:
-        raise DeepSeekClientError("DeepSeek API 请求过于频繁或额度受限，请稍后再试。") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"DeepSeek API 请求过于频繁或额度受限，请稍后再试。{_message_detail(safe_message)}") from exc
     except BadRequestError as exc:
-        raise DeepSeekClientError(f"DeepSeek API 拒绝了本次请求：{exc}") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"DeepSeek API 拒绝了本次请求：{safe_message}") from exc
     except APIConnectionError as exc:
-        raise DeepSeekClientError("无法连接 DeepSeek API，请检查网络连接或代理设置。") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"无法连接 DeepSeek API，请检查网络连接或代理设置。{_message_detail(safe_message)}") from exc
     except APIError as exc:
-        raise DeepSeekClientError(f"DeepSeek API 返回异常：{exc}") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"DeepSeek API 返回异常：{safe_message}") from exc
     except OpenAIError as exc:
-        raise DeepSeekClientError(f"OpenAI SDK 调用 DeepSeek 时发生错误：{exc}") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"OpenAI SDK 调用 DeepSeek 时发生错误：{safe_message}") from exc
     except Exception as exc:
-        raise DeepSeekClientError(f"生成失败：{exc}") from exc
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"生成失败：{safe_message}") from exc
 
     if not getattr(response, "choices", None):
         raise DeepSeekClientError("模型没有返回候选结果。")

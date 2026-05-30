@@ -16,7 +16,7 @@
 - 支持 Prompt 预览，不调用 API，方便调试。
 - 支持保存和加载 `outputs/小说标题/project_config.json`。
 - 支持 Quick Start Wizard，在 UI 中配置 DeepSeek API Key、默认模型并测试连接。
-- API Key 只从环境变量读取，不会写入代码、日志或输出文件。
+- API Key 从环境变量或本地 `.env` 读取；Quick Start 可将 Key 保存到本地 `.env`，不会写入代码、日志或输出文件。
 
 ## 项目结构
 
@@ -28,6 +28,9 @@ novel-generator
 ├── deepseek_client.py
 ├── prompt_templates.py
 ├── file_manager.py
+├── export_service.py
+├── generation_config.py
+├── ui_options.py
 ├── requirements.txt
 ├── README.md
 ├── .env.example
@@ -159,7 +162,7 @@ Quick Start 支持：
 
 本项目定位为本地单用户工具，不包含用户系统和公网多用户部署配置。
 
-- API Key 默认保存到本地 `.env`。
+- API Key 可通过 Quick Start 保存到本地 `.env`，也可由环境变量提供。
 - `.env` 已被 `.gitignore` 排除，不应提交到仓库。
 - 页面不会显示已有 API Key 明文。
 - API Key 不会写入 `project_config.json`。
