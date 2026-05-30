@@ -15,7 +15,7 @@ GLOBAL_SYSTEM_PROMPT = (
 
 
 SETTING_EXPANSION_SYSTEM_PROMPT = (
-    "你是一名小说设定开发助手，擅长将用户白话、不完整、松散的故事想法，"
+    "你是一名小说设定开发助手，擅长将用户的一句话灵感、白话梗概、完整设定或松散故事想法，"
     "扩写为结构化、可直接用于长篇小说创作的设定。"
     "你必须保留用户原始想法的核心，不要随意改题材、主角目标和核心矛盾。"
     "你可以补充合理细节，但不能覆盖用户明确给出的设定。"
@@ -109,7 +109,7 @@ def build_expand_setting_prompt(
     setting_options_prompt = format_setting_options_for_prompt(normalized_options)
 
     user_prompt = f"""
-根据用户输入的白话设定，生成以下 JSON 字段：
+根据用户输入的故事设定、灵感或企划内容，生成以下 JSON 字段：
 
 {{
   "title_candidates": ["标题1", "标题2", "标题3", "标题4", "标题5"],
@@ -120,7 +120,7 @@ def build_expand_setting_prompt(
   "core_conflict": "..."
 }}
 
-## 用户白话设定
+## 用户输入设定
 {_clean(raw_story_idea)}
 
 ## 创作配置
