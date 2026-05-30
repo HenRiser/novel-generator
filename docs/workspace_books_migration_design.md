@@ -323,9 +323,18 @@ list_projects()
 - 已新增 `list_projects()`，可合并 legacy outputs 项目和 workspace books 项目。
 - 已新增 project ref 解析能力，支持 `legacy:<legacy_dir_name>` 和 `book:<book_id>`。
 - 已新增从 project ref 解析 `ProjectContext` 的能力。
-- `list_project_titles()` 仍作为 legacy compatibility API 保留，旧 UI 行为不变。
+- `list_project_titles()` 仍作为 legacy compatibility API 保留；当前 UI 已改为通过 `list_projects()` 选择项目。
 
-当前仍未启用完整迁移；新项目默认保存位置仍是 `outputs/{小说标题}/`，旧 `outputs` 项目不会被自动迁移。
+阶段 3 当前已进入落地：
+
+- 新项目在首次保存配置、首次生成正文或批量生成时，会创建到 `workspace/books/{book_id}/`。
+- UI 内部当前项目身份改为 `project_ref`，workspace 项目使用 `book:<book_id>`，legacy 项目使用 `legacy:<legacy_dir_name>`。
+- 项目选择列表通过 `list_projects()` 同时展示 workspace 和 legacy 项目，显示标题仍使用用户可读 title。
+- `file_manager.py` 的主要读写函数已能接受 project ref，同时保留旧 title 调用兼容。
+- 阅读中心、TXT 下载和章节读取通过 file_manager 间接受益，整本 TXT 的显示标题继续来自 UI title，而不是 `book_id`。
+- 旧 `outputs` 项目仍不会被自动迁移、不会被删除，也不会被静默改名。
+
+当前仍未启用完整迁移；本阶段只让“新项目默认 workspace、旧项目继续兼容”成立。
 
 ## 10. 影响面分析
 

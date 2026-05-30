@@ -182,12 +182,13 @@ def build_single_chapter_txt(chapter_title: str, chapter_content: str) -> str:
     return f"{title}\n\n{body}\n" if body else f"{title}\n"
 
 
-def build_full_novel_txt(project_title: str) -> str:
+def build_full_novel_txt(project_title: str, display_title: str | None = None) -> str:
     chapters = get_ordered_chapters(project_title)
     if not chapters:
         return ""
 
-    parts = [project_title.strip() or "未命名小说"]
+    title = str(display_title if display_title is not None else project_title).strip()
+    parts = [title or "未命名小说"]
     for chapter in chapters:
         chapter_data = read_chapter_for_reader(project_title, int(chapter["chapter_number"]))
         parts.append(build_single_chapter_txt(chapter_data["title"], chapter_data["content"]).strip())
