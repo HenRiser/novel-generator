@@ -9,7 +9,7 @@ from typing import Any
 import streamlit as st
 import streamlit.components.v1 as components
 
-from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, OUTPUT_DIR, PROJECT_ROOT
+from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, PROJECT_ROOT
 from config_manager import (
     get_api_key_status,
     get_available_models,
@@ -40,7 +40,6 @@ from generation_config import (
 from file_manager import (
     ensure_directories,
     find_latest_chapter,
-    get_project_dir,
     list_chapter_files,
     list_project_titles,
     load_project_config,
@@ -64,7 +63,7 @@ from prompt_templates import (
     build_outline_prompt,
     build_summary_prompt,
 )
-from project_context import get_project_context
+from project_context import get_outputs_root, get_project_context
 from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
 
 
@@ -201,7 +200,7 @@ def _status_text(exists: bool) -> str:
 def _render_environment_status() -> None:
     env_path = PROJECT_ROOT / ".env"
     venv_path = PROJECT_ROOT / ".venv"
-    outputs_exists = OUTPUT_DIR.exists()
+    outputs_exists = get_outputs_root().exists()
     api_status = get_api_key_status()
     api_key_configured = bool(api_status["configured"])
 
@@ -1340,7 +1339,7 @@ def main() -> None:
                 st.error(str(exc))
             else:
                 if config is None:
-                    st.info(f"还没有找到当前小说项目的 project_config.json：{get_project_dir(_current_project_title())}")
+                    st.info(f"还没有找到当前小说项目的 project_config.json：{get_project_context(_current_project_title()).project_dir}")
                 else:
                     _load_config_to_session(config)
                     st.success("项目配置已加载。")
@@ -1473,7 +1472,7 @@ def main() -> None:
 
     st.subheader("小说设定")
     st.text_input("小说标题", key="title")
-    st.caption(f"当前项目目录：{get_project_dir(_current_project_title())}")
+    st.caption(f"当前项目目录：{get_project_context(_current_project_title()).project_dir}")
 
     _render_genre_style_controls("project_setting")
 
@@ -1559,7 +1558,7 @@ def main() -> None:
             else:
                 if saved_project_config:
                     continue_project_config = saved_project_config
-                    st.info(f"已读取当前小说项目配置：{get_project_dir(project_title)}")
+                    st.info(f"已读取当前小说项目配置：{get_project_context(project_title).project_dir}")
                 else:
                     st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
 

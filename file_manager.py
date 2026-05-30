@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from config import DOCS_DIR, OUTPUT_DIR
+from config import DOCS_DIR
 from project_context import (
     CHARACTERS_NAME,
     CHAPTER_INDEX_NAME,
@@ -14,6 +14,7 @@ from project_context import (
     PROJECT_CONFIG_NAME,
     SETTING_EXPANSION_NAME,
     UNNAMED_PROJECT_TITLE,
+    get_outputs_root,
     get_project_context,
     sanitize_project_title,
 )
@@ -24,7 +25,7 @@ def get_project_dir(title: str) -> Path:
 
 
 def ensure_directories() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    get_outputs_root().mkdir(parents=True, exist_ok=True)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -42,7 +43,7 @@ def ensure_project_dirs(title: str) -> dict[str, Path]:
 
 def list_project_titles() -> list[str]:
     ensure_directories()
-    return sorted(path.name for path in OUTPUT_DIR.iterdir() if path.is_dir())
+    return sorted(path.name for path in get_outputs_root().iterdir() if path.is_dir())
 
 
 def _read_text(path: Path) -> str:
@@ -97,10 +98,11 @@ def _summary_sort_key(path: Path) -> tuple[int, int, float]:
 
 
 def save_project_config(title: str, config_data: dict[str, Any]) -> Path:
-    dirs = ensure_project_dirs(title)
+    ctx = get_project_context(title)
+    ctx.ensure_project_dirs()
     data = dict(config_data)
     data["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    path = dirs["project"] / PROJECT_CONFIG_NAME
+    path = ctx.config_path
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
 

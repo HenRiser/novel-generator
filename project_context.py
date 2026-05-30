@@ -111,3 +111,7 @@ class ProjectContext:
 
 def get_project_context(title: str) -> ProjectContext:
     return ProjectContext.from_title(title)
+
+
+def get_outputs_root() -> Path:
+    return Path(OUTPUT_DIR)
