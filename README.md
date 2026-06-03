@@ -1,5 +1,7 @@
 # novel-generator
 
+[中文](README.md) | [English](README.en.md)
+
 一个本地运行的轻量 AI 小说生成器，使用 Streamlit 提供 Web 页面，通过 OpenAI Python SDK 调用 DeepSeek API。项目面向个人写作和长期迭代：结构清晰、没有数据库、没有用户系统，方便继续扩展 Prompt、章节创作流程和文件管理能力。
 
 ## 功能列表
@@ -16,6 +18,7 @@
 - 支持 Prompt 预览，不调用 API，方便调试。
 - 支持保存和加载当前项目的 `project_config.json`；新项目默认位于 `workspace/books/{book_id}/`。
 - 支持 Quick Start Wizard，在 UI 中配置 DeepSeek API Key、默认模型并测试连接。
+- 支持日常 API / 模型设置入口，可修改 API Key、Base URL、默认模型和自定义模型名。
 - API Key 从环境变量或本地 `.env` 读取；Quick Start 可将 Key 保存到本地 `.env`，不会写入代码、日志或输出文件。
 
 ## 项目结构
@@ -81,6 +84,7 @@ copy .env.example .env
 
 ```env
 DEEPSEEK_API_KEY=your_api_key_here
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEFAULT_MODEL=deepseek-v4-flash
 ```
 
@@ -112,6 +116,7 @@ setup.bat
 
 ```env
 DEEPSEEK_API_KEY=your_api_key_here
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEFAULT_MODEL=deepseek-v4-flash
 ```
 
@@ -157,7 +162,8 @@ Quick Start 支持：
 3. 点击“测试连接”验证 API Key 和模型是否可用。
 4. 测试成功后保存配置。
 5. 将 API Key 保存到本地 `.env`。
-6. 将默认模型写入 `.env` 中的 `DEFAULT_MODEL`。
+6. 将 Base URL 写入 `.env` 中的 `DEEPSEEK_BASE_URL`。
+7. 将默认模型写入 `.env` 中的 `DEFAULT_MODEL`。
 
 `.env` 只应保存在本地，不应提交到 Git。
 
@@ -169,13 +175,13 @@ Quick Start 支持：
 - `.env` 已被 `.gitignore` 排除，不应提交到仓库。
 - 页面不会显示已有 API Key 明文。
 - API Key 不会写入 `project_config.json`。
-- 如果需要更换 API Key，可以重新打开 Quick Start，输入新 Key 并保存。
+- 如果需要更换 API Key、Base URL 或默认模型，可以使用侧边栏的“API / 模型设置”，也可以重新打开 Quick Start。
 
 ## 导出与阅读
 
 项目支持在网页中按章节阅读当前小说，并提供上一章 / 下一章切换。
 
-阅读区支持下载当前章节 TXT，也支持按章节顺序合并并下载整本正文 TXT。部署在服务器上时，“打开输出目录”可能无法打开你本机文件夹，建议使用网页阅读或 TXT 下载。
+阅读区支持下载当前章节 TXT，也支持按章节顺序合并并下载整本正文 TXT。部署在服务器上时，“打开当前项目目录”可能无法打开你本机文件夹，建议使用网页阅读或 TXT 下载。
 
 ## 示例输入
 
@@ -255,9 +261,11 @@ workspace/books/{book_id}/setting_expansion_latest.json
 
 高级配置默认折叠，包括剧情密度、叙事节奏、世界观复杂度、角色规模、大纲粒度和额外创作要求。期望章节数会影响大纲规模、角色数量、世界观复杂度和叙事节奏，普通用户只使用快速配置即可。
 
-## 模型切换
+## API / 模型配置
 
-项目支持在侧边栏选择 DeepSeek 模型。默认模型为 `deepseek-v4-flash`。
+项目支持在侧边栏选择 DeepSeek 模型。默认模型为 `deepseek-v4-flash`，Base URL 默认为 `https://api.deepseek.com`。
+
+首次使用可以通过 Quick Start 配置 API Key 和默认模型；日常修改可以使用侧边栏的“API / 模型设置”入口。该入口包含 API Key 输入、Base URL、默认模型选择、自定义模型名、连接测试入口和保存配置按钮。
 
 内置可选模型为：
 
@@ -273,7 +281,7 @@ workspace/books/{book_id}/setting_expansion_latest.json
 - 章节标题生成模型
 - 章节摘要生成模型
 
-每个模型选择项都支持 `custom`。自定义模型名会直接传给 DeepSeek API；如果模型名无效，API 会返回错误，页面会显示错误信息。当前模型设置会保存进当前小说项目的 `project_config.json`。
+每个模型选择项都支持 `custom`。自定义模型名会直接传给 DeepSeek API；如果模型名无效，API 会返回错误，页面会显示错误信息。当前任务模型设置会保存进当前小说项目的 `project_config.json`，默认模型和 Base URL 会保存进本地 `.env`。
 
 ## 输出目录结构
 
@@ -313,16 +321,25 @@ workspace/
 
 `chapter_index.md` 也会记录章节标题、章节文件、生成时间、模型和摘要。如果章节标题生成失败，系统会使用“未命名章节”作为兜底标题，不影响章节正文保存。
 
-## 批量章节生成
+## 章节创作
 
-页面支持批量生成章节：
+页面中的正文生成入口集中在“章节创作”区域：
 
-- 自动续写到第 N 章：根据当前项目已有最新章节，依次生成后续章节。
-- 生成指定章节范围：按起始章节到结束章节顺序生成。
+- 一键继续下一章：根据当前项目已有最新章节，生成最大章节号 + 1。
+- 指定章节：使用用户输入的章节编号生成正文。
+- 批量章节：按起始章节到结束章节顺序生成。
 - 一次最多生成 5 章，超过限制时不会调用 API。
 - 第一版会阻止跳章，范围起点必须是当前最新章节的下一章；如果当前项目没有章节，则只能从第 1 章开始。
 - 每章都会顺序读取当前小说项目的上一章正文、历史摘要、大纲和人物卡，并自动生成章节标题、摘要、更新 `chapter_index.md`。
 - 如果中途某章正文生成失败，批量生成会停止，已成功保存的章节会保留。
+
+## 当前开发状态
+
+- 新项目默认写入 `workspace/books/{book_id}/`。
+- 旧 `outputs/{小说标题}/` 项目继续兼容读取与写入，不会自动迁移、删除或改名。
+- UI 已采用“章节创作”流程，大纲与人物卡属于小说设定资产。
+- 写作模式表示叙事节奏/风格；短篇、中篇、长篇由期望章节数自动推导。
+- 侧边栏默认保持简洁，环境状态、路径和调试信息位于“高级状态 / 调试信息”折叠区。
 
 ## 后续可扩展方向
 

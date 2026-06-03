@@ -13,6 +13,7 @@ from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, PROJE
 from config_manager import (
     get_api_key_status,
     get_available_models,
+    get_current_base_url,
     get_current_default_model,
     has_api_key,
     resolve_selected_model,
@@ -261,7 +262,7 @@ def _render_help_content() -> None:
 ### 常见问题
 
 - API Key 未配置：打开 Quick Start，在密码输入框填写 DeepSeek API Key 后保存。
-- 修改 API Key：重新打开 Quick Start，输入新 Key 并保存覆盖本地 `.env`。
+- 修改 API Key / Base URL / 默认模型：使用侧边栏“API / 模型设置”，或重新打开 Quick Start。
 - 连接测试失败：检查 Key 是否有效、模型名是否正确，以及本机网络或代理是否能访问 DeepSeek。
 - 重新打开 Quick Start：使用侧边栏的“打开 Quick Start / Help”按钮。
 - `.env` 在哪里：位于项目根目录 `D:\\vibecoding\\novel-generator\\.env`，已被 Git 忽略。
@@ -278,6 +279,7 @@ def _render_quick_start_wizard() -> None:
     if st.session_state.get("quick_start_model_choice") not in models:
         st.session_state.quick_start_model_choice = default_choice
     st.session_state.setdefault("quick_start_custom_model", default_custom)
+    st.session_state.setdefault("quick_start_base_url", get_current_base_url())
 
     st.subheader("Quick Start Wizard")
     st.caption("配置 DeepSeek API Key、默认模型并做一次最小连接测试。")
@@ -301,6 +303,11 @@ def _render_quick_start_wizard() -> None:
             key="quick_start_api_key",
             type="password",
             placeholder="输入新的 API Key；已有 Key 不会明文回显",
+        )
+        st.text_input(
+            "Base URL",
+            key="quick_start_base_url",
+            placeholder="https://api.deepseek.com",
         )
 
     with tab_model:
@@ -352,6 +359,7 @@ def _render_quick_start_wizard() -> None:
                         api_key=api_key,
                         default_model=st.session_state.quick_start_model_choice,
                         custom_model=st.session_state.get("quick_start_custom_model", ""),
+                        base_url=st.session_state.get("quick_start_base_url", ""),
                     )
                 except (FileNotFoundError, ValueError) as exc:
                     st.error(str(exc))
@@ -368,6 +376,65 @@ def _render_quick_start_wizard() -> None:
 
     with tab_help:
         _render_help_content()
+
+
+def _render_api_model_settings_panel() -> None:
+    api_status = get_api_key_status()
+    models = get_available_models()
+
+    if st.session_state.get("api_settings_model_choice") not in models:
+        choice, custom = _model_choice_from_model(get_current_default_model())
+        st.session_state.api_settings_model_choice = choice
+        st.session_state.api_settings_custom_model = custom
+    st.session_state.setdefault("api_settings_base_url", get_current_base_url())
+    st.session_state.setdefault("api_settings_api_key", "")
+
+    st.text_input(
+        "DeepSeek API Key",
+        key="api_settings_api_key",
+        type="password",
+        placeholder="输入新的 API Key；已有 Key 不会明文回显",
+    )
+    st.text_input(
+        "Base URL",
+        key="api_settings_base_url",
+        placeholder="https://api.deepseek.com",
+    )
+    st.selectbox("默认模型", models, key="api_settings_model_choice")
+    if st.session_state.api_settings_model_choice == "custom":
+        st.text_input(
+            "自定义模型名",
+            key="api_settings_custom_model",
+            placeholder="例如：deepseek-v4-flash",
+        )
+
+    selected_model = resolve_selected_model(
+        st.session_state.api_settings_model_choice,
+        st.session_state.get("api_settings_custom_model", ""),
+    )
+    st.caption(f"当前本地配置：API Key {'已配置' if api_status['configured'] else '未配置'}；默认模型 {api_status['default_model']}")
+    st.caption(f"将保存：Base URL {st.session_state.api_settings_base_url.strip() or get_current_base_url()}；默认模型 {selected_model}")
+
+    test_col, save_col = st.columns(2)
+    with test_col:
+        if st.button("测试连接", use_container_width=True):
+            st.info("本阶段未执行真实 DeepSeek 请求；已保留连接测试入口。")
+    with save_col:
+        if st.button("保存配置", type="primary", use_container_width=True):
+            try:
+                saved_model = save_api_config(
+                    api_key=st.session_state.get("api_settings_api_key", ""),
+                    default_model=st.session_state.api_settings_model_choice,
+                    custom_model=st.session_state.get("api_settings_custom_model", ""),
+                    base_url=st.session_state.get("api_settings_base_url", ""),
+                    require_api_key=False,
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                st.error(str(exc))
+            else:
+                _apply_default_model_to_session(saved_model)
+                st.success("API / 模型配置已保存到本地 .env。")
+                st.rerun()
 
 
 def _count_summary_files(summaries_dir: Path) -> int:
@@ -406,6 +473,47 @@ def _project_option_label(project_ref: str, project_map: dict) -> str:
     return f"{record.title} [{record.kind}]"
 
 
+def _open_project_directory(project_dir: Path) -> tuple[bool, str]:
+    if not project_dir.exists():
+        return False, f"项目目录不存在：{project_dir}"
+    startfile = getattr(os, "startfile", None)
+    if startfile is None:
+        return False, "当前系统不支持直接打开文件夹。"
+    try:
+        startfile(str(project_dir))
+    except Exception as exc:
+        return False, f"无法打开项目目录：{exc}"
+    return True, "已打开当前项目目录。"
+
+
+def _render_open_project_button(project_dir: Path, key: str) -> None:
+    if st.button("打开当前项目目录", use_container_width=True, key=key):
+        ok, message = _open_project_directory(project_dir)
+        if ok:
+            st.success(message)
+        else:
+            st.warning(message)
+            st.caption(f"项目路径：{project_dir}")
+
+
+def _render_sidebar_project_summary(project_ref: str, project_title: str) -> None:
+    st.header("当前项目")
+    st.write(project_title)
+    if not project_ref:
+        st.caption("尚未创建。首次保存或生成时会创建到 workspace/books/{book_id}/。")
+        st.button("打开当前项目目录", use_container_width=True, disabled=True, key="open_project_summary_disabled")
+        return
+
+    try:
+        ctx = resolve_project_context(project_ref)
+    except (FileNotFoundError, ValueError) as exc:
+        st.warning(f"当前项目读取失败：{exc}")
+        return
+
+    st.caption("workspace 项目" if ctx.storage_kind == "workspace" else "legacy outputs 项目")
+    _render_open_project_button(ctx.project_dir, "open_project_summary")
+
+
 def _render_project_status(project_ref: str, project_title: str) -> None:
     try:
         ctx = resolve_project_context(project_ref) if project_ref else None
@@ -423,7 +531,7 @@ def _render_project_status(project_ref: str, project_title: str) -> None:
         st.write("- 章节数量：0")
         st.write("- 摘要数量：0")
         st.write("- 章节索引：未生成")
-        st.button("打开当前小说输出目录", use_container_width=True, disabled=True)
+        st.button("打开当前项目目录", use_container_width=True, disabled=True)
         return
 
     project_dir = ctx.project_dir
@@ -436,18 +544,7 @@ def _render_project_status(project_ref: str, project_title: str) -> None:
     st.write(f"- 摘要数量：{_count_summary_files(ctx.summaries_dir)}")
     st.write(f"- 章节索引：{'已生成' if ctx.chapter_index_path.exists() else '未生成'}")
 
-    if st.button("打开当前小说输出目录", use_container_width=True):
-        try:
-            project_dir.mkdir(parents=True, exist_ok=True)
-            startfile = getattr(os, "startfile", None)
-            if startfile is None:
-                raise OSError("当前系统不支持 os.startfile")
-            startfile(str(project_dir))
-        except Exception:
-            st.warning("当前运行环境无法直接打开你本机文件夹。可以使用“导出与阅读”区域在线阅读或下载 TXT。")
-            st.caption(f"服务器/本地项目路径：{project_dir}")
-        else:
-            st.success("已打开当前小说输出目录。")
+    _render_open_project_button(project_dir, "open_project_debug")
 
 
 def _safe_download_filename(name: str) -> str:
@@ -614,6 +711,8 @@ def _init_session_state() -> None:
         "current_project_title": "",
         "selected_project_ref": "",
         "selected_project_applied": "",
+        "project_loaded": False,
+        "show_raw_setting_input": True,
         "current_result": "",
         "current_file_name": "generated.md",
         "current_saved_path": "",
@@ -642,10 +741,16 @@ def _init_session_state() -> None:
         "setting_extra_requirements": "",
         "show_quick_start": False,
         "quick_start_api_key": "",
+        "quick_start_base_url": get_current_base_url(),
         "quick_start_model_choice": default_model_choice,
         "quick_start_custom_model": default_custom_model,
         "quick_start_connection_ok": False,
         "quick_start_connection_message": "",
+        "show_api_model_settings": False,
+        "api_settings_api_key": "",
+        "api_settings_base_url": get_current_base_url(),
+        "api_settings_model_choice": default_model_choice,
+        "api_settings_custom_model": default_custom_model,
     }
     defaults.update(default_model_settings)
     for key, value in defaults.items():
@@ -1400,10 +1505,7 @@ def main() -> None:
         _render_quick_start_wizard()
 
     with st.sidebar:
-        st.header("生成参数")
-        temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
-        max_tokens = st.number_input("max_tokens", min_value=512, max_value=32768, value=4000, step=256)
-        use_previous_context = st.checkbox("使用上一章上下文", value=True)
+        st.header("当前项目")
         project_records = list_projects()
         project_map = {record.ref: record for record in project_records}
         project_options = [""] + [record.ref for record in project_records]
@@ -1416,14 +1518,6 @@ def main() -> None:
             format_func=lambda ref: _project_option_label(ref, project_map),
         )
 
-    with st.sidebar:
-        st.header("帮助 / Quick Start")
-        if st.button("打开 Quick Start / Help", use_container_width=True):
-            st.session_state.show_quick_start = True
-            st.rerun()
-        with st.expander("Docs / Help", expanded=False):
-            _render_help_content()
-
     if selected_project_ref and st.session_state.selected_project_applied != selected_project_ref:
         try:
             selected_ctx = resolve_project_context(selected_project_ref)
@@ -1432,14 +1526,53 @@ def main() -> None:
         else:
             _set_current_project(selected_project_ref, selected_ctx.title)
             st.session_state.selected_project_applied = selected_project_ref
+            st.session_state.project_loaded = False
+            st.session_state.show_raw_setting_input = True
     elif not selected_project_ref and st.session_state.selected_project_applied:
         st.session_state.current_project_ref = ""
         st.session_state.current_project_title = ""
         st.session_state.selected_project_applied = ""
+        st.session_state.project_loaded = False
+        st.session_state.show_raw_setting_input = True
 
     with st.sidebar:
-        _render_environment_status()
-        _render_project_status(_current_project_ref(), _current_project_title())
+        _render_sidebar_project_summary(_current_project_ref(), _current_project_title())
+
+        st.header("生成参数")
+        temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
+        max_tokens = st.number_input("max_tokens", min_value=512, max_value=32768, value=4000, step=256)
+        use_previous_context = st.checkbox("使用上一章上下文", value=True)
+
+        st.header("模型")
+        st.caption(f"默认模型：{get_current_default_model()}")
+        if st.button("API / 模型设置", use_container_width=True):
+            st.session_state.show_api_model_settings = not st.session_state.show_api_model_settings
+        if st.session_state.show_api_model_settings:
+            with st.expander("API / 模型设置", expanded=True):
+                _render_api_model_settings_panel()
+
+        with st.expander("任务模型选择", expanded=False):
+            st.checkbox("使用统一模型", key="use_unified_model")
+            if st.session_state.use_unified_model:
+                _render_model_choice("统一模型", "unified_model", "custom_unified_model")
+            else:
+                _render_model_choice("设定扩写模型", "setting_expansion_model", "custom_setting_expansion_model")
+                _render_model_choice("大纲生成模型", "outline_model", "custom_outline_model")
+                _render_model_choice("人物卡生成模型", "character_model", "custom_character_model")
+                _render_model_choice("章节正文生成模型", "chapter_model", "custom_chapter_model")
+                _render_model_choice("章节标题生成模型", "chapter_title_model", "custom_chapter_title_model")
+                _render_model_choice("章节摘要生成模型", "summary_model", "custom_summary_model")
+
+        st.header("快速操作")
+        if st.button("打开 Quick Start / Help", use_container_width=True):
+            st.session_state.show_quick_start = True
+            st.rerun()
+        with st.expander("Docs / Help", expanded=False):
+            _render_help_content()
+
+        with st.expander("高级状态 / 调试信息", expanded=False):
+            _render_environment_status()
+            _render_project_status(_current_project_ref(), _current_project_title())
 
     load_col, save_col = st.columns(2)
     with load_col:
@@ -1450,13 +1583,15 @@ def main() -> None:
             else:
                 try:
                     config = load_project_config(project_ref)
-                except ValueError as exc:
+                except (FileNotFoundError, ValueError) as exc:
                     st.error(str(exc))
                 else:
                     if config is None:
                         st.info(f"还没有找到当前小说项目的 project_config.json：{resolve_project_context(project_ref).project_dir}")
                     else:
                         _load_config_to_session(config)
+                        st.session_state.project_loaded = True
+                        st.session_state.show_raw_setting_input = False
                         st.success("项目配置已加载。")
                         st.rerun()
 
@@ -1471,54 +1606,62 @@ def main() -> None:
 
     reader_placeholder = st.empty()
 
-    with st.sidebar:
-        st.header("模型设置")
-        st.checkbox("使用统一模型", key="use_unified_model")
-        if st.session_state.use_unified_model:
-            _render_model_choice("统一模型", "unified_model", "custom_unified_model")
-        else:
-            _render_model_choice("设定扩写模型", "setting_expansion_model", "custom_setting_expansion_model")
-            _render_model_choice("大纲生成模型", "outline_model", "custom_outline_model")
-            _render_model_choice("人物卡生成模型", "character_model", "custom_character_model")
-            _render_model_choice("章节正文生成模型", "chapter_model", "custom_chapter_model")
-            _render_model_choice("章节标题生成模型", "chapter_title_model", "custom_chapter_title_model")
-            _render_model_choice("章节摘要生成模型", "summary_model", "custom_summary_model")
-
     task_models = get_task_models_from_state()
 
+    preview_expand_clicked = False
+    expand_and_fill_clicked = False
+    expand_messages: list[dict[str, str]] = []
+
     st.subheader("设定输入与智能扩写")
-    st.text_area(
-        "故事设定 / 灵感 / 企划内容",
-        key="raw_story_idea",
-        height=120,
-        placeholder=(
-            "可以输入一句话脑洞，也可以粘贴较完整的人物、世界观、剧情冲突等设定。"
-            "系统会结合小说类型、写作风格、写作模式和期望章节数，自动整理、补全并拆分为主角、配角、世界观和核心冲突。"
-        ),
-        help="支持输入简短白话，也支持粘贴较完整的设定文档或小说企划。",
-    )
-    st.caption(
-        "支持输入简短白话，也支持粘贴较完整的设定文档。系统会根据下方配置自动整理、补全并拆分为项目所需的结构化设定。"
-    )
+    if st.session_state.project_loaded and not st.session_state.show_raw_setting_input:
+        st.info(
+            "当前项目已加载扩写后的小说设定。如需修改，请在“小说设定”区域编辑；"
+            "如需重新扩写，可展开“重新输入原始设定”。"
+        )
+        setting_loaded_col1, setting_loaded_col2 = st.columns(2)
+        with setting_loaded_col1:
+            if st.button("查看 / 编辑当前小说设定", use_container_width=True):
+                st.info("请在下方“小说设定”区域直接编辑当前项目设定。")
+        with setting_loaded_col2:
+            if st.button("重新输入原始设定并扩写", use_container_width=True):
+                st.session_state.show_raw_setting_input = True
+                st.rerun()
 
-    _render_setting_generation_config()
+    if not st.session_state.project_loaded or st.session_state.show_raw_setting_input:
+        if st.session_state.project_loaded:
+            st.caption("重新扩写会把新的结构化设定填入下方“小说设定”区域；不会删除已有项目文件。")
+        st.text_area(
+            "故事设定 / 灵感 / 企划内容",
+            key="raw_story_idea",
+            height=120,
+            placeholder=(
+                "可以输入一句话脑洞，也可以粘贴较完整的人物、世界观、剧情冲突等设定。"
+                "系统会结合小说类型、写作风格、写作模式和期望章节数，自动整理、补全并拆分为主角、配角、世界观和核心冲突。"
+            ),
+            help="支持输入简短白话，也支持粘贴较完整的设定文档或小说企划。",
+        )
+        st.caption(
+            "支持输入简短白话，也支持粘贴较完整的设定文档。系统会根据下方配置自动整理、补全并拆分为项目所需的结构化设定。"
+        )
 
-    expand_messages = build_expand_setting_prompt(
-        raw_story_idea=st.session_state.raw_story_idea,
-        genre=_effective_choice(st.session_state.genre, st.session_state.custom_genre),
-        writing_style=_effective_choice(st.session_state.writing_style, st.session_state.custom_style),
-        detail_level=st.session_state.expand_detail_level,
-        supplement_characters=st.session_state.supplement_characters,
-        supplement_conflict=st.session_state.supplement_conflict,
-        supplement_world_rules=st.session_state.supplement_world_rules,
-        setting_options=_setting_generation_options_from_state(),
-    )
+        _render_setting_generation_config()
 
-    expand_action_col1, expand_action_col2 = st.columns(2)
-    with expand_action_col1:
-        preview_expand_clicked = st.button("预览设定扩写 Prompt", use_container_width=True)
-    with expand_action_col2:
-        expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True)
+        expand_messages = build_expand_setting_prompt(
+            raw_story_idea=st.session_state.raw_story_idea,
+            genre=_effective_choice(st.session_state.genre, st.session_state.custom_genre),
+            writing_style=_effective_choice(st.session_state.writing_style, st.session_state.custom_style),
+            detail_level=st.session_state.expand_detail_level,
+            supplement_characters=st.session_state.supplement_characters,
+            supplement_conflict=st.session_state.supplement_conflict,
+            supplement_world_rules=st.session_state.supplement_world_rules,
+            setting_options=_setting_generation_options_from_state(),
+        )
+
+        expand_action_col1, expand_action_col2 = st.columns(2)
+        with expand_action_col1:
+            preview_expand_clicked = st.button("预览设定扩写 Prompt", use_container_width=True)
+        with expand_action_col2:
+            expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True)
 
     if preview_expand_clicked:
         if not st.session_state.raw_story_idea.strip():

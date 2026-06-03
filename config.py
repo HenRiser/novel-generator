@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 
@@ -26,7 +27,7 @@ DEFAULT_MODEL_SETTINGS = {
     "custom_chapter_title_model": "",
     "custom_summary_model": "",
 }
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip() or "https://api.deepseek.com"
 
 OUTPUT_DIR = PROJECT_ROOT / "outputs"
 WORKSPACE_DIR = PROJECT_ROOT / "workspace"
