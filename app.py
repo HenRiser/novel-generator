@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ from config import DEFAULT_MODEL, DEFAULT_MODEL_SETTINGS, DEEPSEEK_MODELS, PROJE
 from config_manager import (
     get_api_key_status,
     get_available_models,
+    get_current_base_url,
     get_current_default_model,
     has_api_key,
     resolve_selected_model,
@@ -76,6 +78,7 @@ OUTLINE_MODE = "outline"
 CHARACTER_MODE = "character"
 CHAPTER_MODE = "chapter"
 BATCH_MAX_CHAPTERS = 5
+GENERATION_DUPLICATE_WINDOW_SECONDS = 3.0
 EXPAND_DETAIL_OPTIONS = ["低", "中", "高"]
 REQUIRED_SETTING_EXPANSION_FIELDS = [
     "protagonist_setting",
@@ -83,6 +86,17 @@ REQUIRED_SETTING_EXPANSION_FIELDS = [
     "world_setting",
     "core_conflict",
 ]
+REQUIRED_SETTING_EXPANSION_SCHEMA_FIELDS = [
+    "title_candidates",
+    "recommended_title",
+    *REQUIRED_SETTING_EXPANSION_FIELDS,
+]
+REQUIRED_STORY_SETTING_FIELDS = {
+    "protagonist": "主角设定",
+    "supporting_characters": "重要配角设定",
+    "worldview": "世界观设定",
+    "core_conflict": "故事核心冲突",
+}
 LEGACY_MODEL_MAP = {
     "deepseek-chat": "deepseek-v4-flash",
     "deepseek-reasoner": "deepseek-v4-pro",
@@ -261,7 +275,7 @@ def _render_help_content() -> None:
 ### 常见问题
 
 - API Key 未配置：打开 Quick Start，在密码输入框填写 DeepSeek API Key 后保存。
-- 修改 API Key：重新打开 Quick Start，输入新 Key 并保存覆盖本地 `.env`。
+- 修改 API Key / Base URL / 默认模型：使用侧边栏“API / 模型设置”，或重新打开 Quick Start。
 - 连接测试失败：检查 Key 是否有效、模型名是否正确，以及本机网络或代理是否能访问 DeepSeek。
 - 重新打开 Quick Start：使用侧边栏的“打开 Quick Start / Help”按钮。
 - `.env` 在哪里：位于项目根目录 `D:\\vibecoding\\novel-generator\\.env`，已被 Git 忽略。
@@ -278,6 +292,7 @@ def _render_quick_start_wizard() -> None:
     if st.session_state.get("quick_start_model_choice") not in models:
         st.session_state.quick_start_model_choice = default_choice
     st.session_state.setdefault("quick_start_custom_model", default_custom)
+    st.session_state.setdefault("quick_start_base_url", get_current_base_url())
 
     st.subheader("Quick Start Wizard")
     st.caption("配置 DeepSeek API Key、默认模型并做一次最小连接测试。")
@@ -301,6 +316,11 @@ def _render_quick_start_wizard() -> None:
             key="quick_start_api_key",
             type="password",
             placeholder="输入新的 API Key；已有 Key 不会明文回显",
+        )
+        st.text_input(
+            "Base URL",
+            key="quick_start_base_url",
+            placeholder="https://api.deepseek.com",
         )
 
     with tab_model:
@@ -352,6 +372,7 @@ def _render_quick_start_wizard() -> None:
                         api_key=api_key,
                         default_model=st.session_state.quick_start_model_choice,
                         custom_model=st.session_state.get("quick_start_custom_model", ""),
+                        base_url=st.session_state.get("quick_start_base_url", ""),
                     )
                 except (FileNotFoundError, ValueError) as exc:
                     st.error(str(exc))
@@ -370,6 +391,65 @@ def _render_quick_start_wizard() -> None:
         _render_help_content()
 
 
+def _render_api_model_settings_panel() -> None:
+    api_status = get_api_key_status()
+    models = get_available_models()
+
+    if st.session_state.get("api_settings_model_choice") not in models:
+        choice, custom = _model_choice_from_model(get_current_default_model())
+        st.session_state.api_settings_model_choice = choice
+        st.session_state.api_settings_custom_model = custom
+    st.session_state.setdefault("api_settings_base_url", get_current_base_url())
+    st.session_state.setdefault("api_settings_api_key", "")
+
+    st.text_input(
+        "DeepSeek API Key",
+        key="api_settings_api_key",
+        type="password",
+        placeholder="输入新的 API Key；已有 Key 不会明文回显",
+    )
+    st.text_input(
+        "Base URL",
+        key="api_settings_base_url",
+        placeholder="https://api.deepseek.com",
+    )
+    st.selectbox("默认模型", models, key="api_settings_model_choice")
+    if st.session_state.api_settings_model_choice == "custom":
+        st.text_input(
+            "自定义模型名",
+            key="api_settings_custom_model",
+            placeholder="例如：deepseek-v4-flash",
+        )
+
+    selected_model = resolve_selected_model(
+        st.session_state.api_settings_model_choice,
+        st.session_state.get("api_settings_custom_model", ""),
+    )
+    st.caption(f"当前本地配置：API Key {'已配置' if api_status['configured'] else '未配置'}；默认模型 {api_status['default_model']}")
+    st.caption(f"将保存：Base URL {st.session_state.api_settings_base_url.strip() or get_current_base_url()}；默认模型 {selected_model}")
+
+    test_col, save_col = st.columns(2)
+    with test_col:
+        if st.button("测试连接", use_container_width=True):
+            st.info("本阶段未执行真实 DeepSeek 请求；已保留连接测试入口。")
+    with save_col:
+        if st.button("保存配置", type="primary", use_container_width=True):
+            try:
+                saved_model = save_api_config(
+                    api_key=st.session_state.get("api_settings_api_key", ""),
+                    default_model=st.session_state.api_settings_model_choice,
+                    custom_model=st.session_state.get("api_settings_custom_model", ""),
+                    base_url=st.session_state.get("api_settings_base_url", ""),
+                    require_api_key=False,
+                )
+            except (FileNotFoundError, ValueError) as exc:
+                st.error(str(exc))
+            else:
+                _apply_default_model_to_session(saved_model)
+                st.success("API / 模型配置已保存到本地 .env。")
+                st.rerun()
+
+
 def _count_summary_files(summaries_dir: Path) -> int:
     if not summaries_dir.exists():
         return 0
@@ -383,7 +463,6 @@ def _current_project_ref() -> str:
 def _set_current_project(ref: str, title: str) -> None:
     st.session_state.current_project_ref = ref
     st.session_state.current_project_title = title
-    st.session_state.title = title
 
 
 def _ensure_current_project_ref() -> str:
@@ -406,6 +485,47 @@ def _project_option_label(project_ref: str, project_map: dict) -> str:
     return f"{record.title} [{record.kind}]"
 
 
+def _open_project_directory(project_dir: Path) -> tuple[bool, str]:
+    if not project_dir.exists():
+        return False, f"项目目录不存在：{project_dir}"
+    startfile = getattr(os, "startfile", None)
+    if startfile is None:
+        return False, "当前系统不支持直接打开文件夹。"
+    try:
+        startfile(str(project_dir))
+    except Exception as exc:
+        return False, f"无法打开项目目录：{exc}"
+    return True, "已打开当前项目目录。"
+
+
+def _render_open_project_button(project_dir: Path, key: str) -> None:
+    if st.button("打开当前项目目录", use_container_width=True, key=key):
+        ok, message = _open_project_directory(project_dir)
+        if ok:
+            st.success(message)
+        else:
+            st.warning(message)
+            st.caption(f"项目路径：{project_dir}")
+
+
+def _render_sidebar_project_summary(project_ref: str, project_title: str) -> None:
+    st.header("当前项目")
+    st.write(project_title)
+    if not project_ref:
+        st.caption("尚未创建。首次保存或生成时会创建到 workspace/books/{book_id}/。")
+        st.button("打开当前项目目录", use_container_width=True, disabled=True, key="open_project_summary_disabled")
+        return
+
+    try:
+        ctx = resolve_project_context(project_ref)
+    except (FileNotFoundError, ValueError) as exc:
+        st.warning(f"当前项目读取失败：{exc}")
+        return
+
+    st.caption("workspace 项目" if ctx.storage_kind == "workspace" else "legacy outputs 项目")
+    _render_open_project_button(ctx.project_dir, "open_project_summary")
+
+
 def _render_project_status(project_ref: str, project_title: str) -> None:
     try:
         ctx = resolve_project_context(project_ref) if project_ref else None
@@ -423,7 +543,7 @@ def _render_project_status(project_ref: str, project_title: str) -> None:
         st.write("- 章节数量：0")
         st.write("- 摘要数量：0")
         st.write("- 章节索引：未生成")
-        st.button("打开当前小说输出目录", use_container_width=True, disabled=True)
+        st.button("打开当前项目目录", use_container_width=True, disabled=True)
         return
 
     project_dir = ctx.project_dir
@@ -436,18 +556,7 @@ def _render_project_status(project_ref: str, project_title: str) -> None:
     st.write(f"- 摘要数量：{_count_summary_files(ctx.summaries_dir)}")
     st.write(f"- 章节索引：{'已生成' if ctx.chapter_index_path.exists() else '未生成'}")
 
-    if st.button("打开当前小说输出目录", use_container_width=True):
-        try:
-            project_dir.mkdir(parents=True, exist_ok=True)
-            startfile = getattr(os, "startfile", None)
-            if startfile is None:
-                raise OSError("当前系统不支持 os.startfile")
-            startfile(str(project_dir))
-        except Exception:
-            st.warning("当前运行环境无法直接打开你本机文件夹。可以使用“导出与阅读”区域在线阅读或下载 TXT。")
-            st.caption(f"服务器/本地项目路径：{project_dir}")
-        else:
-            st.success("已打开当前小说输出目录。")
+    _render_open_project_button(project_dir, "open_project_debug")
 
 
 def _safe_download_filename(name: str) -> str:
@@ -596,7 +705,6 @@ def _init_session_state() -> None:
         "supporting_characters_setting": "",
         "world_setting": "",
         "core_conflict": "",
-        "target_readers": "",
         "chapter_word_range": "3000-5000 字",
         "chapter_number": 1,
         "extra_requirements": "",
@@ -614,6 +722,14 @@ def _init_session_state() -> None:
         "current_project_title": "",
         "selected_project_ref": "",
         "selected_project_applied": "",
+        "pending_project_config": None,
+        "project_config_load_message": "",
+        "project_loaded": False,
+        "show_raw_setting_input": True,
+        "is_generating_chapter": False,
+        "active_chapter_generation_signature": "",
+        "last_chapter_generation_signature": "",
+        "last_chapter_generation_completed_at": 0.0,
         "current_result": "",
         "current_file_name": "generated.md",
         "current_saved_path": "",
@@ -642,10 +758,16 @@ def _init_session_state() -> None:
         "setting_extra_requirements": "",
         "show_quick_start": False,
         "quick_start_api_key": "",
+        "quick_start_base_url": get_current_base_url(),
         "quick_start_model_choice": default_model_choice,
         "quick_start_custom_model": default_custom_model,
         "quick_start_connection_ok": False,
         "quick_start_connection_message": "",
+        "show_api_model_settings": False,
+        "api_settings_api_key": "",
+        "api_settings_base_url": get_current_base_url(),
+        "api_settings_model_choice": default_model_choice,
+        "api_settings_custom_model": default_custom_model,
     }
     defaults.update(default_model_settings)
     for key, value in defaults.items():
@@ -906,7 +1028,6 @@ def _collect_project_config() -> dict[str, Any]:
         "supporting_characters": st.session_state.supporting_characters_setting.strip(),
         "worldview": st.session_state.world_setting.strip(),
         "core_conflict": st.session_state.core_conflict.strip(),
-        "target_readers": st.session_state.target_readers.strip(),
         "word_count_range": st.session_state.chapter_word_range.strip(),
         "extra_requirements": st.session_state.extra_requirements.strip(),
         "model_settings": _model_settings_from_state(),
@@ -914,7 +1035,71 @@ def _collect_project_config() -> dict[str, Any]:
     }
 
 
+def _is_placeholder_title(title: Any) -> bool:
+    cleaned = str(title or "").strip()
+    return not cleaned or cleaned == "未命名小说"
+
+
+def _missing_story_setting_labels(project_config: dict[str, Any]) -> list[str]:
+    return [
+        label
+        for key, label in REQUIRED_STORY_SETTING_FIELDS.items()
+        if not str(project_config.get(key) or "").strip()
+    ]
+
+
+def _missing_basic_config_label(project_config: dict[str, Any]) -> str:
+    for key, label in {"genre": "小说类型", "style": "写作风格", "word_count_range": "单章字数范围"}.items():
+        if not str(project_config.get(key) or "").strip():
+            return label
+    return ""
+
+
+def _validate_project_config_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题，并完成设定输入或在“小说设定”区域补全必要内容后再保存项目配置。"
+
+    missing_settings = _missing_story_setting_labels(project_config)
+    if missing_settings:
+        return (
+            False,
+            "请先填写小说标题，并完成设定输入或在“小说设定”区域补全必要内容后再保存项目配置。"
+            f"缺少：{'、'.join(missing_settings)}。",
+        )
+
+    missing_basic = _missing_basic_config_label(project_config)
+    if missing_basic:
+        return False, f"请先补全{missing_basic}后再保存项目配置。"
+
+    return True, ""
+
+
+def _validate_story_settings_ready(project_config: dict[str, Any], message: str) -> tuple[bool, str]:
+    missing_settings = _missing_story_setting_labels(project_config)
+    if missing_settings:
+        return False, f"{message}缺少：{'、'.join(missing_settings)}。"
+
+    missing_basic = _missing_basic_config_label(project_config)
+    if missing_basic:
+        return False, f"请先补全{missing_basic}。"
+
+    return True, ""
+
+
+def _validate_setting_assets_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题并补全小说设定后再保存设定资产。"
+    return _validate_story_settings_ready(project_config, "请先补全小说设定后再保存设定资产。")
+
+
+def _validate_outline_character_generation_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题并完成小说设定后再生成大纲与人物卡。"
+    return _validate_story_settings_ready(project_config, "请先完成小说设定后再生成大纲与人物卡。")
+
+
 def _load_config_to_session(config: dict[str, Any]) -> None:
+    """Apply a saved config before any widgets using these keys are instantiated."""
     st.session_state.title = config.get("title", "")
     st.session_state.genre, st.session_state.custom_genre = _load_choice(
         config.get("genre_option"),
@@ -932,12 +1117,30 @@ def _load_config_to_session(config: dict[str, Any]) -> None:
     st.session_state.supporting_characters_setting = config.get("supporting_characters", "")
     st.session_state.world_setting = config.get("worldview", "")
     st.session_state.core_conflict = config.get("core_conflict", "")
-    st.session_state.target_readers = config.get("target_readers", "")
     st.session_state.chapter_word_range = config.get("word_count_range", "3000-5000 字")
     st.session_state.extra_requirements = config.get("extra_requirements", "")
     _load_model_settings_to_session(config.get("model_settings", DEFAULT_MODEL_SETTINGS))
     _load_setting_generation_options_to_session(config.get("setting_generation_options", {}))
     _sync_genre_style_widget_state()
+
+
+def _queue_project_config_load(config: dict[str, Any]) -> None:
+    st.session_state.pending_project_config = dict(config)
+
+
+def _consume_pending_project_config() -> None:
+    config = st.session_state.get("pending_project_config")
+    if not isinstance(config, dict):
+        return
+
+    _load_config_to_session(config)
+    loaded_title = str(config.get("title") or "").strip()
+    if loaded_title:
+        st.session_state.current_project_title = loaded_title
+    st.session_state.project_loaded = True
+    st.session_state.show_raw_setting_input = False
+    st.session_state.project_config_load_message = "项目配置已加载。"
+    st.session_state.pending_project_config = None
 
 
 def _load_choice(option_value: Any, final_value: Any, custom_value: Any, options: list[str]) -> tuple[str, str]:
@@ -955,7 +1158,10 @@ def _load_choice(option_value: Any, final_value: Any, custom_value: Any, options
 
 
 def _current_project_title() -> str:
-    return st.session_state.title.strip() or "未命名小说"
+    current_title = str(st.session_state.get("current_project_title", "") or "").strip()
+    if current_title:
+        return current_title
+    return str(st.session_state.get("title", "") or "").strip() or "未命名小说"
 
 
 def _format_messages_for_preview(messages: list[dict[str, str]]) -> str:
@@ -976,48 +1182,158 @@ def _save_pending_setting_expansion(project_key: str) -> Path | None:
     return save_setting_expansion(project_key, raw_story_idea, expanded_data)
 
 
-def parse_setting_expansion_response(raw_text: str) -> dict[str, Any]:
+def _strip_json_code_fence(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    match = re.search(r"```(?:json|JSON)?\s*(.*?)\s*```", text, flags=re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    text = re.sub(r"^\s*```(?:json|JSON)?\s*", "", text)
+    text = re.sub(r"\s*```\s*$", "", text)
+    return text.strip()
+
+
+def _normalize_json_punctuation(raw_text: str) -> str:
+    return (raw_text or "").translate(
+        str.maketrans(
+            {
+                "｛": "{",
+                "｝": "}",
+                "［": "[",
+                "］": "]",
+                "“": '"',
+                "”": '"',
+                "＂": '"',
+                "：": ":",
+                "，": ",",
+                "‘": "'",
+                "’": "'",
+            }
+        )
+    )
+
+
+def _extract_json_object(raw_text: str) -> str:
+    text = _normalize_json_punctuation(_strip_json_code_fence(raw_text))
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("JSON 解析失败：返回内容中没有找到 JSON 对象。")
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1].strip()
+
+    end = text.rfind("}")
+    if end > start:
+        return text[start : end + 1].strip()
+    raise ValueError("JSON 解析失败：返回内容中没有找到完整的 JSON 对象。")
+
+
+def _repair_common_json_issues(json_text: str) -> str:
+    repaired = _normalize_json_punctuation(_strip_json_code_fence(json_text))
+    repaired = repaired.replace("\ufeff", "").replace("\u00a0", " ")
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    repaired = re.sub(
+        r'([}\]"])\s*(?:\r?\n)+\s*("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
+        r"\1,\n  \2",
+        repaired,
+    )
+    repaired = re.sub(
+        r'([}\]"])\s+("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
+        r"\1, \2",
+        repaired,
+    )
+    return repaired.strip()
+
+
+def parse_model_json_response(raw_text: str) -> dict[str, Any]:
     raw_text = (raw_text or "").strip()
     if not raw_text:
         raise ValueError("模型返回内容为空，无法解析 JSON。")
 
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        start = raw_text.find("{")
-        end = raw_text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("JSON 解析失败：返回内容中没有找到完整的 JSON 对象。")
+    candidates: list[str] = []
+    for candidate in (raw_text, _strip_json_code_fence(raw_text)):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    extracted = _extract_json_object(raw_text)
+    if extracted not in candidates:
+        candidates.append(extracted)
+
+    repaired = _repair_common_json_issues(extracted)
+    if repaired not in candidates:
+        candidates.append(repaired)
+
+    last_error: json.JSONDecodeError | None = None
+    for candidate in candidates:
         try:
-            data = json.loads(raw_text[start : end + 1])
+            data = json.loads(candidate)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"JSON 解析失败：{exc}") from exc
+            last_error = exc
+            continue
+        if not isinstance(data, dict):
+            raise ValueError("JSON 解析失败：返回结果不是 JSON 对象。")
+        return data
 
-    if not isinstance(data, dict):
-        raise ValueError("JSON 解析失败：返回结果不是 JSON 对象。")
+    detail = f"最后错误：{last_error}" if last_error else ""
+    raise ValueError(f"JSON 解析失败：模型返回的设定不是合法 JSON，系统已尝试提取和轻量修复但仍无法解析。{detail}")
 
-    missing_fields = [field for field in REQUIRED_SETTING_EXPANSION_FIELDS if field not in data]
+
+def _coerce_title_candidates(value: Any) -> list[str]:
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, str):
+        candidates = re.split(r"[\n,，、;；]+", value)
+    else:
+        raise ValueError("JSON 字段类型错误：title_candidates 必须是字符串数组。")
+
+    titles = [str(title).strip().strip('"“”') for title in candidates if str(title).strip()]
+    if not titles:
+        raise ValueError("JSON 字段为空：title_candidates 至少需要一个标题候选。")
+    return titles
+
+
+def parse_setting_expansion_response(raw_text: str) -> dict[str, Any]:
+    data = parse_model_json_response(raw_text)
+
+    missing_fields = [field for field in REQUIRED_SETTING_EXPANSION_SCHEMA_FIELDS if field not in data]
     if missing_fields:
         raise ValueError(f"JSON 字段缺失：{', '.join(missing_fields)}")
 
-    parsed: dict[str, Any] = {}
+    parsed: dict[str, Any] = {
+        "title_candidates": _coerce_title_candidates(data["title_candidates"]),
+    }
+
+    recommended_title = data["recommended_title"]
+    if not isinstance(recommended_title, str) or not recommended_title.strip():
+        raise ValueError("JSON 字段为空：recommended_title 必须是非空字符串。")
+    parsed["recommended_title"] = recommended_title.strip()
+
     for field in REQUIRED_SETTING_EXPANSION_FIELDS:
         value = data[field]
         if not isinstance(value, str):
             raise ValueError(f"JSON 字段类型错误：{field} 必须是字符串。")
+        if not value.strip():
+            raise ValueError(f"JSON 字段为空：{field} 不能为空。")
         parsed[field] = value.strip()
-
-    title_candidates = data.get("title_candidates", [])
-    if not isinstance(title_candidates, list):
-        title_candidates = []
-    parsed["title_candidates"] = [
-        str(title).strip()
-        for title in title_candidates
-        if isinstance(title, str) and title.strip()
-    ]
-
-    recommended_title = data.get("recommended_title", "")
-    parsed["recommended_title"] = recommended_title.strip() if isinstance(recommended_title, str) else ""
 
     return parsed
 
@@ -1337,6 +1653,71 @@ def _plan_batch_chapters(project_key: str) -> tuple[list[int], str | None]:
     return chapters, None
 
 
+def _validate_chapter_generation_ready(project_ref: str, project_config: dict[str, Any]) -> tuple[bool, str]:
+    if not project_ref:
+        return False, "请先保存项目配置，或生成 / 更新大纲与人物卡，创建当前小说项目后再生成正文。"
+
+    try:
+        ctx = resolve_project_context(project_ref)
+    except (FileNotFoundError, ValueError) as exc:
+        return False, f"当前项目无效，无法生成正文：{exc}"
+
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题，并保存项目配置后再生成正文。"
+
+    missing_fields = _missing_story_setting_labels(project_config)
+
+    if missing_fields:
+        return (
+            False,
+            "请先完成设定输入与智能扩写，或在“小说设定”区域补全必要设定后再生成正文。"
+            f"缺少：{'、'.join(missing_fields)}。",
+        )
+
+    missing_basic = _missing_basic_config_label(project_config)
+    if missing_basic:
+        return False, f"请先补全{missing_basic}后再生成正文。"
+
+    _, outline_path = read_latest_outline(project_ref)
+    _, characters_path = read_latest_characters(project_ref)
+    has_saved_setting_asset = ctx.config_path.exists() or bool(outline_path) or bool(characters_path)
+    if not has_saved_setting_asset:
+        return False, "请先保存项目配置，或生成 / 更新大纲与人物卡，确保有可用于章节正文生成的设定资产。"
+
+    return True, ""
+
+
+def _chapter_generation_signature(action: str, project_ref: str, chapter_numbers: list[int]) -> str:
+    chapters = ",".join(str(int(number)) for number in chapter_numbers)
+    return f"{action}:{project_ref}:{chapters}"
+
+
+def _begin_chapter_generation(signature: str) -> bool:
+    if st.session_state.get("is_generating_chapter"):
+        st.warning("当前已有章节生成任务正在进行，请等待完成后再操作。")
+        return False
+
+    now = time.monotonic()
+    last_signature = st.session_state.get("last_chapter_generation_signature", "")
+    last_completed_at = float(st.session_state.get("last_chapter_generation_completed_at", 0.0) or 0.0)
+    if last_signature == signature and now - last_completed_at < GENERATION_DUPLICATE_WINDOW_SECONDS:
+        st.warning("刚刚已经处理过同一次章节生成请求，请稍后再重复生成。")
+        return False
+
+    st.session_state.is_generating_chapter = True
+    st.session_state.active_chapter_generation_signature = signature
+    return True
+
+
+def _end_chapter_generation() -> None:
+    signature = st.session_state.get("active_chapter_generation_signature", "")
+    if signature:
+        st.session_state.last_chapter_generation_signature = signature
+        st.session_state.last_chapter_generation_completed_at = time.monotonic()
+    st.session_state.active_chapter_generation_signature = ""
+    st.session_state.is_generating_chapter = False
+
+
 def _generate_and_save(
     project_key: str,
     mode: str,
@@ -1388,9 +1769,13 @@ def main() -> None:
     st.set_page_config(page_title="AI 小说生成器", layout="wide")
     ensure_directories()
     _init_session_state()
+    _consume_pending_project_config()
 
     st.title("AI 小说生成器")
     st.caption("本地运行的轻量小说创作工具：大纲、人物卡、章节正文、续写和上下文管理。")
+    if st.session_state.get("project_config_load_message"):
+        st.success(st.session_state.project_config_load_message)
+        st.session_state.project_config_load_message = ""
 
     api_key_configured = _is_api_key_configured()
     if not api_key_configured:
@@ -1400,10 +1785,7 @@ def main() -> None:
         _render_quick_start_wizard()
 
     with st.sidebar:
-        st.header("生成参数")
-        temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
-        max_tokens = st.number_input("max_tokens", min_value=512, max_value=32768, value=4000, step=256)
-        use_previous_context = st.checkbox("使用上一章上下文", value=True)
+        st.header("当前项目")
         project_records = list_projects()
         project_map = {record.ref: record for record in project_records}
         project_options = [""] + [record.ref for record in project_records]
@@ -1416,14 +1798,6 @@ def main() -> None:
             format_func=lambda ref: _project_option_label(ref, project_map),
         )
 
-    with st.sidebar:
-        st.header("帮助 / Quick Start")
-        if st.button("打开 Quick Start / Help", use_container_width=True):
-            st.session_state.show_quick_start = True
-            st.rerun()
-        with st.expander("Docs / Help", expanded=False):
-            _render_help_content()
-
     if selected_project_ref and st.session_state.selected_project_applied != selected_project_ref:
         try:
             selected_ctx = resolve_project_context(selected_project_ref)
@@ -1432,14 +1806,53 @@ def main() -> None:
         else:
             _set_current_project(selected_project_ref, selected_ctx.title)
             st.session_state.selected_project_applied = selected_project_ref
+            st.session_state.project_loaded = False
+            st.session_state.show_raw_setting_input = True
     elif not selected_project_ref and st.session_state.selected_project_applied:
         st.session_state.current_project_ref = ""
         st.session_state.current_project_title = ""
         st.session_state.selected_project_applied = ""
+        st.session_state.project_loaded = False
+        st.session_state.show_raw_setting_input = True
 
     with st.sidebar:
-        _render_environment_status()
-        _render_project_status(_current_project_ref(), _current_project_title())
+        _render_sidebar_project_summary(_current_project_ref(), _current_project_title())
+
+        st.header("生成参数")
+        temperature = st.slider("temperature", min_value=0.0, max_value=2.0, value=0.7, step=0.05)
+        max_tokens = st.number_input("max_tokens", min_value=512, max_value=32768, value=4000, step=256)
+        use_previous_context = st.checkbox("使用上一章上下文", value=True)
+
+        st.header("模型")
+        st.caption(f"默认模型：{get_current_default_model()}")
+        if st.button("API / 模型设置", use_container_width=True):
+            st.session_state.show_api_model_settings = not st.session_state.show_api_model_settings
+        if st.session_state.show_api_model_settings:
+            with st.expander("API / 模型设置", expanded=True):
+                _render_api_model_settings_panel()
+
+        with st.expander("任务模型选择", expanded=False):
+            st.checkbox("使用统一模型", key="use_unified_model")
+            if st.session_state.use_unified_model:
+                _render_model_choice("统一模型", "unified_model", "custom_unified_model")
+            else:
+                _render_model_choice("设定扩写模型", "setting_expansion_model", "custom_setting_expansion_model")
+                _render_model_choice("大纲生成模型", "outline_model", "custom_outline_model")
+                _render_model_choice("人物卡生成模型", "character_model", "custom_character_model")
+                _render_model_choice("章节正文生成模型", "chapter_model", "custom_chapter_model")
+                _render_model_choice("章节标题生成模型", "chapter_title_model", "custom_chapter_title_model")
+                _render_model_choice("章节摘要生成模型", "summary_model", "custom_summary_model")
+
+        st.header("快速操作")
+        if st.button("打开 Quick Start / Help", use_container_width=True):
+            st.session_state.show_quick_start = True
+            st.rerun()
+        with st.expander("Docs / Help", expanded=False):
+            _render_help_content()
+
+        with st.expander("高级状态 / 调试信息", expanded=False):
+            _render_environment_status()
+            _render_project_status(_current_project_ref(), _current_project_title())
 
     load_col, save_col = st.columns(2)
     with load_col:
@@ -1450,75 +1863,87 @@ def main() -> None:
             else:
                 try:
                     config = load_project_config(project_ref)
-                except ValueError as exc:
+                except (FileNotFoundError, ValueError) as exc:
                     st.error(str(exc))
                 else:
                     if config is None:
                         st.info(f"还没有找到当前小说项目的 project_config.json：{resolve_project_context(project_ref).project_dir}")
                     else:
-                        _load_config_to_session(config)
-                        st.success("项目配置已加载。")
+                        _queue_project_config_load(config)
                         st.rerun()
 
     with save_col:
         if st.button("保存项目配置", use_container_width=True):
-            project_ref = _ensure_current_project_ref()
-            path = save_project_config(project_ref, _collect_project_config())
-            st.success(f"项目配置已保存：{path}")
-            expansion_path = _save_pending_setting_expansion(project_ref)
-            if expansion_path:
-                st.info(f"最近一次设定扩写已保存：{expansion_path}")
+            project_config_to_save = _collect_project_config()
+            ready, message = _validate_project_config_ready(project_config_to_save)
+            if not ready:
+                st.warning(message)
+            else:
+                project_ref = _ensure_current_project_ref()
+                path = save_project_config(project_ref, project_config_to_save)
+                st.success(f"项目配置已保存：{path}")
+                expansion_path = _save_pending_setting_expansion(project_ref)
+                if expansion_path:
+                    st.info(f"最近一次设定扩写已保存：{expansion_path}")
 
     reader_placeholder = st.empty()
 
-    with st.sidebar:
-        st.header("模型设置")
-        st.checkbox("使用统一模型", key="use_unified_model")
-        if st.session_state.use_unified_model:
-            _render_model_choice("统一模型", "unified_model", "custom_unified_model")
-        else:
-            _render_model_choice("设定扩写模型", "setting_expansion_model", "custom_setting_expansion_model")
-            _render_model_choice("大纲生成模型", "outline_model", "custom_outline_model")
-            _render_model_choice("人物卡生成模型", "character_model", "custom_character_model")
-            _render_model_choice("章节正文生成模型", "chapter_model", "custom_chapter_model")
-            _render_model_choice("章节标题生成模型", "chapter_title_model", "custom_chapter_title_model")
-            _render_model_choice("章节摘要生成模型", "summary_model", "custom_summary_model")
-
     task_models = get_task_models_from_state()
 
+    preview_expand_clicked = False
+    expand_and_fill_clicked = False
+    expand_messages: list[dict[str, str]] = []
+
     st.subheader("设定输入与智能扩写")
-    st.text_area(
-        "故事设定 / 灵感 / 企划内容",
-        key="raw_story_idea",
-        height=120,
-        placeholder=(
-            "可以输入一句话脑洞，也可以粘贴较完整的人物、世界观、剧情冲突等设定。"
-            "系统会结合小说类型、写作风格、写作模式和期望章节数，自动整理、补全并拆分为主角、配角、世界观和核心冲突。"
-        ),
-        help="支持输入简短白话，也支持粘贴较完整的设定文档或小说企划。",
-    )
-    st.caption(
-        "支持输入简短白话，也支持粘贴较完整的设定文档。系统会根据下方配置自动整理、补全并拆分为项目所需的结构化设定。"
-    )
+    if st.session_state.project_loaded and not st.session_state.show_raw_setting_input:
+        st.info(
+            "当前项目已加载扩写后的小说设定。如需修改，请在“小说设定”区域编辑；"
+            "如需重新扩写，可展开“重新输入原始设定”。"
+        )
+        setting_loaded_col1, setting_loaded_col2 = st.columns(2)
+        with setting_loaded_col1:
+            if st.button("查看 / 编辑当前小说设定", use_container_width=True):
+                st.info("请在下方“小说设定”区域直接编辑当前项目设定。")
+        with setting_loaded_col2:
+            if st.button("重新输入原始设定并扩写", use_container_width=True):
+                st.session_state.show_raw_setting_input = True
+                st.rerun()
 
-    _render_setting_generation_config()
+    if not st.session_state.project_loaded or st.session_state.show_raw_setting_input:
+        if st.session_state.project_loaded:
+            st.caption("重新扩写会把新的结构化设定填入下方“小说设定”区域；不会删除已有项目文件。")
+        st.text_area(
+            "故事设定 / 灵感 / 企划内容",
+            key="raw_story_idea",
+            height=120,
+            placeholder=(
+                "可以输入一句话脑洞，也可以粘贴较完整的人物、世界观、剧情冲突等设定。"
+                "系统会结合小说类型、写作风格、写作模式和期望章节数，自动整理、补全并拆分为主角、配角、世界观和核心冲突。"
+            ),
+            help="支持输入简短白话，也支持粘贴较完整的设定文档或小说企划。",
+        )
+        st.caption(
+            "支持输入简短白话，也支持粘贴较完整的设定文档。系统会根据下方配置自动整理、补全并拆分为项目所需的结构化设定。"
+        )
 
-    expand_messages = build_expand_setting_prompt(
-        raw_story_idea=st.session_state.raw_story_idea,
-        genre=_effective_choice(st.session_state.genre, st.session_state.custom_genre),
-        writing_style=_effective_choice(st.session_state.writing_style, st.session_state.custom_style),
-        detail_level=st.session_state.expand_detail_level,
-        supplement_characters=st.session_state.supplement_characters,
-        supplement_conflict=st.session_state.supplement_conflict,
-        supplement_world_rules=st.session_state.supplement_world_rules,
-        setting_options=_setting_generation_options_from_state(),
-    )
+        _render_setting_generation_config()
 
-    expand_action_col1, expand_action_col2 = st.columns(2)
-    with expand_action_col1:
-        preview_expand_clicked = st.button("预览设定扩写 Prompt", use_container_width=True)
-    with expand_action_col2:
-        expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True)
+        expand_messages = build_expand_setting_prompt(
+            raw_story_idea=st.session_state.raw_story_idea,
+            genre=_effective_choice(st.session_state.genre, st.session_state.custom_genre),
+            writing_style=_effective_choice(st.session_state.writing_style, st.session_state.custom_style),
+            detail_level=st.session_state.expand_detail_level,
+            supplement_characters=st.session_state.supplement_characters,
+            supplement_conflict=st.session_state.supplement_conflict,
+            supplement_world_rules=st.session_state.supplement_world_rules,
+            setting_options=_setting_generation_options_from_state(),
+        )
+
+        expand_action_col1, expand_action_col2 = st.columns(2)
+        with expand_action_col1:
+            preview_expand_clicked = st.button("预览设定扩写 Prompt", use_container_width=True)
+        with expand_action_col2:
+            expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True)
 
     if preview_expand_clicked:
         if not st.session_state.raw_story_idea.strip():
@@ -1606,11 +2031,7 @@ def main() -> None:
     st.text_area("世界观设定", key="world_setting", height=130)
     st.text_area("故事核心冲突", key="core_conflict", height=100)
 
-    col3, col4 = st.columns(2)
-    with col3:
-        st.text_input("目标读者", key="target_readers")
-    with col4:
-        st.text_input("单章字数范围", key="chapter_word_range")
+    st.text_input("单章字数范围", key="chapter_word_range")
 
     st.text_area(
         "额外要求",
@@ -1622,7 +2043,7 @@ def main() -> None:
     project_ref = _current_project_ref()
     project_config = _collect_project_config()
     st.subheader("小说设定 / 大纲与人物")
-    st.caption("大纲和人物卡是正文生成前的设定资产；本阶段不强制锁定章节生成，但建议先保存或生成。")
+    st.caption("大纲和人物卡是正文生成前的设定资产；保存、生成和章节正文创作都会先检查必要设定。")
     asset_col1, asset_col2, asset_col3, asset_col4 = st.columns(4)
     with asset_col1:
         generate_assets_clicked = st.button("生成 / 更新大纲与人物卡", use_container_width=True)
@@ -1634,24 +2055,32 @@ def main() -> None:
         save_setting_assets_clicked = st.button("保存设定资产", use_container_width=True)
 
     if save_setting_assets_clicked:
-        project_ref = _ensure_current_project_ref()
-        config_path = save_project_config(project_ref, project_config)
-        expansion_path = _save_pending_setting_expansion(project_ref)
-        st.success(f"设定资产已保存：{config_path}")
-        if expansion_path:
-            st.info(f"设定扩写结果已保存：{expansion_path}")
+        ready, message = _validate_setting_assets_ready(project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            project_ref = _ensure_current_project_ref()
+            config_path = save_project_config(project_ref, project_config)
+            expansion_path = _save_pending_setting_expansion(project_ref)
+            st.success(f"设定资产已保存：{config_path}")
+            if expansion_path:
+                st.info(f"设定扩写结果已保存：{expansion_path}")
 
     if generate_assets_clicked:
-        project_ref = _ensure_current_project_ref()
-        save_project_config(project_ref, project_config)
-        with st.spinner("正在生成大纲与人物卡..."):
-            _generate_setting_assets(
-                project_key=project_ref,
-                project_config=project_config,
-                task_models=task_models,
-                temperature=temperature,
-                max_tokens=int(max_tokens),
-            )
+        ready, message = _validate_outline_character_generation_ready(project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            project_ref = _ensure_current_project_ref()
+            save_project_config(project_ref, project_config)
+            with st.spinner("正在生成大纲与人物卡..."):
+                _generate_setting_assets(
+                    project_key=project_ref,
+                    project_config=project_config,
+                    task_models=task_models,
+                    temperature=temperature,
+                    max_tokens=int(max_tokens),
+                )
 
     if view_outline_clicked:
         if not project_ref:
@@ -1708,148 +2137,179 @@ def main() -> None:
         batch_clicked = st.button("批量生成章节", use_container_width=True)
 
     chapter_number = int(st.session_state.chapter_number)
-    messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
     preview_clicked = st.button("预览 Prompt", use_container_width=True)
 
-    if notices:
-        with st.expander("本次上下文提示", expanded=False):
-            for notice in notices:
-                st.write(notice)
-
     if preview_clicked:
-        with st.expander("章节正文 messages 预览", expanded=True):
-            st.info(
-                "本次任务模型："
-                f"章节正文 {task_models['chapter']}，"
-                f"章节标题 {task_models['chapter_title']}，"
-                f"章节摘要 {task_models['summary']}"
-            )
-            st.json(messages, expanded=False)
-            st.text_area("可复制 Prompt", value=_format_messages_for_preview(messages), height=420)
+        ready, message = _validate_chapter_generation_ready(project_ref, project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
+            if notices:
+                with st.expander("本次上下文提示", expanded=False):
+                    for notice in notices:
+                        st.write(notice)
+            with st.expander("章节正文 messages 预览", expanded=True):
+                st.info(
+                    "本次任务模型："
+                    f"章节正文 {task_models['chapter']}，"
+                    f"章节标题 {task_models['chapter_title']}，"
+                    f"章节摘要 {task_models['summary']}"
+                )
+                st.json(messages, expanded=False)
+                st.text_area("可复制 Prompt", value=_format_messages_for_preview(messages), height=420)
 
     if generate_clicked:
-        project_ref = _ensure_current_project_ref()
-        messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
-        _generate_and_save(
-            project_key=project_ref,
-            mode=CHAPTER_MODE,
-            messages=messages,
-            task_models=task_models,
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-            chapter_number=chapter_number,
-            project_config=project_config,
-            use_previous_context=use_previous_context,
-        )
-
-    if continue_clicked:
-        project_ref = _ensure_current_project_ref()
-        latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
-        next_chapter_number = int(latest_chapter_number or 0) + 1
-        continue_project_config = project_config
-
-        try:
-            saved_project_config = load_project_config(project_ref)
-        except (FileNotFoundError, ValueError) as exc:
-            st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
+        ready, message = _validate_chapter_generation_ready(project_ref, project_config)
+        if not ready:
+            st.warning(message)
         else:
-            if saved_project_config:
-                continue_project_config = saved_project_config
-                st.info(f"已读取当前小说项目配置：{resolve_project_context(project_ref).project_dir}")
-            else:
-                st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
-
-        continue_messages, continue_notices = _build_messages(
-            project_key=project_ref,
-            mode=CHAPTER_MODE,
-            project_config=continue_project_config,
-            chapter_number=next_chapter_number,
-            use_previous_context=True,
-        )
-        if latest_chapter_path:
-            st.info(
-                f"将从 {latest_chapter_path.name} 继续生成第 {next_chapter_number} 章，"
-                "并已自动启用上一章上下文。"
-            )
-        else:
-            st.info("当前项目还没有章节，将生成第 1 章。")
-        if continue_notices:
-            with st.expander("一键继续使用的上下文", expanded=False):
-                for notice in continue_notices:
-                    st.write(notice)
-
-        _generate_and_save(
-            project_key=project_ref,
-            mode=CHAPTER_MODE,
-            messages=continue_messages,
-            task_models=task_models,
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-            chapter_number=next_chapter_number,
-            project_config=continue_project_config,
-            use_previous_context=True,
-        )
-
-    if batch_clicked:
-        project_ref = _ensure_current_project_ref()
-        chapters_to_generate, batch_error = _plan_batch_chapters(project_ref)
-        if batch_error:
-            st.warning(batch_error)
-        else:
-            st.info(f"将按顺序生成：{', '.join(f'第 {number} 章' for number in chapters_to_generate)}")
-            progress = st.progress(0)
-            successful_results: list[dict[str, Any]] = []
-            failed_result: dict[str, Any] | None = None
-
-            for index, batch_chapter_number in enumerate(chapters_to_generate, start=1):
-                with st.status(f"正在生成第 {batch_chapter_number} 章", expanded=True) as status:
-                    batch_result = generate_single_chapter_workflow(
+            signature = _chapter_generation_signature("specified", project_ref, [chapter_number])
+            if _begin_chapter_generation(signature):
+                try:
+                    messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
+                    if notices:
+                        with st.expander("本次上下文提示", expanded=False):
+                            for notice in notices:
+                                st.write(notice)
+                    _generate_and_save(
                         project_key=project_ref,
-                        chapter_number=batch_chapter_number,
-                        form_data=project_config,
+                        mode=CHAPTER_MODE,
+                        messages=messages,
                         task_models=task_models,
                         temperature=temperature,
                         max_tokens=int(max_tokens),
+                        chapter_number=chapter_number,
+                        project_config=project_config,
+                        use_previous_context=use_previous_context,
+                    )
+                finally:
+                    _end_chapter_generation()
+
+    if continue_clicked:
+        continue_project_config = project_config
+        if project_ref:
+            try:
+                saved_project_config = load_project_config(project_ref)
+            except (FileNotFoundError, ValueError) as exc:
+                st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
+            else:
+                if saved_project_config:
+                    continue_project_config = saved_project_config
+                    st.info(f"已读取当前小说项目配置：{resolve_project_context(project_ref).project_dir}")
+                else:
+                    st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
+
+        ready, message = _validate_chapter_generation_ready(project_ref, continue_project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
+            next_chapter_number = int(latest_chapter_number or 0) + 1
+            signature = _chapter_generation_signature("continue", project_ref, [next_chapter_number])
+            if _begin_chapter_generation(signature):
+                try:
+                    continue_messages, continue_notices = _build_messages(
+                        project_key=project_ref,
+                        mode=CHAPTER_MODE,
+                        project_config=continue_project_config,
+                        chapter_number=next_chapter_number,
                         use_previous_context=True,
                     )
-                    if batch_result.get("error"):
-                        failed_result = batch_result
-                        status.update(label=f"第 {batch_chapter_number} 章生成失败", state="error")
-                        st.error(batch_result["error"])
-                        break
+                    if latest_chapter_path:
+                        st.info(
+                            f"将从 {latest_chapter_path.name} 继续生成第 {next_chapter_number} 章，"
+                            "并已自动启用上一章上下文。"
+                        )
+                    else:
+                        st.info("当前项目还没有章节，将生成第 1 章。")
+                    if continue_notices:
+                        with st.expander("一键继续使用的上下文", expanded=False):
+                            for notice in continue_notices:
+                                st.write(notice)
 
-                    successful_results.append(batch_result)
-                    status.update(label=f"第 {batch_chapter_number} 章生成成功", state="complete")
-                    st.write(f"章节标题：{batch_result['chapter_title']}")
-                    st.write(
-                        "使用模型："
-                        f"正文 {batch_result['chapter_model']}，"
-                        f"标题 {batch_result['chapter_title_model']}，"
-                        f"摘要 {batch_result['summary_model']}"
+                    _generate_and_save(
+                        project_key=project_ref,
+                        mode=CHAPTER_MODE,
+                        messages=continue_messages,
+                        task_models=task_models,
+                        temperature=temperature,
+                        max_tokens=int(max_tokens),
+                        chapter_number=next_chapter_number,
+                        project_config=continue_project_config,
+                        use_previous_context=True,
                     )
-                    st.write(f"保存路径：{batch_result['chapter_path']}")
-                    if batch_result.get("summary_path"):
-                        st.write(f"摘要已保存：{batch_result['summary_path']}")
-                    elif batch_result.get("summary_error"):
-                        st.warning(f"摘要生成失败：{batch_result['summary_error']}")
+                finally:
+                    _end_chapter_generation()
 
-                progress.progress(index / len(chapters_to_generate))
+    if batch_clicked:
+        ready, message = _validate_chapter_generation_ready(project_ref, project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            chapters_to_generate, batch_error = _plan_batch_chapters(project_ref)
+            if batch_error:
+                st.warning(batch_error)
+            else:
+                signature = _chapter_generation_signature("batch", project_ref, chapters_to_generate)
+                if _begin_chapter_generation(signature):
+                    try:
+                        st.info(f"将按顺序生成：{', '.join(f'第 {number} 章' for number in chapters_to_generate)}")
+                        progress = st.progress(0)
+                        successful_results: list[dict[str, Any]] = []
+                        failed_result: dict[str, Any] | None = None
 
-            if successful_results:
-                last_result = successful_results[-1]
-                _set_current_result(last_result["content"], Path(last_result["chapter_path"]))
-                _mark_reader_refresh(int(last_result["chapter_number"]))
-                st.success(f"批量生成完成：成功生成 {len(successful_results)} 章。")
-                for item in successful_results:
-                    st.write(
-                        f"第 {item['chapter_number']} 章：{item['chapter_title']}，"
-                        f"正文模型 {item['chapter_model']}，{item['chapter_path']}"
-                    )
-            if failed_result:
-                st.warning(
-                    f"批量生成已停止：第 {failed_result['chapter_number']} 章失败。"
-                    f"已成功生成 {len(successful_results)} 章。"
-                )
+                        for index, batch_chapter_number in enumerate(chapters_to_generate, start=1):
+                            with st.status(f"正在生成第 {batch_chapter_number} 章", expanded=True) as status:
+                                batch_result = generate_single_chapter_workflow(
+                                    project_key=project_ref,
+                                    chapter_number=batch_chapter_number,
+                                    form_data=project_config,
+                                    task_models=task_models,
+                                    temperature=temperature,
+                                    max_tokens=int(max_tokens),
+                                    use_previous_context=True,
+                                )
+                                if batch_result.get("error"):
+                                    failed_result = batch_result
+                                    status.update(label=f"第 {batch_chapter_number} 章生成失败", state="error")
+                                    st.error(batch_result["error"])
+                                    break
+
+                                successful_results.append(batch_result)
+                                status.update(label=f"第 {batch_chapter_number} 章生成成功", state="complete")
+                                st.write(f"章节标题：{batch_result['chapter_title']}")
+                                st.write(
+                                    "使用模型："
+                                    f"正文 {batch_result['chapter_model']}，"
+                                    f"标题 {batch_result['chapter_title_model']}，"
+                                    f"摘要 {batch_result['summary_model']}"
+                                )
+                                st.write(f"保存路径：{batch_result['chapter_path']}")
+                                if batch_result.get("summary_path"):
+                                    st.write(f"摘要已保存：{batch_result['summary_path']}")
+                                elif batch_result.get("summary_error"):
+                                    st.warning(f"摘要生成失败：{batch_result['summary_error']}")
+
+                            progress.progress(index / len(chapters_to_generate))
+
+                        if successful_results:
+                            last_result = successful_results[-1]
+                            _set_current_result(last_result["content"], Path(last_result["chapter_path"]))
+                            _mark_reader_refresh(int(last_result["chapter_number"]))
+                            st.success(f"批量生成完成：成功生成 {len(successful_results)} 章。")
+                            for item in successful_results:
+                                st.write(
+                                    f"第 {item['chapter_number']} 章：{item['chapter_title']}，"
+                                    f"正文模型 {item['chapter_model']}，{item['chapter_path']}"
+                                )
+                        if failed_result:
+                            st.warning(
+                                f"批量生成已停止：第 {failed_result['chapter_number']} 章失败。"
+                                f"已成功生成 {len(successful_results)} 章。"
+                            )
+                    finally:
+                        _end_chapter_generation()
 
     with reader_placeholder.container():
         _render_reader_export_center(_current_project_ref(), _current_project_title())

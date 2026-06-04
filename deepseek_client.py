@@ -50,6 +50,11 @@ def _get_api_key() -> str:
     return api_key
 
 
+def _get_base_url() -> str:
+    load_dotenv()
+    return os.getenv("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL).strip() or DEEPSEEK_BASE_URL
+
+
 def test_deepseek_connection(api_key: str, model: str) -> tuple[bool, str]:
     """Test DeepSeek with a temporary API key without reading or writing .env."""
     safe_api_key = (api_key or "").strip()
@@ -57,7 +62,7 @@ def test_deepseek_connection(api_key: str, model: str) -> tuple[bool, str]:
     if not safe_api_key or safe_api_key == "your_api_key_here":
         return False, "请先填写有效的 DeepSeek API Key。"
 
-    client = OpenAI(api_key=safe_api_key, base_url=DEEPSEEK_BASE_URL)
+    client = OpenAI(api_key=safe_api_key, base_url=_get_base_url())
 
     try:
         response: Any = client.chat.completions.create(
@@ -103,7 +108,7 @@ def generate_text(
         raise DeepSeekClientError("Prompt 为空，无法生成内容。")
 
     api_key = _get_api_key()
-    client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL)
+    client = OpenAI(api_key=api_key, base_url=_get_base_url())
 
     try:
         response: Any = client.chat.completions.create(

@@ -7,12 +7,13 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from config import DEFAULT_MODEL, DEEPSEEK_MODELS, PROJECT_ROOT
+from config import DEEPSEEK_BASE_URL, DEFAULT_MODEL, DEEPSEEK_MODELS, PROJECT_ROOT
 
 
 API_KEY_PLACEHOLDER = "your_api_key_here"
 DEFAULT_ENV_LINES = [
     "DEEPSEEK_API_KEY=your_api_key_here",
+    f"DEEPSEEK_BASE_URL={DEEPSEEK_BASE_URL}",
     f"DEFAULT_MODEL={DEFAULT_MODEL}",
 ]
 _ENV_KEY_PATTERN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
@@ -70,6 +71,12 @@ def get_current_default_model() -> str:
     return model
 
 
+def get_current_base_url() -> str:
+    values = _read_env_values()
+    base_url = values.get("DEEPSEEK_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL", "") or DEEPSEEK_BASE_URL
+    return base_url.strip() or DEEPSEEK_BASE_URL
+
+
 def get_api_key_status() -> dict[str, object]:
     values = _read_env_values()
     file_value = values.get("DEEPSEEK_API_KEY", "")
@@ -91,6 +98,7 @@ def get_api_key_status() -> dict[str, object]:
         "placeholder": file_value == API_KEY_PLACEHOLDER or process_value == API_KEY_PLACEHOLDER,
         "source": source,
         "default_model": get_current_default_model(),
+        "base_url": get_current_base_url(),
     }
 
 
@@ -163,13 +171,30 @@ def resolve_selected_model(model_choice: str, custom_model: str) -> str:
     return DEFAULT_MODEL
 
 
-def save_api_config(api_key: str, default_model: str, custom_model: str = "") -> str:
+def _validate_base_url(base_url: str) -> str:
+    cleaned = (base_url or "").strip() or DEEPSEEK_BASE_URL
+    if not cleaned.startswith(("http://", "https://")):
+        raise ValueError("Base URL 必须以 http:// 或 https:// 开头。")
+    return cleaned.rstrip("/")
+
+
+def save_api_config(
+    api_key: str,
+    default_model: str,
+    custom_model: str = "",
+    base_url: str = "",
+    require_api_key: bool = True,
+) -> str:
     selected_model = resolve_selected_model(default_model, custom_model)
     cleaned_api_key = (api_key or "").strip()
-    if not _is_real_api_key(cleaned_api_key):
+    if cleaned_api_key:
+        if not _is_real_api_key(cleaned_api_key):
+            raise ValueError("请填写有效的 DeepSeek API Key 后再保存。")
+        update_env_value("DEEPSEEK_API_KEY", cleaned_api_key)
+    elif require_api_key or not _read_configured_api_key():
         raise ValueError("请填写有效的 DeepSeek API Key 后再保存。")
 
-    update_env_value("DEEPSEEK_API_KEY", cleaned_api_key)
+    update_env_value("DEEPSEEK_BASE_URL", _validate_base_url(base_url))
     update_env_value("DEFAULT_MODEL", selected_model)
     return selected_model
 
