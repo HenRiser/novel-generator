@@ -1192,8 +1192,28 @@ def _strip_json_code_fence(raw_text: str) -> str:
     return text.strip()
 
 
+def _normalize_json_punctuation(raw_text: str) -> str:
+    return (raw_text or "").translate(
+        str.maketrans(
+            {
+                "｛": "{",
+                "｝": "}",
+                "［": "[",
+                "］": "]",
+                "“": '"',
+                "”": '"',
+                "＂": '"',
+                "：": ":",
+                "，": ",",
+                "‘": "'",
+                "’": "'",
+            }
+        )
+    )
+
+
 def _extract_json_object(raw_text: str) -> str:
-    text = _strip_json_code_fence(raw_text)
+    text = _normalize_json_punctuation(_strip_json_code_fence(raw_text))
     start = text.find("{")
     if start == -1:
         raise ValueError("JSON 解析失败：返回内容中没有找到 JSON 对象。")
@@ -1228,21 +1248,8 @@ def _extract_json_object(raw_text: str) -> str:
 
 
 def _repair_common_json_issues(json_text: str) -> str:
-    repaired = _strip_json_code_fence(json_text)
+    repaired = _normalize_json_punctuation(_strip_json_code_fence(json_text))
     repaired = repaired.replace("\ufeff", "").replace("\u00a0", " ")
-    repaired = repaired.translate(
-        str.maketrans(
-            {
-                "“": '"',
-                "”": '"',
-                "＂": '"',
-                "‘": '"',
-                "’": '"',
-                "：": ":",
-                "，": ",",
-            }
-        )
-    )
     repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
     repaired = re.sub(
         r'([}\]"])\s*(?:\r?\n)+\s*("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
