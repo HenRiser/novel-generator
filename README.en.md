@@ -6,7 +6,7 @@ A lightweight local-first AI novel writing tool built with Streamlit and the Ope
 
 ## Features
 
-- Enter a novel title, genre, writing style, characters, worldview, core conflict, target readers, and extra requirements.
+- Enter a novel title, genre, writing style, characters, worldview, core conflict, and extra requirements.
 - Generate or update the novel outline as a setting asset.
 - Generate or update character cards as setting assets.
 - Write a specified chapter, continue with the next chapter, or generate a small chapter range.

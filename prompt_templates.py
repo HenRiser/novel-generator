@@ -34,7 +34,8 @@ def _setting_expansion_system_prompt(story_scale: str) -> str:
         "你可以补充合理细节，但不能覆盖用户明确给出的设定。"
         "当用户没有明确给出小说标题时，你需要根据故事题材、主角目标、世界观关键词和核心冲突，"
         "生成多个不同风格的小说标题候选，并选择一个最适合作为推荐标题。"
-        "请只输出严格 JSON，不要输出 Markdown，不要输出解释。"
+        "请只输出合法 JSON，不要输出 Markdown、代码块、解释或 JSON 以外的任何文字。"
+        "所有字段之间必须使用英文逗号分隔，所有 key 必须使用英文双引号。"
     )
 
 
@@ -46,7 +47,6 @@ PROJECT_FIELD_LABELS = {
     "supporting_characters": "重要配角设定",
     "worldview": "世界观设定",
     "core_conflict": "故事核心冲突",
-    "target_readers": "目标读者",
     "word_count_range": "单章字数范围",
     "extra_requirements": "额外要求",
 }
@@ -219,19 +219,26 @@ def build_expand_setting_prompt(
 
 ## JSON 输出要求
 1. 必须是合法 JSON。
-2. 不要使用 Markdown 代码块。
-3. 不要在 JSON 前后添加解释。
-4. 字段名必须完全一致：
+2. 只输出 JSON 对象本身。
+3. 不要输出 Markdown。
+4. 不要输出代码块。
+5. 不要输出解释。
+6. 不要在 JSON 前后添加任何文字。
+7. 所有字段之间必须使用英文逗号分隔。
+8. 所有 key 必须使用英文双引号。
+9. 字符串内部换行必须使用 \\n 转义，不要直接换行。
+10. 不得省略字段。
+11. 不得输出 trailing comma。
+12. 字段名必须完全一致：
    - title_candidates
    - recommended_title
    - protagonist_setting
    - supporting_characters_setting
    - world_setting
    - core_conflict
-5. title_candidates 使用字符串数组。
-6. recommended_title 和四个设定字段使用字符串，不要使用对象，方便直接填入页面文本框。
-7. 字符串内部可以使用换行符。
-8. 如果用户原始描述中信息不足，请合理补充，但不要偏离原意。
+13. title_candidates 使用字符串数组。
+14. recommended_title 和四个设定字段使用字符串，不要使用对象，方便直接填入页面文本框。
+15. 如果用户原始描述中信息不足，请合理补充，但不要偏离原意。
 """
     return [
         {"role": "system", "content": _setting_expansion_system_prompt(story_scale)},

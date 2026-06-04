@@ -6,7 +6,7 @@
 
 ## 功能列表
 
-- 输入小说标题、类型、风格、人物、世界观、核心冲突、目标读者和额外要求。
+- 输入小说标题、类型、风格、人物、世界观、核心冲突和额外要求。
 - 大纲生成，新项目保存到 `workspace/books/{book_id}/novel_outline.md`，旧项目继续兼容 `outputs/小说标题/novel_outline.md`，并自动追加版本号。
 - 人物卡生成，新项目保存到 `workspace/books/{book_id}/characters.md`，旧项目继续兼容 `outputs/小说标题/characters.md`，并自动追加版本号。
 - 生成指定章节正文，新项目保存为 `workspace/books/{book_id}/chapters/chapter_001.md`、`chapter_002.md` 等，旧项目继续兼容 `outputs/小说标题/chapters/`。

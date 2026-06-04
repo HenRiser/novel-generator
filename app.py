@@ -86,6 +86,17 @@ REQUIRED_SETTING_EXPANSION_FIELDS = [
     "world_setting",
     "core_conflict",
 ]
+REQUIRED_SETTING_EXPANSION_SCHEMA_FIELDS = [
+    "title_candidates",
+    "recommended_title",
+    *REQUIRED_SETTING_EXPANSION_FIELDS,
+]
+REQUIRED_STORY_SETTING_FIELDS = {
+    "protagonist": "主角设定",
+    "supporting_characters": "重要配角设定",
+    "worldview": "世界观设定",
+    "core_conflict": "故事核心冲突",
+}
 LEGACY_MODEL_MAP = {
     "deepseek-chat": "deepseek-v4-flash",
     "deepseek-reasoner": "deepseek-v4-pro",
@@ -694,7 +705,6 @@ def _init_session_state() -> None:
         "supporting_characters_setting": "",
         "world_setting": "",
         "core_conflict": "",
-        "target_readers": "",
         "chapter_word_range": "3000-5000 字",
         "chapter_number": 1,
         "extra_requirements": "",
@@ -1018,12 +1028,74 @@ def _collect_project_config() -> dict[str, Any]:
         "supporting_characters": st.session_state.supporting_characters_setting.strip(),
         "worldview": st.session_state.world_setting.strip(),
         "core_conflict": st.session_state.core_conflict.strip(),
-        "target_readers": st.session_state.target_readers.strip(),
         "word_count_range": st.session_state.chapter_word_range.strip(),
         "extra_requirements": st.session_state.extra_requirements.strip(),
         "model_settings": _model_settings_from_state(),
         "setting_generation_options": _setting_generation_options_from_state(),
     }
+
+
+def _is_placeholder_title(title: Any) -> bool:
+    cleaned = str(title or "").strip()
+    return not cleaned or cleaned == "未命名小说"
+
+
+def _missing_story_setting_labels(project_config: dict[str, Any]) -> list[str]:
+    return [
+        label
+        for key, label in REQUIRED_STORY_SETTING_FIELDS.items()
+        if not str(project_config.get(key) or "").strip()
+    ]
+
+
+def _missing_basic_config_label(project_config: dict[str, Any]) -> str:
+    for key, label in {"genre": "小说类型", "style": "写作风格", "word_count_range": "单章字数范围"}.items():
+        if not str(project_config.get(key) or "").strip():
+            return label
+    return ""
+
+
+def _validate_project_config_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题，并完成设定输入或在“小说设定”区域补全必要内容后再保存项目配置。"
+
+    missing_settings = _missing_story_setting_labels(project_config)
+    if missing_settings:
+        return (
+            False,
+            "请先填写小说标题，并完成设定输入或在“小说设定”区域补全必要内容后再保存项目配置。"
+            f"缺少：{'、'.join(missing_settings)}。",
+        )
+
+    missing_basic = _missing_basic_config_label(project_config)
+    if missing_basic:
+        return False, f"请先补全{missing_basic}后再保存项目配置。"
+
+    return True, ""
+
+
+def _validate_story_settings_ready(project_config: dict[str, Any], message: str) -> tuple[bool, str]:
+    missing_settings = _missing_story_setting_labels(project_config)
+    if missing_settings:
+        return False, f"{message}缺少：{'、'.join(missing_settings)}。"
+
+    missing_basic = _missing_basic_config_label(project_config)
+    if missing_basic:
+        return False, f"请先补全{missing_basic}。"
+
+    return True, ""
+
+
+def _validate_setting_assets_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题并补全小说设定后再保存设定资产。"
+    return _validate_story_settings_ready(project_config, "请先补全小说设定后再保存设定资产。")
+
+
+def _validate_outline_character_generation_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
+    if _is_placeholder_title(project_config.get("title")):
+        return False, "请先填写小说标题并完成小说设定后再生成大纲与人物卡。"
+    return _validate_story_settings_ready(project_config, "请先完成小说设定后再生成大纲与人物卡。")
 
 
 def _load_config_to_session(config: dict[str, Any]) -> None:
@@ -1045,7 +1117,6 @@ def _load_config_to_session(config: dict[str, Any]) -> None:
     st.session_state.supporting_characters_setting = config.get("supporting_characters", "")
     st.session_state.world_setting = config.get("worldview", "")
     st.session_state.core_conflict = config.get("core_conflict", "")
-    st.session_state.target_readers = config.get("target_readers", "")
     st.session_state.chapter_word_range = config.get("word_count_range", "3000-5000 字")
     st.session_state.extra_requirements = config.get("extra_requirements", "")
     _load_model_settings_to_session(config.get("model_settings", DEFAULT_MODEL_SETTINGS))
@@ -1111,48 +1182,151 @@ def _save_pending_setting_expansion(project_key: str) -> Path | None:
     return save_setting_expansion(project_key, raw_story_idea, expanded_data)
 
 
-def parse_setting_expansion_response(raw_text: str) -> dict[str, Any]:
+def _strip_json_code_fence(raw_text: str) -> str:
+    text = (raw_text or "").strip()
+    match = re.search(r"```(?:json|JSON)?\s*(.*?)\s*```", text, flags=re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    text = re.sub(r"^\s*```(?:json|JSON)?\s*", "", text)
+    text = re.sub(r"\s*```\s*$", "", text)
+    return text.strip()
+
+
+def _extract_json_object(raw_text: str) -> str:
+    text = _strip_json_code_fence(raw_text)
+    start = text.find("{")
+    if start == -1:
+        raise ValueError("JSON 解析失败：返回内容中没有找到 JSON 对象。")
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1].strip()
+
+    end = text.rfind("}")
+    if end > start:
+        return text[start : end + 1].strip()
+    raise ValueError("JSON 解析失败：返回内容中没有找到完整的 JSON 对象。")
+
+
+def _repair_common_json_issues(json_text: str) -> str:
+    repaired = _strip_json_code_fence(json_text)
+    repaired = repaired.replace("\ufeff", "").replace("\u00a0", " ")
+    repaired = repaired.translate(
+        str.maketrans(
+            {
+                "“": '"',
+                "”": '"',
+                "＂": '"',
+                "‘": '"',
+                "’": '"',
+                "：": ":",
+                "，": ",",
+            }
+        )
+    )
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    repaired = re.sub(
+        r'([}\]"])\s*(?:\r?\n)+\s*("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
+        r"\1,\n  \2",
+        repaired,
+    )
+    repaired = re.sub(
+        r'([}\]"])\s+("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
+        r"\1, \2",
+        repaired,
+    )
+    return repaired.strip()
+
+
+def parse_model_json_response(raw_text: str) -> dict[str, Any]:
     raw_text = (raw_text or "").strip()
     if not raw_text:
         raise ValueError("模型返回内容为空，无法解析 JSON。")
 
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError:
-        start = raw_text.find("{")
-        end = raw_text.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise ValueError("JSON 解析失败：返回内容中没有找到完整的 JSON 对象。")
+    candidates: list[str] = []
+    for candidate in (raw_text, _strip_json_code_fence(raw_text)):
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+
+    extracted = _extract_json_object(raw_text)
+    if extracted not in candidates:
+        candidates.append(extracted)
+
+    repaired = _repair_common_json_issues(extracted)
+    if repaired not in candidates:
+        candidates.append(repaired)
+
+    last_error: json.JSONDecodeError | None = None
+    for candidate in candidates:
         try:
-            data = json.loads(raw_text[start : end + 1])
+            data = json.loads(candidate)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"JSON 解析失败：{exc}") from exc
+            last_error = exc
+            continue
+        if not isinstance(data, dict):
+            raise ValueError("JSON 解析失败：返回结果不是 JSON 对象。")
+        return data
 
-    if not isinstance(data, dict):
-        raise ValueError("JSON 解析失败：返回结果不是 JSON 对象。")
+    detail = f"最后错误：{last_error}" if last_error else ""
+    raise ValueError(f"JSON 解析失败：模型返回的设定不是合法 JSON，系统已尝试提取和轻量修复但仍无法解析。{detail}")
 
-    missing_fields = [field for field in REQUIRED_SETTING_EXPANSION_FIELDS if field not in data]
+
+def _coerce_title_candidates(value: Any) -> list[str]:
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, str):
+        candidates = re.split(r"[\n,，、;；]+", value)
+    else:
+        raise ValueError("JSON 字段类型错误：title_candidates 必须是字符串数组。")
+
+    titles = [str(title).strip().strip('"“”') for title in candidates if str(title).strip()]
+    if not titles:
+        raise ValueError("JSON 字段为空：title_candidates 至少需要一个标题候选。")
+    return titles
+
+
+def parse_setting_expansion_response(raw_text: str) -> dict[str, Any]:
+    data = parse_model_json_response(raw_text)
+
+    missing_fields = [field for field in REQUIRED_SETTING_EXPANSION_SCHEMA_FIELDS if field not in data]
     if missing_fields:
         raise ValueError(f"JSON 字段缺失：{', '.join(missing_fields)}")
 
-    parsed: dict[str, Any] = {}
+    parsed: dict[str, Any] = {
+        "title_candidates": _coerce_title_candidates(data["title_candidates"]),
+    }
+
+    recommended_title = data["recommended_title"]
+    if not isinstance(recommended_title, str) or not recommended_title.strip():
+        raise ValueError("JSON 字段为空：recommended_title 必须是非空字符串。")
+    parsed["recommended_title"] = recommended_title.strip()
+
     for field in REQUIRED_SETTING_EXPANSION_FIELDS:
         value = data[field]
         if not isinstance(value, str):
             raise ValueError(f"JSON 字段类型错误：{field} 必须是字符串。")
+        if not value.strip():
+            raise ValueError(f"JSON 字段为空：{field} 不能为空。")
         parsed[field] = value.strip()
-
-    title_candidates = data.get("title_candidates", [])
-    if not isinstance(title_candidates, list):
-        title_candidates = []
-    parsed["title_candidates"] = [
-        str(title).strip()
-        for title in title_candidates
-        if isinstance(title, str) and title.strip()
-    ]
-
-    recommended_title = data.get("recommended_title", "")
-    parsed["recommended_title"] = recommended_title.strip() if isinstance(recommended_title, str) else ""
 
     return parsed
 
@@ -1481,20 +1655,10 @@ def _validate_chapter_generation_ready(project_ref: str, project_config: dict[st
     except (FileNotFoundError, ValueError) as exc:
         return False, f"当前项目无效，无法生成正文：{exc}"
 
-    title = str(project_config.get("title") or "").strip()
-    if not title or title == "未命名小说":
+    if _is_placeholder_title(project_config.get("title")):
         return False, "请先填写小说标题，并保存项目配置后再生成正文。"
 
-    missing_fields = []
-    required_fields = {
-        "protagonist": "主角设定",
-        "supporting_characters": "重要配角设定",
-        "worldview": "世界观设定",
-        "core_conflict": "故事核心冲突",
-    }
-    for key, label in required_fields.items():
-        if not str(project_config.get(key) or "").strip():
-            missing_fields.append(label)
+    missing_fields = _missing_story_setting_labels(project_config)
 
     if missing_fields:
         return (
@@ -1503,9 +1667,9 @@ def _validate_chapter_generation_ready(project_ref: str, project_config: dict[st
             f"缺少：{'、'.join(missing_fields)}。",
         )
 
-    for key, label in {"genre": "小说类型", "style": "写作风格", "word_count_range": "单章字数范围"}.items():
-        if not str(project_config.get(key) or "").strip():
-            return False, f"请先补全{label}后再生成正文。"
+    missing_basic = _missing_basic_config_label(project_config)
+    if missing_basic:
+        return False, f"请先补全{missing_basic}后再生成正文。"
 
     _, outline_path = read_latest_outline(project_ref)
     _, characters_path = read_latest_characters(project_ref)
@@ -1703,12 +1867,17 @@ def main() -> None:
 
     with save_col:
         if st.button("保存项目配置", use_container_width=True):
-            project_ref = _ensure_current_project_ref()
-            path = save_project_config(project_ref, _collect_project_config())
-            st.success(f"项目配置已保存：{path}")
-            expansion_path = _save_pending_setting_expansion(project_ref)
-            if expansion_path:
-                st.info(f"最近一次设定扩写已保存：{expansion_path}")
+            project_config_to_save = _collect_project_config()
+            ready, message = _validate_project_config_ready(project_config_to_save)
+            if not ready:
+                st.warning(message)
+            else:
+                project_ref = _ensure_current_project_ref()
+                path = save_project_config(project_ref, project_config_to_save)
+                st.success(f"项目配置已保存：{path}")
+                expansion_path = _save_pending_setting_expansion(project_ref)
+                if expansion_path:
+                    st.info(f"最近一次设定扩写已保存：{expansion_path}")
 
     reader_placeholder = st.empty()
 
@@ -1855,11 +2024,7 @@ def main() -> None:
     st.text_area("世界观设定", key="world_setting", height=130)
     st.text_area("故事核心冲突", key="core_conflict", height=100)
 
-    col3, col4 = st.columns(2)
-    with col3:
-        st.text_input("目标读者", key="target_readers")
-    with col4:
-        st.text_input("单章字数范围", key="chapter_word_range")
+    st.text_input("单章字数范围", key="chapter_word_range")
 
     st.text_area(
         "额外要求",
@@ -1871,7 +2036,7 @@ def main() -> None:
     project_ref = _current_project_ref()
     project_config = _collect_project_config()
     st.subheader("小说设定 / 大纲与人物")
-    st.caption("大纲和人物卡是正文生成前的设定资产；本阶段不强制锁定章节生成，但建议先保存或生成。")
+    st.caption("大纲和人物卡是正文生成前的设定资产；保存、生成和章节正文创作都会先检查必要设定。")
     asset_col1, asset_col2, asset_col3, asset_col4 = st.columns(4)
     with asset_col1:
         generate_assets_clicked = st.button("生成 / 更新大纲与人物卡", use_container_width=True)
@@ -1883,24 +2048,32 @@ def main() -> None:
         save_setting_assets_clicked = st.button("保存设定资产", use_container_width=True)
 
     if save_setting_assets_clicked:
-        project_ref = _ensure_current_project_ref()
-        config_path = save_project_config(project_ref, project_config)
-        expansion_path = _save_pending_setting_expansion(project_ref)
-        st.success(f"设定资产已保存：{config_path}")
-        if expansion_path:
-            st.info(f"设定扩写结果已保存：{expansion_path}")
+        ready, message = _validate_setting_assets_ready(project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            project_ref = _ensure_current_project_ref()
+            config_path = save_project_config(project_ref, project_config)
+            expansion_path = _save_pending_setting_expansion(project_ref)
+            st.success(f"设定资产已保存：{config_path}")
+            if expansion_path:
+                st.info(f"设定扩写结果已保存：{expansion_path}")
 
     if generate_assets_clicked:
-        project_ref = _ensure_current_project_ref()
-        save_project_config(project_ref, project_config)
-        with st.spinner("正在生成大纲与人物卡..."):
-            _generate_setting_assets(
-                project_key=project_ref,
-                project_config=project_config,
-                task_models=task_models,
-                temperature=temperature,
-                max_tokens=int(max_tokens),
-            )
+        ready, message = _validate_outline_character_generation_ready(project_config)
+        if not ready:
+            st.warning(message)
+        else:
+            project_ref = _ensure_current_project_ref()
+            save_project_config(project_ref, project_config)
+            with st.spinner("正在生成大纲与人物卡..."):
+                _generate_setting_assets(
+                    project_key=project_ref,
+                    project_config=project_config,
+                    task_models=task_models,
+                    temperature=temperature,
+                    max_tokens=int(max_tokens),
+                )
 
     if view_outline_clicked:
         if not project_ref:
