@@ -79,6 +79,19 @@ CHARACTER_MODE = "character"
 CHAPTER_MODE = "chapter"
 BATCH_MAX_CHAPTERS = 5
 GENERATION_DUPLICATE_WINDOW_SECONDS = 3.0
+GENERATION_STATUS_LABELS = {
+    "idle": "空闲",
+    "running": "生成中",
+    "completed": "生成完成",
+    "failed": "生成失败",
+    "cancelled": "已取消",
+}
+GENERATION_TASK_TYPE_LABELS = {
+    None: "无",
+    "chapter": "章节生成",
+    "batch_chapter": "批量章节生成",
+    "outline_character": "大纲与人物卡生成",
+}
 EXPAND_DETAIL_OPTIONS = ["低", "中", "高"]
 REQUIRED_SETTING_EXPANSION_FIELDS = [
     "protagonist_setting",
@@ -559,6 +572,184 @@ def _render_project_status(project_ref: str, project_title: str) -> None:
     _render_open_project_button(project_dir, "open_project_debug")
 
 
+def _default_generation_task() -> dict[str, Any]:
+    return {
+        "status": "idle",
+        "task_type": None,
+        "target": None,
+        "project_ref": "",
+        "request_id": "",
+        "request_signature": "",
+        "started_at": "",
+        "finished_at": "",
+        "started_monotonic": 0.0,
+        "finished_monotonic": 0.0,
+        "error": None,
+        "result_paths": [],
+        "progress_current": 0,
+        "progress_total": 0,
+    }
+
+
+def _get_generation_task() -> dict[str, Any]:
+    default_task = _default_generation_task()
+    task = st.session_state.get("generation_task")
+    if not isinstance(task, dict):
+        st.session_state.generation_task = default_task
+        return default_task
+
+    normalized = dict(default_task)
+    normalized.update({key: task.get(key, value) for key, value in default_task.items()})
+    if normalized["status"] not in GENERATION_STATUS_LABELS:
+        normalized["status"] = "idle"
+    if not isinstance(normalized.get("result_paths"), list):
+        normalized["result_paths"] = []
+    for key in ("progress_current", "progress_total"):
+        try:
+            normalized[key] = max(0, int(normalized.get(key) or 0))
+        except (TypeError, ValueError):
+            normalized[key] = 0
+
+    st.session_state.generation_task = normalized
+    return normalized
+
+
+def _is_generation_running() -> bool:
+    return _get_generation_task().get("status") == "running"
+
+
+def _sync_legacy_chapter_generation_state(task: dict[str, Any]) -> None:
+    task_type = task.get("task_type")
+    is_chapter_task = task_type in {"chapter", "batch_chapter"}
+    is_running = task.get("status") == "running"
+    signature = str(task.get("request_signature") or "")
+
+    st.session_state.is_generating_chapter = bool(is_running and is_chapter_task)
+    st.session_state.active_chapter_generation_signature = signature if is_running and is_chapter_task else ""
+
+    if not is_running and is_chapter_task and signature:
+        st.session_state.last_chapter_generation_signature = signature
+        st.session_state.last_chapter_generation_completed_at = float(
+            task.get("finished_monotonic") or time.monotonic()
+        )
+
+
+def _start_generation_task(
+    task_type: str,
+    target: str,
+    project_ref: str,
+    request_signature: str,
+    request_id: str | None = None,
+    progress_total: int = 0,
+) -> bool:
+    task = _get_generation_task()
+    if task.get("status") == "running":
+        current_type = GENERATION_TASK_TYPE_LABELS.get(task.get("task_type"), "生成任务")
+        current_target = task.get("target") or "当前目标"
+        st.warning(f"当前已有{current_type}正在进行：{current_target}。请等待完成后再操作。")
+        return False
+
+    now = time.monotonic()
+    finished_at = float(task.get("finished_monotonic") or 0.0)
+    if (
+        task.get("request_signature") == request_signature
+        and task.get("status") in {"completed", "failed", "cancelled"}
+        and now - finished_at < GENERATION_DUPLICATE_WINDOW_SECONDS
+    ):
+        st.warning("刚刚已经处理过同一次生成请求，请稍后再重复生成。")
+        return False
+
+    generation_task = _default_generation_task()
+    generation_task.update(
+        {
+            "status": "running",
+            "task_type": task_type,
+            "target": target,
+            "project_ref": project_ref,
+            "request_id": request_id or f"{request_signature}:{now:.6f}",
+            "request_signature": request_signature,
+            "started_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "started_monotonic": now,
+            "progress_total": max(0, int(progress_total or 0)),
+        }
+    )
+    st.session_state.generation_task = generation_task
+    _sync_legacy_chapter_generation_state(generation_task)
+    return True
+
+
+def _update_generation_task_progress(
+    progress_current: int,
+    progress_total: int | None = None,
+    result_paths: list[str] | None = None,
+) -> None:
+    task = _get_generation_task()
+    if task.get("status") != "running":
+        return
+
+    task["progress_current"] = max(0, int(progress_current or 0))
+    if progress_total is not None:
+        task["progress_total"] = max(0, int(progress_total or 0))
+    if result_paths is not None:
+        task["result_paths"] = list(result_paths)
+    st.session_state.generation_task = task
+
+
+def _complete_generation_task(result_paths: list[str] | None = None) -> None:
+    task = _get_generation_task()
+    now = time.monotonic()
+    task["status"] = "completed"
+    task["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    task["finished_monotonic"] = now
+    task["error"] = None
+    if result_paths is not None:
+        task["result_paths"] = list(result_paths)
+    if task.get("progress_total") and not task.get("progress_current"):
+        task["progress_current"] = int(task["progress_total"])
+    st.session_state.generation_task = task
+    _sync_legacy_chapter_generation_state(task)
+
+
+def _fail_generation_task(error: str) -> None:
+    task = _get_generation_task()
+    now = time.monotonic()
+    task["status"] = "failed"
+    task["finished_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    task["finished_monotonic"] = now
+    task["error"] = str(error or "生成任务失败。")
+    st.session_state.generation_task = task
+    _sync_legacy_chapter_generation_state(task)
+
+
+def _render_generation_task_status() -> None:
+    task = _get_generation_task()
+    status = task.get("status")
+    if status == "idle":
+        return
+
+    task_type = GENERATION_TASK_TYPE_LABELS.get(task.get("task_type"), "生成任务")
+    status_label = GENERATION_STATUS_LABELS.get(status, status)
+    lines = [f"当前任务：{task_type}", f"目标：{task.get('target') or '未指定'}", f"状态：{status_label}"]
+    if task.get("progress_total"):
+        lines.append(f"进度：{task.get('progress_current', 0)} / {task.get('progress_total', 0)}")
+    if task.get("error"):
+        lines.append(f"生成失败：{task['error']}")
+    result_paths = task.get("result_paths") or []
+    if result_paths:
+        latest_path = Path(str(result_paths[-1]))
+        lines.append(f"最近保存：{latest_path.name}")
+
+    message = "\n".join(f"- {line}" for line in lines)
+    if status == "running":
+        st.info(message)
+    elif status == "completed":
+        st.success(message)
+    elif status == "failed":
+        st.error(message)
+    else:
+        st.warning(message)
+
+
 def _safe_download_filename(name: str) -> str:
     safe_name = re.sub(r'[<>:"/\\|?*\s]+', "_", str(name or "").strip())
     safe_name = safe_name.strip("._")
@@ -726,6 +917,7 @@ def _init_session_state() -> None:
         "project_config_load_message": "",
         "project_loaded": False,
         "show_raw_setting_input": True,
+        "generation_task": _default_generation_task(),
         "is_generating_chapter": False,
         "active_chapter_generation_signature": "",
         "last_chapter_generation_signature": "",
@@ -778,6 +970,7 @@ def _init_session_state() -> None:
     )
     for key, value in normalized_settings.items():
         st.session_state[key] = value
+    _get_generation_task()
     _sync_genre_style_widget_state()
 
 
@@ -1692,32 +1885,6 @@ def _chapter_generation_signature(action: str, project_ref: str, chapter_numbers
     return f"{action}:{project_ref}:{chapters}"
 
 
-def _begin_chapter_generation(signature: str) -> bool:
-    if st.session_state.get("is_generating_chapter"):
-        st.warning("当前已有章节生成任务正在进行，请等待完成后再操作。")
-        return False
-
-    now = time.monotonic()
-    last_signature = st.session_state.get("last_chapter_generation_signature", "")
-    last_completed_at = float(st.session_state.get("last_chapter_generation_completed_at", 0.0) or 0.0)
-    if last_signature == signature and now - last_completed_at < GENERATION_DUPLICATE_WINDOW_SECONDS:
-        st.warning("刚刚已经处理过同一次章节生成请求，请稍后再重复生成。")
-        return False
-
-    st.session_state.is_generating_chapter = True
-    st.session_state.active_chapter_generation_signature = signature
-    return True
-
-
-def _end_chapter_generation() -> None:
-    signature = st.session_state.get("active_chapter_generation_signature", "")
-    if signature:
-        st.session_state.last_chapter_generation_signature = signature
-        st.session_state.last_chapter_generation_completed_at = time.monotonic()
-    st.session_state.active_chapter_generation_signature = ""
-    st.session_state.is_generating_chapter = False
-
-
 def _generate_and_save(
     project_key: str,
     mode: str,
@@ -1773,6 +1940,10 @@ def main() -> None:
 
     st.title("AI 小说生成器")
     st.caption("本地运行的轻量小说创作工具：大纲、人物卡、章节正文、续写和上下文管理。")
+    task_running = _is_generation_running()
+    generation_status_placeholder = st.empty()
+    with generation_status_placeholder.container():
+        _render_generation_task_status()
     if st.session_state.get("project_config_load_message"):
         st.success(st.session_state.project_config_load_message)
         st.session_state.project_config_load_message = ""
@@ -1796,7 +1967,10 @@ def main() -> None:
             project_options,
             key="selected_project_ref",
             format_func=lambda ref: _project_option_label(ref, project_map),
+            disabled=task_running,
         )
+        if task_running:
+            st.caption("生成任务进行中，暂时不能切换当前项目。")
 
     if selected_project_ref and st.session_state.selected_project_applied != selected_project_ref:
         try:
@@ -1856,7 +2030,7 @@ def main() -> None:
 
     load_col, save_col = st.columns(2)
     with load_col:
-        if st.button("加载项目配置", use_container_width=True):
+        if st.button("加载项目配置", use_container_width=True, disabled=task_running):
             project_ref = _current_project_ref()
             if not project_ref:
                 st.info("当前还没有已保存项目，请先保存项目配置或生成内容。")
@@ -1873,7 +2047,7 @@ def main() -> None:
                         st.rerun()
 
     with save_col:
-        if st.button("保存项目配置", use_container_width=True):
+        if st.button("保存项目配置", use_container_width=True, disabled=task_running):
             project_config_to_save = _collect_project_config()
             ready, message = _validate_project_config_ready(project_config_to_save)
             if not ready:
@@ -1885,6 +2059,8 @@ def main() -> None:
                 expansion_path = _save_pending_setting_expansion(project_ref)
                 if expansion_path:
                     st.info(f"最近一次设定扩写已保存：{expansion_path}")
+    if task_running:
+        st.caption("生成期间已暂时禁用加载和保存项目配置，避免改变当前生成上下文。")
 
     reader_placeholder = st.empty()
 
@@ -1905,7 +2081,7 @@ def main() -> None:
             if st.button("查看 / 编辑当前小说设定", use_container_width=True):
                 st.info("请在下方“小说设定”区域直接编辑当前项目设定。")
         with setting_loaded_col2:
-            if st.button("重新输入原始设定并扩写", use_container_width=True):
+            if st.button("重新输入原始设定并扩写", use_container_width=True, disabled=task_running):
                 st.session_state.show_raw_setting_input = True
                 st.rerun()
 
@@ -1943,7 +2119,7 @@ def main() -> None:
         with expand_action_col1:
             preview_expand_clicked = st.button("预览设定扩写 Prompt", use_container_width=True)
         with expand_action_col2:
-            expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True)
+            expand_and_fill_clicked = st.button("整理并扩写设定", use_container_width=True, disabled=task_running)
 
     if preview_expand_clicked:
         if not st.session_state.raw_story_idea.strip():
@@ -2007,7 +2183,7 @@ def main() -> None:
         with title_select_col:
             st.selectbox("从候选标题中选择", st.session_state.title_candidates, key="selected_title_candidate")
         with title_button_col:
-            if st.button("使用该标题", use_container_width=True):
+            if st.button("使用该标题", use_container_width=True, disabled=task_running):
                 st.session_state.title = st.session_state.selected_title_candidate
                 st.success(f"已使用标题：{st.session_state.selected_title_candidate}")
 
@@ -2046,13 +2222,15 @@ def main() -> None:
     st.caption("大纲和人物卡是正文生成前的设定资产；保存、生成和章节正文创作都会先检查必要设定。")
     asset_col1, asset_col2, asset_col3, asset_col4 = st.columns(4)
     with asset_col1:
-        generate_assets_clicked = st.button("生成 / 更新大纲与人物卡", use_container_width=True)
+        generate_assets_clicked = st.button("生成 / 更新大纲与人物卡", use_container_width=True, disabled=task_running)
     with asset_col2:
         view_outline_clicked = st.button("查看大纲", use_container_width=True)
     with asset_col3:
         view_characters_clicked = st.button("查看人物卡", use_container_width=True)
     with asset_col4:
-        save_setting_assets_clicked = st.button("保存设定资产", use_container_width=True)
+        save_setting_assets_clicked = st.button("保存设定资产", use_container_width=True, disabled=task_running)
+    if task_running:
+        st.caption("生成期间可查看大纲与人物卡，但保存和重新生成设定资产已暂时禁用。")
 
     if save_setting_assets_clicked:
         ready, message = _validate_setting_assets_ready(project_config)
@@ -2072,15 +2250,44 @@ def main() -> None:
             st.warning(message)
         else:
             project_ref = _ensure_current_project_ref()
-            save_project_config(project_ref, project_config)
-            with st.spinner("正在生成大纲与人物卡..."):
-                _generate_setting_assets(
-                    project_key=project_ref,
-                    project_config=project_config,
-                    task_models=task_models,
-                    temperature=temperature,
-                    max_tokens=int(max_tokens),
-                )
+            signature = f"outline_character:{project_ref}"
+            if _start_generation_task(
+                task_type="outline_character",
+                target="大纲与人物卡",
+                project_ref=project_ref,
+                request_signature=signature,
+                progress_total=2,
+            ):
+                with generation_status_placeholder.container():
+                    _render_generation_task_status()
+                try:
+                    save_project_config(project_ref, project_config)
+                    with st.spinner("正在生成大纲与人物卡..."):
+                        success = _generate_setting_assets(
+                            project_key=project_ref,
+                            project_config=project_config,
+                            task_models=task_models,
+                            temperature=temperature,
+                            max_tokens=int(max_tokens),
+                        )
+                    if success:
+                        result_paths = []
+                        _, outline_path = read_latest_outline(project_ref)
+                        _, characters_path = read_latest_characters(project_ref)
+                        if outline_path:
+                            result_paths.append(str(outline_path))
+                        if characters_path:
+                            result_paths.append(str(characters_path))
+                        _update_generation_task_progress(2, result_paths=result_paths)
+                        _complete_generation_task(result_paths=result_paths)
+                    else:
+                        _fail_generation_task("大纲与人物卡生成失败，请查看上方错误信息。")
+                except Exception as exc:
+                    st.error(f"大纲与人物卡生成流程异常：{exc}")
+                    _fail_generation_task(f"大纲与人物卡生成流程异常：{exc}")
+                finally:
+                    if _is_generation_running():
+                        _fail_generation_task("大纲与人物卡生成流程异常结束。")
 
     if view_outline_clicked:
         if not project_ref:
@@ -2116,7 +2323,7 @@ def main() -> None:
     st.write(f"当前最新章节：{'第 ' + str(latest_chapter_number) + ' 章' if latest_chapter_path else '暂无'}")
     st.write(f"推荐下一章：第 {recommended_next_chapter} 章")
 
-    continue_clicked = st.button("一键继续下一章", type="primary", use_container_width=True)
+    continue_clicked = st.button("一键继续下一章", type="primary", use_container_width=True, disabled=task_running)
     st.caption("一键继续会扫描当前项目已有章节，并生成最大章节号 + 1。")
 
     chapter_col, batch_col = st.columns(2)
@@ -2124,7 +2331,7 @@ def main() -> None:
         st.markdown("#### 指定章节")
         st.number_input("指定章节编号", min_value=1, step=1, key="chapter_number")
         st.caption("如同编号章节已存在，会自动保存为新版本文件，不会覆盖原文件。")
-        generate_clicked = st.button("生成指定章节", use_container_width=True)
+        generate_clicked = st.button("生成指定章节", use_container_width=True, disabled=task_running)
 
     with batch_col:
         st.markdown("#### 批量章节")
@@ -2134,7 +2341,9 @@ def main() -> None:
         with batch_end_col:
             st.number_input("结束章节", min_value=1, step=1, key="end_chapter_number")
         st.caption("批量生成会从当前最新章节的下一章开始，避免跳章。")
-        batch_clicked = st.button("批量生成章节", use_container_width=True)
+        batch_clicked = st.button("批量生成章节", use_container_width=True, disabled=task_running)
+    if task_running:
+        st.caption("生成任务进行中，章节生成按钮已暂时禁用。")
 
     chapter_number = int(st.session_state.chapter_number)
     preview_clicked = st.button("预览 Prompt", use_container_width=True)
@@ -2165,14 +2374,22 @@ def main() -> None:
             st.warning(message)
         else:
             signature = _chapter_generation_signature("specified", project_ref, [chapter_number])
-            if _begin_chapter_generation(signature):
+            if _start_generation_task(
+                task_type="chapter",
+                target=f"第 {chapter_number} 章",
+                project_ref=project_ref,
+                request_signature=signature,
+                progress_total=1,
+            ):
+                with generation_status_placeholder.container():
+                    _render_generation_task_status()
                 try:
                     messages, notices = _build_messages(project_ref, CHAPTER_MODE, project_config, chapter_number, use_previous_context)
                     if notices:
                         with st.expander("本次上下文提示", expanded=False):
                             for notice in notices:
                                 st.write(notice)
-                    _generate_and_save(
+                    success = _generate_and_save(
                         project_key=project_ref,
                         mode=CHAPTER_MODE,
                         messages=messages,
@@ -2183,8 +2400,19 @@ def main() -> None:
                         project_config=project_config,
                         use_previous_context=use_previous_context,
                     )
+                    result_path = str(st.session_state.get("current_saved_path") or "")
+                    if success:
+                        result_paths = [result_path] if result_path else []
+                        _update_generation_task_progress(1, result_paths=result_paths)
+                        _complete_generation_task(result_paths=result_paths)
+                    else:
+                        _fail_generation_task(f"第 {chapter_number} 章生成失败，请查看上方错误信息。")
+                except Exception as exc:
+                    st.error(f"第 {chapter_number} 章生成流程异常：{exc}")
+                    _fail_generation_task(f"第 {chapter_number} 章生成流程异常：{exc}")
                 finally:
-                    _end_chapter_generation()
+                    if _is_generation_running():
+                        _fail_generation_task(f"第 {chapter_number} 章生成流程异常结束。")
 
     if continue_clicked:
         continue_project_config = project_config
@@ -2207,7 +2435,15 @@ def main() -> None:
             latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
             next_chapter_number = int(latest_chapter_number or 0) + 1
             signature = _chapter_generation_signature("continue", project_ref, [next_chapter_number])
-            if _begin_chapter_generation(signature):
+            if _start_generation_task(
+                task_type="chapter",
+                target=f"第 {next_chapter_number} 章",
+                project_ref=project_ref,
+                request_signature=signature,
+                progress_total=1,
+            ):
+                with generation_status_placeholder.container():
+                    _render_generation_task_status()
                 try:
                     continue_messages, continue_notices = _build_messages(
                         project_key=project_ref,
@@ -2228,7 +2464,7 @@ def main() -> None:
                             for notice in continue_notices:
                                 st.write(notice)
 
-                    _generate_and_save(
+                    success = _generate_and_save(
                         project_key=project_ref,
                         mode=CHAPTER_MODE,
                         messages=continue_messages,
@@ -2239,8 +2475,19 @@ def main() -> None:
                         project_config=continue_project_config,
                         use_previous_context=True,
                     )
+                    result_path = str(st.session_state.get("current_saved_path") or "")
+                    if success:
+                        result_paths = [result_path] if result_path else []
+                        _update_generation_task_progress(1, result_paths=result_paths)
+                        _complete_generation_task(result_paths=result_paths)
+                    else:
+                        _fail_generation_task(f"第 {next_chapter_number} 章生成失败，请查看上方错误信息。")
+                except Exception as exc:
+                    st.error(f"第 {next_chapter_number} 章生成流程异常：{exc}")
+                    _fail_generation_task(f"第 {next_chapter_number} 章生成流程异常：{exc}")
                 finally:
-                    _end_chapter_generation()
+                    if _is_generation_running():
+                        _fail_generation_task(f"第 {next_chapter_number} 章生成流程异常结束。")
 
     if batch_clicked:
         ready, message = _validate_chapter_generation_ready(project_ref, project_config)
@@ -2252,12 +2499,22 @@ def main() -> None:
                 st.warning(batch_error)
             else:
                 signature = _chapter_generation_signature("batch", project_ref, chapters_to_generate)
-                if _begin_chapter_generation(signature):
+                batch_target = f"第 {chapters_to_generate[0]}-{chapters_to_generate[-1]} 章"
+                if _start_generation_task(
+                    task_type="batch_chapter",
+                    target=batch_target,
+                    project_ref=project_ref,
+                    request_signature=signature,
+                    progress_total=len(chapters_to_generate),
+                ):
+                    with generation_status_placeholder.container():
+                        _render_generation_task_status()
                     try:
                         st.info(f"将按顺序生成：{', '.join(f'第 {number} 章' for number in chapters_to_generate)}")
                         progress = st.progress(0)
                         successful_results: list[dict[str, Any]] = []
                         failed_result: dict[str, Any] | None = None
+                        result_paths: list[str] = []
 
                         for index, batch_chapter_number in enumerate(chapters_to_generate, start=1):
                             with st.status(f"正在生成第 {batch_chapter_number} 章", expanded=True) as status:
@@ -2274,9 +2531,12 @@ def main() -> None:
                                     failed_result = batch_result
                                     status.update(label=f"第 {batch_chapter_number} 章生成失败", state="error")
                                     st.error(batch_result["error"])
+                                    _update_generation_task_progress(index - 1, result_paths=result_paths)
                                     break
 
                                 successful_results.append(batch_result)
+                                if batch_result.get("chapter_path"):
+                                    result_paths.append(str(batch_result["chapter_path"]))
                                 status.update(label=f"第 {batch_chapter_number} 章生成成功", state="complete")
                                 st.write(f"章节标题：{batch_result['chapter_title']}")
                                 st.write(
@@ -2292,6 +2552,7 @@ def main() -> None:
                                     st.warning(f"摘要生成失败：{batch_result['summary_error']}")
 
                             progress.progress(index / len(chapters_to_generate))
+                            _update_generation_task_progress(index, result_paths=result_paths)
 
                         if successful_results:
                             last_result = successful_results[-1]
@@ -2308,8 +2569,20 @@ def main() -> None:
                                 f"批量生成已停止：第 {failed_result['chapter_number']} 章失败。"
                                 f"已成功生成 {len(successful_results)} 章。"
                             )
+                            _fail_generation_task(
+                                f"第 {failed_result['chapter_number']} 章生成失败：{failed_result['error']}"
+                            )
+                        else:
+                            _complete_generation_task(result_paths=result_paths)
+                    except Exception as exc:
+                        st.error(f"批量章节生成流程异常：{exc}")
+                        _fail_generation_task(f"批量章节生成流程异常：{exc}")
                     finally:
-                        _end_chapter_generation()
+                        if _is_generation_running():
+                            _fail_generation_task("批量章节生成流程异常结束。")
+
+    with generation_status_placeholder.container():
+        _render_generation_task_status()
 
     with reader_placeholder.container():
         _render_reader_export_center(_current_project_ref(), _current_project_title())
@@ -2333,7 +2606,7 @@ def main() -> None:
             height=420,
         )
 
-        if st.button("保存编辑后的版本", use_container_width=True):
+        if st.button("保存编辑后的版本", use_container_width=True, disabled=task_running):
             if not st.session_state.editable_source_path:
                 st.warning("还没有可保存的原始生成文件，请先生成内容。")
             elif not st.session_state.editable_result.strip():
@@ -2348,6 +2621,8 @@ def main() -> None:
                 )
                 st.session_state.edited_saved_path = str(edited_path)
                 st.success(f"编辑后的版本已保存：{edited_path}")
+        if task_running:
+            st.caption("生成期间暂时不能保存编辑后的版本。")
 
         if st.session_state.edited_saved_path:
             st.caption(f"最近编辑版保存路径：{st.session_state.edited_saved_path}")
