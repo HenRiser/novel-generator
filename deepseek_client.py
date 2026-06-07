@@ -38,6 +38,27 @@ def _message_detail(message: str) -> str:
     return f"：{message}" if message else ""
 
 
+def _extract_message_text(message: Any) -> str:
+    """Extract readable text from OpenAI-style message objects or dicts."""
+    candidates = [
+        getattr(message, "content", None),
+        # Some DeepSeek models return readable text in reasoning_content; keep
+        # connection tests and generation behavior consistent by sharing fallback.
+        getattr(message, "reasoning_content", None),
+    ]
+    if isinstance(message, dict):
+        candidates.extend([message.get("content"), message.get("reasoning_content")])
+
+    for value in candidates:
+        if value is None:
+            continue
+        text = value if isinstance(value, str) else str(value)
+        text = text.strip()
+        if text:
+            return text
+    return ""
+
+
 def _get_api_key() -> str:
     load_dotenv()
     api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
@@ -89,9 +110,8 @@ def test_deepseek_connection(api_key: str, model: str) -> tuple[bool, str]:
     if not getattr(response, "choices", None):
         return False, "API 请求完成，但模型没有返回候选结果。"
 
-    message = response.choices[0].message
-    content = message.content or getattr(message, "reasoning_content", "")
-    if not content or not content.strip():
+    content = _extract_message_text(response.choices[0].message)
+    if not content:
         return False, "API 请求完成，但模型返回内容为空。"
 
     return True, f"连接成功，模型 {safe_model} 返回了有效响应。"
@@ -144,8 +164,8 @@ def generate_text(
     if not getattr(response, "choices", None):
         raise DeepSeekClientError("模型没有返回候选结果。")
 
-    content = response.choices[0].message.content
-    if not content or not content.strip():
+    content = _extract_message_text(response.choices[0].message)
+    if not content:
         raise DeepSeekClientError("模型返回内容为空，请调整 Prompt 或稍后重试。")
 
-    return content.strip()
+    return content
