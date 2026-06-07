@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import re
 import time
@@ -70,6 +69,20 @@ from prompt_templates import (
     build_summary_prompt,
 )
 from project_context import get_books_root, get_outputs_root
+from services.chapter_service import (
+    build_chapter_generation_signature,
+    extract_chapter_title,
+    plan_batch_chapters,
+)
+from services.project_service import (
+    is_placeholder_title,
+    missing_basic_config_label,
+    missing_story_setting_labels,
+    validate_outline_character_ready,
+    validate_project_config_ready,
+    validate_setting_assets_ready,
+)
+from services.setting_service import parse_setting_expansion_response
 from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
 
 
@@ -93,23 +106,6 @@ GENERATION_TASK_TYPE_LABELS = {
     "outline_character": "大纲与人物卡生成",
 }
 EXPAND_DETAIL_OPTIONS = ["低", "中", "高"]
-REQUIRED_SETTING_EXPANSION_FIELDS = [
-    "protagonist_setting",
-    "supporting_characters_setting",
-    "world_setting",
-    "core_conflict",
-]
-REQUIRED_SETTING_EXPANSION_SCHEMA_FIELDS = [
-    "title_candidates",
-    "recommended_title",
-    *REQUIRED_SETTING_EXPANSION_FIELDS,
-]
-REQUIRED_STORY_SETTING_FIELDS = {
-    "protagonist": "主角设定",
-    "supporting_characters": "重要配角设定",
-    "worldview": "世界观设定",
-    "core_conflict": "故事核心冲突",
-}
 LEGACY_MODEL_MAP = {
     "deepseek-chat": "deepseek-v4-flash",
     "deepseek-reasoner": "deepseek-v4-pro",
@@ -1228,69 +1224,6 @@ def _collect_project_config() -> dict[str, Any]:
     }
 
 
-def _is_placeholder_title(title: Any) -> bool:
-    cleaned = str(title or "").strip()
-    return not cleaned or cleaned == "未命名小说"
-
-
-def _missing_story_setting_labels(project_config: dict[str, Any]) -> list[str]:
-    return [
-        label
-        for key, label in REQUIRED_STORY_SETTING_FIELDS.items()
-        if not str(project_config.get(key) or "").strip()
-    ]
-
-
-def _missing_basic_config_label(project_config: dict[str, Any]) -> str:
-    for key, label in {"genre": "小说类型", "style": "写作风格", "word_count_range": "单章字数范围"}.items():
-        if not str(project_config.get(key) or "").strip():
-            return label
-    return ""
-
-
-def _validate_project_config_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
-    if _is_placeholder_title(project_config.get("title")):
-        return False, "请先填写小说标题，并完成设定输入或在“小说设定”区域补全必要内容后再保存项目配置。"
-
-    missing_settings = _missing_story_setting_labels(project_config)
-    if missing_settings:
-        return (
-            False,
-            "请先填写小说标题，并完成设定输入或在“小说设定”区域补全必要内容后再保存项目配置。"
-            f"缺少：{'、'.join(missing_settings)}。",
-        )
-
-    missing_basic = _missing_basic_config_label(project_config)
-    if missing_basic:
-        return False, f"请先补全{missing_basic}后再保存项目配置。"
-
-    return True, ""
-
-
-def _validate_story_settings_ready(project_config: dict[str, Any], message: str) -> tuple[bool, str]:
-    missing_settings = _missing_story_setting_labels(project_config)
-    if missing_settings:
-        return False, f"{message}缺少：{'、'.join(missing_settings)}。"
-
-    missing_basic = _missing_basic_config_label(project_config)
-    if missing_basic:
-        return False, f"请先补全{missing_basic}。"
-
-    return True, ""
-
-
-def _validate_setting_assets_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
-    if _is_placeholder_title(project_config.get("title")):
-        return False, "请先填写小说标题并补全小说设定后再保存设定资产。"
-    return _validate_story_settings_ready(project_config, "请先补全小说设定后再保存设定资产。")
-
-
-def _validate_outline_character_generation_ready(project_config: dict[str, Any]) -> tuple[bool, str]:
-    if _is_placeholder_title(project_config.get("title")):
-        return False, "请先填写小说标题并完成小说设定后再生成大纲与人物卡。"
-    return _validate_story_settings_ready(project_config, "请先完成小说设定后再生成大纲与人物卡。")
-
-
 def _load_config_to_session(config: dict[str, Any]) -> None:
     """Apply a saved config before any widgets using these keys are instantiated."""
     st.session_state.title = config.get("title", "")
@@ -1373,216 +1306,6 @@ def _save_pending_setting_expansion(project_key: str) -> Path | None:
         return None
 
     return save_setting_expansion(project_key, raw_story_idea, expanded_data)
-
-
-def _strip_json_code_fence(raw_text: str) -> str:
-    text = (raw_text or "").strip()
-    match = re.search(r"```(?:json|JSON)?\s*(.*?)\s*```", text, flags=re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    text = re.sub(r"^\s*```(?:json|JSON)?\s*", "", text)
-    text = re.sub(r"\s*```\s*$", "", text)
-    return text.strip()
-
-
-def _normalize_json_punctuation(raw_text: str) -> str:
-    return (raw_text or "").translate(
-        str.maketrans(
-            {
-                "｛": "{",
-                "｝": "}",
-                "［": "[",
-                "］": "]",
-                "“": '"',
-                "”": '"',
-                "＂": '"',
-                "：": ":",
-                "，": ",",
-                "‘": "'",
-                "’": "'",
-            }
-        )
-    )
-
-
-def _extract_json_object(raw_text: str) -> str:
-    text = _normalize_json_punctuation(_strip_json_code_fence(raw_text))
-    start = text.find("{")
-    if start == -1:
-        raise ValueError("JSON 解析失败：返回内容中没有找到 JSON 对象。")
-
-    depth = 0
-    in_string = False
-    escaped = False
-    for index in range(start, len(text)):
-        char = text[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start : index + 1].strip()
-
-    end = text.rfind("}")
-    if end > start:
-        return text[start : end + 1].strip()
-    raise ValueError("JSON 解析失败：返回内容中没有找到完整的 JSON 对象。")
-
-
-def _repair_common_json_issues(json_text: str) -> str:
-    repaired = _normalize_json_punctuation(_strip_json_code_fence(json_text))
-    repaired = repaired.replace("\ufeff", "").replace("\u00a0", " ")
-    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
-    repaired = re.sub(
-        r'([}\]"])\s*(?:\r?\n)+\s*("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
-        r"\1,\n  \2",
-        repaired,
-    )
-    repaired = re.sub(
-        r'([}\]"])\s+("(?=[A-Za-z_][A-Za-z0-9_]*"\s*:))',
-        r"\1, \2",
-        repaired,
-    )
-    return repaired.strip()
-
-
-def parse_model_json_response(raw_text: str) -> dict[str, Any]:
-    raw_text = (raw_text or "").strip()
-    if not raw_text:
-        raise ValueError("模型返回内容为空，无法解析 JSON。")
-
-    candidates: list[str] = []
-    for candidate in (raw_text, _strip_json_code_fence(raw_text)):
-        if candidate and candidate not in candidates:
-            candidates.append(candidate)
-
-    extracted = _extract_json_object(raw_text)
-    if extracted not in candidates:
-        candidates.append(extracted)
-
-    repaired = _repair_common_json_issues(extracted)
-    if repaired not in candidates:
-        candidates.append(repaired)
-
-    last_error: json.JSONDecodeError | None = None
-    for candidate in candidates:
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError as exc:
-            last_error = exc
-            continue
-        if not isinstance(data, dict):
-            raise ValueError("JSON 解析失败：返回结果不是 JSON 对象。")
-        return data
-
-    detail = f"最后错误：{last_error}" if last_error else ""
-    raise ValueError(f"JSON 解析失败：模型返回的设定不是合法 JSON，系统已尝试提取和轻量修复但仍无法解析。{detail}")
-
-
-def _coerce_title_candidates(value: Any) -> list[str]:
-    if isinstance(value, list):
-        candidates = value
-    elif isinstance(value, str):
-        candidates = re.split(r"[\n,，、;；]+", value)
-    else:
-        raise ValueError("JSON 字段类型错误：title_candidates 必须是字符串数组。")
-
-    titles = [str(title).strip().strip('"“”') for title in candidates if str(title).strip()]
-    if not titles:
-        raise ValueError("JSON 字段为空：title_candidates 至少需要一个标题候选。")
-    return titles
-
-
-def parse_setting_expansion_response(raw_text: str) -> dict[str, Any]:
-    data = parse_model_json_response(raw_text)
-
-    missing_fields = [field for field in REQUIRED_SETTING_EXPANSION_SCHEMA_FIELDS if field not in data]
-    if missing_fields:
-        raise ValueError(f"JSON 字段缺失：{', '.join(missing_fields)}")
-
-    parsed: dict[str, Any] = {
-        "title_candidates": _coerce_title_candidates(data["title_candidates"]),
-    }
-
-    recommended_title = data["recommended_title"]
-    if not isinstance(recommended_title, str) or not recommended_title.strip():
-        raise ValueError("JSON 字段为空：recommended_title 必须是非空字符串。")
-    parsed["recommended_title"] = recommended_title.strip()
-
-    for field in REQUIRED_SETTING_EXPANSION_FIELDS:
-        value = data[field]
-        if not isinstance(value, str):
-            raise ValueError(f"JSON 字段类型错误：{field} 必须是字符串。")
-        if not value.strip():
-            raise ValueError(f"JSON 字段为空：{field} 不能为空。")
-        parsed[field] = value.strip()
-
-    return parsed
-
-
-def clean_chapter_title(raw_title: str) -> str:
-    title = (raw_title or "").strip()
-    if not title:
-        return "未命名章节"
-
-    title = next((line.strip() for line in title.splitlines() if line.strip()), "")
-    title = re.sub(r"^```(?:\w+)?", "", title).strip()
-    title = title.strip("`#*_ \t\r\n")
-    title = title.strip("\"'“”‘’《》「」『』")
-    title = re.sub(r"^第\s*[零一二三四五六七八九十百千万\d]+\s*章\s*[:：、.\-\s]*", "", title)
-    title = re.sub(r"^章节标题\s*[:：]\s*", "", title).strip()
-    title = re.sub(r"\s+", " ", title).strip()
-    title = title.strip("\"'“”‘’《》「」『』`#*_ ")
-
-    if not title:
-        return "未命名章节"
-    if len(title) > 30:
-        title = title[:30].rstrip()
-    return title or "未命名章节"
-
-
-def apply_chapter_heading(chapter_content: str, chapter_number: int, chapter_title: str) -> str:
-    chapter_number = max(1, int(chapter_number))
-    chapter_title = clean_chapter_title(chapter_title)
-    heading = f"# 第 {chapter_number} 章：{chapter_title}"
-    content = (chapter_content or "").lstrip()
-    if not content:
-        return f"{heading}\n"
-
-    lines = content.splitlines()
-    first_line = lines[0].strip() if lines else ""
-    heading_pattern = r"^#{0,6}\s*第\s*[零一二三四五六七八九十百千万\d]+\s*章(?:\s*[:：、.\-].*|\s+.*)?$"
-    if re.match(heading_pattern, first_line):
-        body = "\n".join(lines[1:]).lstrip("\n")
-        return f"{heading}\n\n{body}".rstrip() + "\n"
-
-    return f"{heading}\n\n{content}".rstrip() + "\n"
-
-
-def extract_chapter_title(chapter_content: str) -> str:
-    for line in (chapter_content or "").splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        match = re.match(
-            r"^#{0,6}\s*第\s*[零一二三四五六七八九十百千万\d]+\s*章\s*[:：、.\-\s]+(.+)$",
-            line,
-        )
-        if match:
-            return clean_chapter_title(match.group(1))
-        break
-    return "未命名章节"
 
 
 def _build_messages(project_key: str, mode: str, project_config: dict[str, Any], chapter_number: int, use_previous_context: bool) -> tuple[list[dict[str, str]], list[str]]:
@@ -1830,20 +1553,13 @@ def _show_chapter_workflow_result(result: dict[str, Any]) -> bool:
 def _plan_batch_chapters(project_key: str) -> tuple[list[int], str | None]:
     latest_chapter_number, _ = find_latest_chapter(project_key)
     latest_chapter_number = int(latest_chapter_number or 0)
-    expected_start = latest_chapter_number + 1 if latest_chapter_number else 1
-    start = int(st.session_state.start_chapter_number)
-    end = int(st.session_state.end_chapter_number)
-    if end < start:
-        return [], "结束章节号不能小于起始章节号。"
-    if start != expected_start:
-        return [], f"为避免跳章，起始章节必须是第 {expected_start} 章。"
-    chapters = list(range(start, end + 1))
-
-    if len(chapters) > BATCH_MAX_CHAPTERS:
-        return [], f"一次最多生成 {BATCH_MAX_CHAPTERS} 章，请缩小范围。"
-    if not chapters:
-        return [], "没有需要生成的章节。"
-    return chapters, None
+    result = plan_batch_chapters(
+        latest_chapter_number=latest_chapter_number,
+        start_chapter_number=st.session_state.start_chapter_number,
+        end_chapter_number=st.session_state.end_chapter_number,
+        max_chapters=BATCH_MAX_CHAPTERS,
+    )
+    return result.chapter_numbers, None if result.ok else result.message
 
 
 def _validate_chapter_generation_ready(project_ref: str, project_config: dict[str, Any]) -> tuple[bool, str]:
@@ -1855,10 +1571,10 @@ def _validate_chapter_generation_ready(project_ref: str, project_config: dict[st
     except (FileNotFoundError, ValueError) as exc:
         return False, f"当前项目无效，无法生成正文：{exc}"
 
-    if _is_placeholder_title(project_config.get("title")):
+    if is_placeholder_title(project_config.get("title")):
         return False, "请先填写小说标题，并保存项目配置后再生成正文。"
 
-    missing_fields = _missing_story_setting_labels(project_config)
+    missing_fields = missing_story_setting_labels(project_config)
 
     if missing_fields:
         return (
@@ -1867,7 +1583,7 @@ def _validate_chapter_generation_ready(project_ref: str, project_config: dict[st
             f"缺少：{'、'.join(missing_fields)}。",
         )
 
-    missing_basic = _missing_basic_config_label(project_config)
+    missing_basic = missing_basic_config_label(project_config)
     if missing_basic:
         return False, f"请先补全{missing_basic}后再生成正文。"
 
@@ -1878,11 +1594,6 @@ def _validate_chapter_generation_ready(project_ref: str, project_config: dict[st
         return False, "请先保存项目配置，或生成 / 更新大纲与人物卡，确保有可用于章节正文生成的设定资产。"
 
     return True, ""
-
-
-def _chapter_generation_signature(action: str, project_ref: str, chapter_numbers: list[int]) -> str:
-    chapters = ",".join(str(int(number)) for number in chapter_numbers)
-    return f"{action}:{project_ref}:{chapters}"
 
 
 def _generate_and_save(
@@ -2049,9 +1760,9 @@ def main() -> None:
     with save_col:
         if st.button("保存项目配置", use_container_width=True, disabled=task_running):
             project_config_to_save = _collect_project_config()
-            ready, message = _validate_project_config_ready(project_config_to_save)
-            if not ready:
-                st.warning(message)
+            validation = validate_project_config_ready(project_config_to_save)
+            if not validation.ok:
+                st.warning(validation.message)
             else:
                 project_ref = _ensure_current_project_ref()
                 path = save_project_config(project_ref, project_config_to_save)
@@ -2142,7 +1853,7 @@ def main() -> None:
                         temperature=temperature,
                         max_tokens=int(max_tokens),
                     )
-                    expanded_data = parse_setting_expansion_response(raw_response)
+                    expanded_data = parse_setting_expansion_response(raw_response).to_dict()
                 except DeepSeekClientError as exc:
                     st.error(str(exc))
                 except ValueError as exc:
@@ -2233,9 +1944,9 @@ def main() -> None:
         st.caption("生成期间可查看大纲与人物卡，但保存和重新生成设定资产已暂时禁用。")
 
     if save_setting_assets_clicked:
-        ready, message = _validate_setting_assets_ready(project_config)
-        if not ready:
-            st.warning(message)
+        validation = validate_setting_assets_ready(project_config)
+        if not validation.ok:
+            st.warning(validation.message)
         else:
             project_ref = _ensure_current_project_ref()
             config_path = save_project_config(project_ref, project_config)
@@ -2245,9 +1956,9 @@ def main() -> None:
                 st.info(f"设定扩写结果已保存：{expansion_path}")
 
     if generate_assets_clicked:
-        ready, message = _validate_outline_character_generation_ready(project_config)
-        if not ready:
-            st.warning(message)
+        validation = validate_outline_character_ready(project_config)
+        if not validation.ok:
+            st.warning(validation.message)
         else:
             project_ref = _ensure_current_project_ref()
             signature = f"outline_character:{project_ref}"
@@ -2373,7 +2084,7 @@ def main() -> None:
         if not ready:
             st.warning(message)
         else:
-            signature = _chapter_generation_signature("specified", project_ref, [chapter_number])
+            signature = build_chapter_generation_signature("specified", project_ref, [chapter_number])
             if _start_generation_task(
                 task_type="chapter",
                 target=f"第 {chapter_number} 章",
@@ -2434,7 +2145,7 @@ def main() -> None:
         else:
             latest_chapter_number, latest_chapter_path = find_latest_chapter(project_ref)
             next_chapter_number = int(latest_chapter_number or 0) + 1
-            signature = _chapter_generation_signature("continue", project_ref, [next_chapter_number])
+            signature = build_chapter_generation_signature("continue", project_ref, [next_chapter_number])
             if _start_generation_task(
                 task_type="chapter",
                 target=f"第 {next_chapter_number} 章",
@@ -2498,7 +2209,7 @@ def main() -> None:
             if batch_error:
                 st.warning(batch_error)
             else:
-                signature = _chapter_generation_signature("batch", project_ref, chapters_to_generate)
+                signature = build_chapter_generation_signature("batch", project_ref, chapters_to_generate)
                 batch_target = f"第 {chapters_to_generate[0]}-{chapters_to_generate[-1]} 章"
                 if _start_generation_task(
                     task_type="batch_chapter",
