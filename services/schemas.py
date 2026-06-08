@@ -68,3 +68,42 @@ class ProjectDirectoryResult:
     storage_type: str = ""
     path: Path | None = None
     message: str = ""
+
+
+@dataclass(frozen=True)
+class ReaderChapterItem:
+    chapter_number: int
+    title: str
+    filename: str
+    path: str
+    is_version: bool = False
+    version: int = 1
+    display_label: str = ""
+
+
+@dataclass(frozen=True)
+class ReaderChapterContent:
+    ok: bool
+    chapter_number: int = 0
+    title: str = ""
+    filename: str = ""
+    path: str = ""
+    content: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class ExportPayload:
+    ok: bool
+    filename: str = ""
+    content: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class ReaderProjectSnapshot:
+    ok: bool
+    project_ref: str = ""
+    display_title: str = ""
+    chapters: list[ReaderChapterItem] = field(default_factory=list)
+    message: str = ""

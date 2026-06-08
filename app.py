@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -21,13 +20,7 @@ from config_manager import (
     test_api_connection,
 )
 from deepseek_client import DeepSeekClientError, generate_text
-from export_service import (
-    build_full_novel_txt,
-    build_reader_html,
-    build_single_chapter_txt,
-    get_ordered_chapters,
-    read_chapter_for_reader,
-)
+from export_service import build_reader_html
 from generation_config import (
     OUTLINE_GRANULARITY_OPTIONS,
     PLOT_DENSITY_OPTIONS,
@@ -84,6 +77,12 @@ from services.project_service import (
     validate_outline_character_ready,
     validate_project_config_ready,
     validate_setting_assets_ready,
+)
+from services.reader_service import (
+    build_full_book_export_payload,
+    build_reader_project_snapshot,
+    build_single_chapter_export_payload,
+    read_chapter_for_display,
 )
 from services.setting_service import parse_setting_expansion_response
 from ui_options import CUSTOM_OPTION, GENRE_OPTIONS, WRITING_STYLE_OPTIONS
@@ -746,12 +745,6 @@ def _render_generation_task_status() -> None:
         st.warning(message)
 
 
-def _safe_download_filename(name: str) -> str:
-    safe_name = re.sub(r'[<>:"/\\|?*\s]+', "_", str(name or "").strip())
-    safe_name = safe_name.strip("._")
-    return safe_name or "未命名小说"
-
-
 def _render_reader_nav(numbers: list[int], current_index: int, key_prefix: str) -> None:
     prev_col, next_col = st.columns(2)
     with prev_col:
@@ -787,7 +780,12 @@ def _render_reader_export_center(project_ref: str, project_title: str) -> None:
             st.info("当前项目还没有章节，请先保存项目或生成章节。")
             return
 
-        chapters = get_ordered_chapters(project_ref)
+        reader_snapshot = build_reader_project_snapshot(project_ref, project_title)
+        if not reader_snapshot.ok:
+            st.warning(reader_snapshot.message)
+            return
+
+        chapters = reader_snapshot.chapters
         if st.session_state.get("reader_needs_refresh") and not chapters:
             st.session_state.reader_needs_refresh = False
             st.session_state.reader_selected_chapter = None
@@ -798,8 +796,11 @@ def _render_reader_export_center(project_ref: str, project_title: str) -> None:
         st.markdown('<div id="reader-top"></div>', unsafe_allow_html=True)
         st.markdown("[回到阅读区顶部](#reader-top)")
 
-        numbers = [int(chapter["chapter_number"]) for chapter in chapters]
-        labels = {int(chapter["chapter_number"]): str(chapter["title"]) for chapter in chapters}
+        numbers = [int(chapter.chapter_number) for chapter in chapters]
+        labels = {
+            int(chapter.chapter_number): str(chapter.display_label or chapter.title)
+            for chapter in chapters
+        }
         current_number = int(st.session_state.get("reader_chapter_number", numbers[-1]))
         if st.session_state.get("reader_needs_refresh"):
             try:
@@ -828,12 +829,15 @@ def _render_reader_export_center(project_ref: str, project_title: str) -> None:
         _render_reader_nav(numbers, current_index, "reader_top")
 
         try:
-            chapter = read_chapter_for_reader(project_ref, current_number)
-        except FileNotFoundError as exc:
+            chapter = read_chapter_for_display(project_ref, current_number)
+        except (FileNotFoundError, ValueError, OSError) as exc:
             st.warning(str(exc))
             return
+        if not chapter.ok:
+            st.warning(chapter.message)
+            return
 
-        reader_html = build_reader_html(chapter["title"], chapter["content"])
+        reader_html = build_reader_html(chapter.title, chapter.content)
         st.markdown(reader_html, unsafe_allow_html=True)
         if st.session_state.get("reader_should_scroll_top"):
             components.html(
@@ -851,23 +855,23 @@ if (readerTop) {
 
         _render_reader_nav(numbers, current_index, "reader_bottom")
 
-        safe_project_name = _safe_download_filename(project_title)
-        current_txt = build_single_chapter_txt(chapter["title"], chapter["content"])
+        current_payload = build_single_chapter_export_payload(project_ref, current_number, project_title)
         st.download_button(
             "下载当前章节 TXT",
-            data=current_txt,
-            file_name=f"{safe_project_name}_chapter_{current_number:03d}.txt",
+            data=current_payload.content,
+            file_name=current_payload.filename or f"chapter_{current_number:03d}.txt",
             mime="text/plain",
+            disabled=not current_payload.ok,
             use_container_width=True,
         )
 
-        full_txt = build_full_novel_txt(project_ref, display_title=project_title)
+        full_payload = build_full_book_export_payload(project_ref, project_title)
         st.download_button(
             "下载整本正文 TXT",
-            data=full_txt,
-            file_name=f"{safe_project_name}_全文.txt",
+            data=full_payload.content,
+            file_name=full_payload.filename or "novel.txt",
             mime="text/plain",
-            disabled=not bool(full_txt.strip()),
+            disabled=not full_payload.ok,
             use_container_width=True,
         )
 
