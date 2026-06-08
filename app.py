@@ -44,8 +44,6 @@ from file_manager import (
     ensure_directories,
     find_latest_chapter,
     list_chapter_files,
-    list_projects,
-    load_project_config,
     project_ref_from_context,
     read_history_summaries,
     read_latest_characters,
@@ -56,7 +54,6 @@ from file_manager import (
     save_characters,
     save_edited_result,
     save_outline,
-    save_project_config,
     save_setting_expansion,
     save_summary,
     update_chapter_index,
@@ -76,8 +73,14 @@ from services.chapter_service import (
 )
 from services.project_service import (
     is_placeholder_title,
+    list_project_summaries,
+    load_project_detail,
     missing_basic_config_label,
     missing_story_setting_labels,
+    project_summary_label,
+    resolve_project_directory,
+    save_project_configuration,
+    save_setting_assets,
     validate_outline_character_ready,
     validate_project_config_ready,
     validate_setting_assets_ready,
@@ -485,36 +488,33 @@ def _ensure_current_project_ref() -> str:
     return project_ref
 
 
-def _project_option_label(project_ref: str, project_map: dict) -> str:
-    if not project_ref:
-        return ""
-    record = project_map.get(project_ref)
-    if record is None:
-        return project_ref
-    return f"{record.title} [{record.kind}]"
+def _open_project_directory(project_ref: str) -> tuple[bool, str, Path | None]:
+    directory = resolve_project_directory(project_ref)
+    if not directory.ok or directory.path is None:
+        return False, directory.message, directory.path
 
-
-def _open_project_directory(project_dir: Path) -> tuple[bool, str]:
+    project_dir = directory.path
     if not project_dir.exists():
-        return False, f"项目目录不存在：{project_dir}"
+        return False, f"项目目录不存在：{project_dir}", project_dir
     startfile = getattr(os, "startfile", None)
     if startfile is None:
-        return False, "当前系统不支持直接打开文件夹。"
+        return False, "当前系统不支持直接打开文件夹。", project_dir
     try:
         startfile(str(project_dir))
     except Exception as exc:
-        return False, f"无法打开项目目录：{exc}"
-    return True, "已打开当前项目目录。"
+        return False, f"无法打开项目目录：{exc}", project_dir
+    return True, "已打开当前项目目录。", project_dir
 
 
-def _render_open_project_button(project_dir: Path, key: str) -> None:
+def _render_open_project_button(project_ref: str, key: str) -> None:
     if st.button("打开当前项目目录", use_container_width=True, key=key):
-        ok, message = _open_project_directory(project_dir)
+        ok, message, project_dir = _open_project_directory(project_ref)
         if ok:
             st.success(message)
         else:
             st.warning(message)
-            st.caption(f"项目路径：{project_dir}")
+            if project_dir:
+                st.caption(f"项目路径：{project_dir}")
 
 
 def _render_sidebar_project_summary(project_ref: str, project_title: str) -> None:
@@ -532,7 +532,7 @@ def _render_sidebar_project_summary(project_ref: str, project_title: str) -> Non
         return
 
     st.caption("workspace 项目" if ctx.storage_kind == "workspace" else "legacy outputs 项目")
-    _render_open_project_button(ctx.project_dir, "open_project_summary")
+    _render_open_project_button(project_ref, "open_project_summary")
 
 
 def _render_project_status(project_ref: str, project_title: str) -> None:
@@ -565,7 +565,7 @@ def _render_project_status(project_ref: str, project_title: str) -> None:
     st.write(f"- 摘要数量：{_count_summary_files(ctx.summaries_dir)}")
     st.write(f"- 章节索引：{'已生成' if ctx.chapter_index_path.exists() else '未生成'}")
 
-    _render_open_project_button(project_dir, "open_project_debug")
+    _render_open_project_button(project_ref, "open_project_debug")
 
 
 def _default_generation_task() -> dict[str, Any]:
@@ -1668,16 +1668,16 @@ def main() -> None:
 
     with st.sidebar:
         st.header("当前项目")
-        project_records = list_projects()
-        project_map = {record.ref: record for record in project_records}
-        project_options = [""] + [record.ref for record in project_records]
+        project_summaries = list_project_summaries()
+        project_map = {summary.project_ref: summary for summary in project_summaries}
+        project_options = [""] + [summary.project_ref for summary in project_summaries]
         if st.session_state.selected_project_ref not in project_options:
             st.session_state.selected_project_ref = ""
         selected_project_ref = st.selectbox(
             "选择已有小说项目",
             project_options,
             key="selected_project_ref",
-            format_func=lambda ref: _project_option_label(ref, project_map),
+            format_func=lambda ref: project_summary_label(ref, project_map),
             disabled=task_running,
         )
         if task_running:
@@ -1685,11 +1685,13 @@ def main() -> None:
 
     if selected_project_ref and st.session_state.selected_project_applied != selected_project_ref:
         try:
-            selected_ctx = resolve_project_context(selected_project_ref)
+            selected_project = load_project_detail(selected_project_ref)
+            if selected_project.error:
+                raise ValueError(selected_project.message)
         except (FileNotFoundError, ValueError) as exc:
             st.warning(f"项目读取失败：{exc}")
         else:
-            _set_current_project(selected_project_ref, selected_ctx.title)
+            _set_current_project(selected_project_ref, selected_project.title or selected_project_ref)
             st.session_state.selected_project_applied = selected_project_ref
             st.session_state.project_loaded = False
             st.session_state.show_raw_setting_input = True
@@ -1747,12 +1749,15 @@ def main() -> None:
                 st.info("当前还没有已保存项目，请先保存项目配置或生成内容。")
             else:
                 try:
-                    config = load_project_config(project_ref)
+                    load_result = load_project_detail(project_ref)
+                    if load_result.error:
+                        raise ValueError(load_result.message)
+                    config = load_result.config
                 except (FileNotFoundError, ValueError) as exc:
                     st.error(str(exc))
                 else:
                     if config is None:
-                        st.info(f"还没有找到当前小说项目的 project_config.json：{resolve_project_context(project_ref).project_dir}")
+                        st.info(load_result.message)
                     else:
                         _queue_project_config_load(config)
                         st.rerun()
@@ -1765,7 +1770,11 @@ def main() -> None:
                 st.warning(validation.message)
             else:
                 project_ref = _ensure_current_project_ref()
-                path = save_project_config(project_ref, project_config_to_save)
+                save_result = save_project_configuration(project_ref, project_config_to_save)
+                if not save_result.ok:
+                    st.warning(save_result.message)
+                    st.stop()
+                path = save_result.path
                 st.success(f"项目配置已保存：{path}")
                 expansion_path = _save_pending_setting_expansion(project_ref)
                 if expansion_path:
@@ -1902,12 +1911,11 @@ def main() -> None:
     st.text_input("小说标题", key="title")
     current_ref_for_caption = _current_project_ref()
     if current_ref_for_caption:
-        try:
-            current_ctx_for_caption = resolve_project_context(current_ref_for_caption)
-        except (FileNotFoundError, ValueError) as exc:
-            st.caption(f"当前项目目录：无法读取当前项目（{exc}）")
+        current_directory = resolve_project_directory(current_ref_for_caption)
+        if current_directory.ok and current_directory.path:
+            st.caption(f"当前项目目录：{current_directory.path}")
         else:
-            st.caption(f"当前项目目录：{current_ctx_for_caption.project_dir}")
+            st.caption(f"当前项目目录：无法读取当前项目（{current_directory.message}）")
     else:
         st.caption("当前项目目录：首次保存或生成时将创建到 workspace/books/{book_id}/")
 
@@ -1949,8 +1957,17 @@ def main() -> None:
             st.warning(validation.message)
         else:
             project_ref = _ensure_current_project_ref()
-            config_path = save_project_config(project_ref, project_config)
-            expansion_path = _save_pending_setting_expansion(project_ref)
+            save_result = save_setting_assets(
+                project_ref,
+                project_config,
+                raw_story_idea=st.session_state.get("last_raw_story_idea", ""),
+                expanded_data=st.session_state.get("last_setting_expansion_data"),
+            )
+            if not save_result.ok:
+                st.warning(save_result.message)
+                st.stop()
+            config_path = save_result.path
+            expansion_path = save_result.result_paths[1] if len(save_result.result_paths) > 1 else None
             st.success(f"设定资产已保存：{config_path}")
             if expansion_path:
                 st.info(f"设定扩写结果已保存：{expansion_path}")
@@ -1972,7 +1989,11 @@ def main() -> None:
                 with generation_status_placeholder.container():
                     _render_generation_task_status()
                 try:
-                    save_project_config(project_ref, project_config)
+                    save_result = save_project_configuration(project_ref, project_config)
+                    if not save_result.ok:
+                        st.warning(save_result.message)
+                        _fail_generation_task(save_result.message)
+                        st.stop()
                     with st.spinner("正在生成大纲与人物卡..."):
                         success = _generate_setting_assets(
                             project_key=project_ref,
@@ -2129,13 +2150,16 @@ def main() -> None:
         continue_project_config = project_config
         if project_ref:
             try:
-                saved_project_config = load_project_config(project_ref)
+                load_result = load_project_detail(project_ref)
+                if load_result.error:
+                    raise ValueError(load_result.message)
+                saved_project_config = load_result.config
             except (FileNotFoundError, ValueError) as exc:
                 st.warning(f"项目配置读取失败，将使用页面当前设定：{exc}")
             else:
                 if saved_project_config:
                     continue_project_config = saved_project_config
-                    st.info(f"已读取当前小说项目配置：{resolve_project_context(project_ref).project_dir}")
+                    st.info(f"已读取当前小说项目配置：{load_result.project_dir}")
                 else:
                     st.info("未找到当前小说项目的 project_config.json，将使用页面当前设定。")
 

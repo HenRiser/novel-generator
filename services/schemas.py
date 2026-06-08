@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -27,4 +28,43 @@ class SettingExpansionResult:
 class BatchPlanResult:
     ok: bool
     chapter_numbers: list[int]
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class ProjectSummary:
+    project_ref: str
+    title: str
+    storage_type: str
+    updated_at: str = ""
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class ProjectLoadResult:
+    ok: bool
+    project_ref: str = ""
+    title: str = ""
+    config: dict[str, Any] | None = None
+    project_dir: Path | None = None
+    message: str = ""
+    error: bool = False
+
+
+@dataclass(frozen=True)
+class ProjectSaveResult:
+    ok: bool
+    project_ref: str = ""
+    path: Path | None = None
+    result_paths: list[Path] = field(default_factory=list)
+    message: str = ""
+
+
+@dataclass(frozen=True)
+class ProjectDirectoryResult:
+    ok: bool
+    project_ref: str = ""
+    title: str = ""
+    storage_type: str = ""
+    path: Path | None = None
     message: str = ""
