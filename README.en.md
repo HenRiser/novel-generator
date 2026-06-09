@@ -52,6 +52,20 @@ http://localhost:8501
 
 Windows users can also run `setup.bat` and `start.bat`.
 
+Start the first-stage read-only API backend in a separate terminal:
+
+```bat
+.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
+```
+
+The API is available at:
+
+```text
+http://127.0.0.1:8000
+```
+
+This first-stage API exposes only health, project listing/detail, chapter reading, and TXT export endpoints. It does not implement generation endpoints, streaming output, WebSocket, task queues, user accounts, or save APIs.
+
 ## API / Model Configuration
 
 The default model is `deepseek-v4-flash`. The built-in model choices are:
@@ -75,6 +89,10 @@ API Keys are stored only in the local `.env` file or environment variables. They
 
 ```text
 novel-generator
+|-- api/
+|   |-- main.py
+|   |-- schemas.py
+|   `-- routers/
 |-- app.py
 |-- config.py
 |-- config_manager.py
