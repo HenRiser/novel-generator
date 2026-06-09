@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.tsbuildinfo
 .streamlit/
 
 outputs/
@@ -10,3 +11,5 @@ outputs/*
 !outputs/.gitkeep
 workspace/
 reports/
+frontend/node_modules/
+frontend/dist/

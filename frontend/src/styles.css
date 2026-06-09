@@ -1,0 +1,280 @@
+:root {
+  color: #202124;
+  background: #f5f7f8;
+  font-family:
+    Inter, "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+a {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.app-header {
+  align-items: center;
+  display: flex;
+  gap: 20px;
+  justify-content: space-between;
+  margin: 0 auto 18px;
+  max-width: 1440px;
+}
+
+.app-header h1 {
+  font-size: 24px;
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+
+.app-header p {
+  color: #5f6b73;
+  margin: 0;
+}
+
+.status-pill {
+  border: 1px solid #cfd7dd;
+  border-radius: 999px;
+  font-size: 14px;
+  min-width: 110px;
+  padding: 7px 12px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.status-online {
+  background: #e5f6ed;
+  border-color: #9bd2b4;
+  color: #146b3a;
+}
+
+.status-offline {
+  background: #fff0ee;
+  border-color: #e5aaa0;
+  color: #9d2b1f;
+}
+
+.status-loading {
+  background: #eef3f7;
+  color: #52616b;
+}
+
+.notice {
+  display: grid;
+  gap: 8px;
+  margin: 0 auto 18px;
+  max-width: 1440px;
+  padding: 14px 16px;
+}
+
+.error-notice {
+  background: #fff0ee;
+  border: 1px solid #e5aaa0;
+}
+
+.reader-layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(240px, 300px) minmax(280px, 380px) minmax(0, 1fr);
+  margin: 0 auto;
+  max-width: 1440px;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d8e0e5;
+  min-height: 240px;
+  padding: 16px;
+}
+
+.panel h2,
+.panel h3 {
+  margin: 0;
+}
+
+.panel-header,
+.section-header,
+.reader-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.panel-header button {
+  background: #21313c;
+  border: 0;
+  color: #ffffff;
+  padding: 7px 11px;
+}
+
+.panel-header button:disabled {
+  background: #b7c0c7;
+  cursor: not-allowed;
+}
+
+.project-items,
+.chapter-list {
+  display: grid;
+  gap: 8px;
+}
+
+.project-item,
+.chapter-item {
+  background: #f9fbfc;
+  border: 1px solid #d8e0e5;
+  color: inherit;
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.project-item:hover,
+.chapter-item:hover,
+.project-item.selected,
+.chapter-item.selected {
+  border-color: #506b7a;
+}
+
+.project-item.selected,
+.chapter-item.selected {
+  background: #eef6f8;
+}
+
+.project-item span,
+.chapter-item span,
+.reader-header p,
+.detail-grid span,
+.muted {
+  color: #61717c;
+  font-size: 13px;
+}
+
+code {
+  background: #eef2f4;
+  color: #384852;
+  display: inline-block;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 2px 4px;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 22px;
+}
+
+.detail-grid div {
+  background: #f9fbfc;
+  border: 1px solid #e2e8ec;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.text-link,
+.download-button {
+  color: #0f5f86;
+  text-decoration: none;
+}
+
+.text-link:hover,
+.download-button:hover {
+  text-decoration: underline;
+}
+
+.download-button {
+  background: #21313c;
+  color: #ffffff;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
+.download-button:hover {
+  background: #314856;
+  text-decoration: none;
+}
+
+.reader-header h2 {
+  font-size: 20px;
+  line-height: 1.35;
+  margin: 0 0 4px;
+}
+
+.reader-header p {
+  margin: 0;
+}
+
+.chapter-content {
+  background: #fbfcfd;
+  border: 1px solid #e2e8ec;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+  margin: 0;
+  max-height: calc(100vh - 190px);
+  overflow: auto;
+  padding: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.error-text {
+  color: #a02c1c;
+  font-size: 14px;
+}
+
+@media (max-width: 1100px) {
+  .reader-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-content {
+    max-height: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell {
+    padding: 12px;
+  }
+
+  .app-header,
+  .panel-header,
+  .section-header,
+  .reader-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .download-button {
+    text-align: center;
+  }
+}

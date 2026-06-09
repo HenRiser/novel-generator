@@ -66,6 +66,22 @@ http://127.0.0.1:8000
 
 This first-stage API exposes only health, project listing/detail, chapter reading, and TXT export endpoints. It does not implement generation endpoints, streaming output, WebSocket, task queues, user accounts, or save APIs.
 
+Start the first-stage React reader frontend after the API is running:
+
+```bat
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+The React reader is available at:
+
+```text
+http://127.0.0.1:5173
+```
+
+The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. This first-stage frontend only supports project browsing, chapter reading, and TXT export links. It does not support generation, saving, API Key settings, streaming output, or task status APIs.
+
 ## API / Model Configuration
 
 The default model is `deepseek-v4-flash`. The built-in model choices are:
@@ -93,6 +109,10 @@ novel-generator
 |   |-- main.py
 |   |-- schemas.py
 |   `-- routers/
+|-- frontend/
+|   |-- package.json
+|   |-- index.html
+|   `-- src/
 |-- app.py
 |-- config.py
 |-- config_manager.py
