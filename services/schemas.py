@@ -32,6 +32,75 @@ class BatchPlanResult:
 
 
 @dataclass(frozen=True)
+class GenerationResult:
+    ok: bool
+    content: str = ""
+    title: str = ""
+    message: str = ""
+    output_path: str = ""
+    summary_path: str = ""
+    index_path: str = ""
+
+
+@dataclass(frozen=True)
+class ChapterGenerationResult:
+    ok: bool
+    chapter_number: int = 0
+    title: str = ""
+    content: str = ""
+    chapter_path: str = ""
+    summary: str = ""
+    summary_path: str = ""
+    index_path: str = ""
+    message: str = ""
+    notices: list[str] = field(default_factory=list)
+    title_error: str | None = None
+    summary_error: str | None = None
+    chapter_model: str = ""
+    chapter_title_model: str = ""
+    summary_model: str = ""
+
+    def to_legacy_dict(self) -> dict[str, Any]:
+        return {
+            "chapter_number": self.chapter_number,
+            "chapter_title": self.title,
+            "chapter_model": self.chapter_model,
+            "chapter_title_model": self.chapter_title_model,
+            "summary_model": self.summary_model,
+            "chapter_path": self.chapter_path,
+            "summary": self.summary,
+            "summary_path": self.summary_path,
+            "content": self.content,
+            "notices": list(self.notices),
+            "title_error": self.title_error,
+            "summary_error": self.summary_error,
+            "index_path": self.index_path,
+            "error": None if self.ok else self.message,
+        }
+
+
+@dataclass(frozen=True)
+class OutlineCharacterGenerationResult:
+    ok: bool
+    outline_path: str = ""
+    characters_path: str = ""
+    outline_content: str = ""
+    characters_content: str = ""
+    message: str = ""
+    outline_model: str = ""
+    characters_model: str = ""
+
+
+@dataclass(frozen=True)
+class BatchChapterItemResult:
+    chapter_number: int
+    ok: bool
+    chapter_path: str = ""
+    title: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class ProjectSummary:
     project_ref: str
     title: str

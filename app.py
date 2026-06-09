@@ -38,31 +38,24 @@ from file_manager import (
     find_latest_chapter,
     list_chapter_files,
     project_ref_from_context,
-    read_history_summaries,
     read_latest_characters,
     read_latest_outline,
-    read_previous_chapter,
     resolve_project_context,
-    save_chapter,
-    save_characters,
     save_edited_result,
-    save_outline,
     save_setting_expansion,
-    save_summary,
-    update_chapter_index,
 )
 from prompt_templates import (
-    build_chapter_prompt,
-    build_character_prompt,
     build_expand_setting_prompt,
-    build_outline_prompt,
-    build_summary_prompt,
 )
 from project_context import get_books_root, get_outputs_root
 from services.chapter_service import (
     build_chapter_generation_signature,
-    extract_chapter_title,
     plan_batch_chapters,
+)
+from services.generation_service import (
+    build_generation_messages,
+    generate_outline_and_characters,
+    generate_single_chapter,
 )
 from services.project_service import (
     is_placeholder_title,
@@ -197,14 +190,6 @@ def _model_settings_from_state() -> dict[str, Any]:
 def _load_model_settings_to_session(raw_settings: Any) -> None:
     for key, value in normalize_model_settings(raw_settings).items():
         st.session_state[key] = value
-
-
-def _model_for_mode(mode: str, task_models: dict[str, str]) -> str:
-    if mode == OUTLINE_MODE:
-        return task_models["outline"]
-    if mode == CHARACTER_MODE:
-        return task_models["character"]
-    return task_models["chapter"]
 
 
 def _render_model_choice(label: str, model_key: str, custom_key: str) -> None:
@@ -1313,57 +1298,13 @@ def _save_pending_setting_expansion(project_key: str) -> Path | None:
 
 
 def _build_messages(project_key: str, mode: str, project_config: dict[str, Any], chapter_number: int, use_previous_context: bool) -> tuple[list[dict[str, str]], list[str]]:
-    notices = []
-
-    if mode == OUTLINE_MODE:
-        return build_outline_prompt(project_config), notices
-
-    if mode == CHARACTER_MODE:
-        return build_character_prompt(project_config), notices
-
-    outline, outline_path = (None, None)
-    characters, characters_path = (None, None)
-    previous_chapter = None
-    previous_path = None
-    summaries = ""
-
-    if project_key:
-        outline, outline_path = read_latest_outline(project_key)
-        characters, characters_path = read_latest_characters(project_key)
-        summaries = read_history_summaries(project_key, before_chapter=chapter_number)
-
-    if outline_path:
-        notices.append(f"已加入大纲上下文：{outline_path.name}")
-    if characters_path:
-        notices.append(f"已加入人物卡上下文：{characters_path.name}")
-    if summaries:
-        notices.append("已加入历史章节摘要。")
-
-    if use_previous_context:
-        if project_key:
-            previous_chapter, previous_path = read_previous_chapter(project_key, chapter_number)
-        if previous_path:
-            notices.append(f"已加入上一章正文：{previous_path.name}")
-        else:
-            notices.append("未找到上一章正文，将仅使用设定、大纲、人物卡和摘要生成。")
-
-    messages = build_chapter_prompt(
+    return build_generation_messages(
+        project_ref=project_key,
+        mode=mode,
         project_config=project_config,
         chapter_number=chapter_number,
-        outline=outline,
-        characters=characters,
-        previous_chapter=previous_chapter,
-        summaries=summaries,
+        use_previous_context=use_previous_context,
     )
-    return messages, notices
-
-
-def _save_result(project_key: str, mode: str, content: str, chapter_number: int) -> Path:
-    if mode == OUTLINE_MODE:
-        return save_outline(project_key, content)
-    if mode == CHARACTER_MODE:
-        return save_characters(project_key, content)
-    return save_chapter(project_key, chapter_number, content)
 
 
 def _generate_setting_assets(
@@ -1373,38 +1314,26 @@ def _generate_setting_assets(
     temperature: float,
     max_tokens: int,
 ) -> bool:
-    try:
-        outline = generate_text(
-            messages=build_outline_prompt(project_config),
-            model=task_models["outline"],
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-        )
-        outline_path = save_outline(project_key, outline)
-
-        characters = generate_text(
-            messages=build_character_prompt(project_config),
-            model=task_models["character"],
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-        )
-        characters_path = save_characters(project_key, characters)
-        _save_pending_setting_expansion(project_key)
-    except DeepSeekClientError as exc:
-        st.error(str(exc))
-        return False
-    except Exception as exc:
-        st.error(f"设定资产保存失败：{exc}")
+    result = generate_outline_and_characters(
+        project_ref=project_key,
+        project_config=project_config,
+        task_models=task_models,
+        temperature=temperature,
+        max_tokens=int(max_tokens),
+    )
+    if not result.ok:
+        st.error(result.message)
         return False
 
+    _save_pending_setting_expansion(project_key)
     st.success("大纲与人物卡已生成并保存。")
-    st.info(f"大纲：{outline_path}")
-    st.info(f"人物卡：{characters_path}")
-    st.info(f"使用模型：大纲 {task_models['outline']}，人物卡 {task_models['character']}")
+    st.info(f"大纲：{result.outline_path}")
+    st.info(f"人物卡：{result.characters_path}")
+    st.info(f"使用模型：大纲 {result.outline_model}，人物卡 {result.characters_model}")
     with st.expander("本次生成的大纲", expanded=True):
-        st.markdown(outline)
+        st.markdown(result.outline_content)
     with st.expander("本次生成的人物卡", expanded=False):
-        st.markdown(characters)
+        st.markdown(result.characters_content)
     return True
 
 
@@ -1430,89 +1359,18 @@ def generate_single_chapter_workflow(
     max_tokens: int,
     use_previous_context: bool,
 ) -> dict[str, Any]:
-    chapter_model = task_models["chapter"]
-    chapter_title_model = chapter_model
-    summary_model = task_models["summary"]
-    result: dict[str, Any] = {
-        "chapter_number": int(chapter_number),
-        "chapter_title": "未命名章节",
-        "chapter_model": chapter_model,
-        "chapter_title_model": chapter_title_model,
-        "summary_model": summary_model,
-        "chapter_path": "",
-        "summary": "",
-        "summary_path": "",
-        "content": "",
-        "notices": [],
-        "title_error": None,
-        "summary_error": None,
-        "index_path": "",
-        "error": None,
-    }
-
-    try:
-        messages, notices = _build_messages(
-            project_key=project_key,
-            mode=CHAPTER_MODE,
-            project_config=form_data,
-            chapter_number=int(chapter_number),
-            use_previous_context=use_previous_context,
-        )
-        result["notices"] = notices
-        chapter_content = generate_text(
-            messages=messages,
-            model=chapter_model,
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-        )
-    except DeepSeekClientError as exc:
-        result["error"] = str(exc)
-        return result
-
-    chapter_title = extract_chapter_title(chapter_content)
-    final_content = chapter_content
-    result["chapter_title"] = chapter_title
-    result["content"] = final_content
-
-    try:
-        chapter_path = save_chapter(project_key, int(chapter_number), final_content)
+    result = generate_single_chapter(
+        project_ref=project_key,
+        chapter_number=chapter_number,
+        project_config=form_data,
+        task_models=task_models,
+        temperature=temperature,
+        max_tokens=int(max_tokens),
+        use_previous_context=use_previous_context,
+    )
+    if result.ok:
         _save_pending_setting_expansion(project_key)
-    except Exception as exc:
-        result["error"] = f"章节保存失败：{exc}"
-        return result
-
-    result["chapter_path"] = str(chapter_path)
-
-    try:
-        summary_messages = build_summary_prompt(final_content, int(chapter_number))
-        summary = generate_text(
-            messages=summary_messages,
-            model=summary_model,
-            temperature=0.2,
-            max_tokens=512,
-        )
-        summary_path = save_summary(project_key, int(chapter_number), summary)
-        result["summary"] = summary
-        result["summary_path"] = str(summary_path)
-    except DeepSeekClientError as exc:
-        result["summary_error"] = str(exc)
-    except Exception as exc:
-        result["summary_error"] = f"摘要保存失败：{exc}"
-
-    try:
-        index_path = update_chapter_index(
-            title=project_key,
-            chapter_number=int(chapter_number),
-            chapter_title=chapter_title,
-            chapter_path=Path(chapter_path),
-            model=chapter_model,
-            summary=result["summary"],
-        )
-        result["index_path"] = str(index_path)
-    except Exception as exc:
-        result["error"] = f"章节索引更新失败：{exc}"
-
-    return result
+    return result.to_legacy_dict()
 
 
 def _show_chapter_workflow_result(result: dict[str, Any]) -> bool:
@@ -1611,40 +1469,21 @@ def _generate_and_save(
     project_config: dict[str, Any] | None = None,
     use_previous_context: bool = False,
 ) -> bool:
-    if mode == CHAPTER_MODE:
-        with st.spinner("正在生成章节正文、章节标题和摘要..."):
-            chapter_result = generate_single_chapter_workflow(
-                project_key=project_key,
-                chapter_number=chapter_number,
-                form_data=project_config or _collect_project_config(),
-                task_models=task_models,
-                temperature=temperature,
-                max_tokens=int(max_tokens),
-                use_previous_context=use_previous_context,
-            )
-        return _show_chapter_workflow_result(chapter_result)
+    if mode != CHAPTER_MODE:
+        st.error("Unsupported generation mode.")
+        return False
 
-    with st.spinner("正在请求 DeepSeek 生成内容..."):
-        try:
-            selected_model = _model_for_mode(mode, task_models)
-            result = generate_text(
-                messages=messages,
-                model=selected_model,
-                temperature=temperature,
-                max_tokens=int(max_tokens),
-            )
-        except DeepSeekClientError as exc:
-            st.error(str(exc))
-            return False
-
-    saved_path = _save_result(project_key, mode, result, chapter_number)
-    _save_pending_setting_expansion(project_key)
-    _set_current_result(result, saved_path)
-    _set_current_model_info({"使用模型": selected_model})
-    st.success(f"生成成功，已保存：{saved_path}")
-    st.info(f"使用模型：{selected_model}")
-
-    return True
+    with st.spinner("正在生成章节正文、章节标题和摘要..."):
+        chapter_result = generate_single_chapter_workflow(
+            project_key=project_key,
+            chapter_number=chapter_number,
+            form_data=project_config or _collect_project_config(),
+            task_models=task_models,
+            temperature=temperature,
+            max_tokens=int(max_tokens),
+            use_previous_context=use_previous_context,
+        )
+    return _show_chapter_workflow_result(chapter_result)
 
 
 def main() -> None:
