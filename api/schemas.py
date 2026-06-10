@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -46,3 +46,14 @@ class ChapterContentResponse(BaseModel):
     title: str
     filename: str
     content: str
+
+
+class GenerateOutlineCharactersRequest(BaseModel):
+    model: str | None = None
+    max_tokens: int | None = Field(default=None, ge=512, le=32768)
+
+
+class GenerateChapterRequest(BaseModel):
+    model: str | None = None
+    max_tokens: int | None = Field(default=None, ge=512, le=32768)
+    writing_mode: str | None = None
