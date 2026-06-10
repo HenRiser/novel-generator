@@ -1,6 +1,6 @@
-# React Reader Foundation
+# React Reader / Generation Foundation
 
-This frontend is the first-stage React reader for `novel-generator`. It only consumes the existing read-only FastAPI endpoints.
+This frontend is the first-stage React reader and basic generation surface for `novel-generator`. It consumes the existing FastAPI read and synchronous generation endpoints.
 
 ## Start the API
 
@@ -42,22 +42,26 @@ VITE_API_BASE_URL=http://127.0.0.1:8000
 Implemented:
 
 - API health status
+- API generation status
 - Project list
 - Project detail summary
 - Chapter list
 - Chapter content reading
 - Single chapter TXT link
 - Full book TXT link
+- Generate / update outline and character files
+- Generate a specified chapter
+- Refresh chapters and open the generated chapter after generation
 - Basic loading and error states
 
 Not implemented in this stage:
 
 - Setting expansion
-- Outline / character generation
-- Chapter generation
 - Batch generation
+- Batch generation API
 - Save APIs
 - Model or API Key settings
 - Streaming output
 - WebSocket or SSE
-- Task status APIs
+
+Generation requests are currently synchronous and can take a while to complete. The UI disables generation buttons while an API generation task is running.

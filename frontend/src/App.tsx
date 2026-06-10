@@ -4,13 +4,32 @@ import {
   API_BASE_URL,
   exportChapterUrl,
   exportFullBookUrl,
+  generateChapter,
+  generateOutlineCharacters,
   getChapter,
   getChapters,
+  getGenerationStatus,
   getHealth,
   getProject,
   getProjects,
+  ApiRequestError,
 } from "./api";
-import type { ApiStatus, ChapterContent, ChapterSummary, ProjectDetail, ProjectSummary } from "./types";
+import type {
+  ApiStatus,
+  ChapterContent,
+  ChapterGenerationResponse,
+  ChapterSummary,
+  GenerationRequest,
+  GenerationStatus,
+  OutlineCharactersGenerationResponse,
+  ProjectDetail,
+  ProjectSummary,
+} from "./types";
+
+const DEFAULT_GENERATION_REQUEST: GenerationRequest = {
+  model: "deepseek-v4-pro",
+  max_tokens: 4000,
+};
 
 function asText(value: unknown, fallback = "未填写"): string {
   if (typeof value === "string" && value.trim()) {
@@ -44,6 +63,73 @@ function statusText(status: ApiStatus): string {
   return "loading";
 }
 
+function generationStatusText(status: GenerationStatus | null): string {
+  if (!status) {
+    return "Loading";
+  }
+  if (status.running) {
+    return "Running";
+  }
+  if (status.last_error) {
+    return "Last error";
+  }
+  if (status.last_result) {
+    return "Last success";
+  }
+  return "Idle";
+}
+
+function publicErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiRequestError) {
+    if (error.status === 409) {
+      return "已有生成任务正在运行，请稍后再试。";
+    }
+    if (error.code === "setting_assets_missing") {
+      return "缺少大纲或人物卡，请先生成 / 更新大纲与人物卡。";
+    }
+    if (error.code === "project_config_incomplete") {
+      return `项目配置不完整：${error.message}`;
+    }
+    if (error.code === "model_config_missing") {
+      return "模型配置缺失，请先在本地旧前端或环境配置中设置模型凭据。";
+    }
+    return error.message || fallback;
+  }
+
+  return error instanceof Error ? error.message : fallback;
+}
+
+function nextChapterSuggestion(chapters: ChapterSummary[]): number {
+  if (chapters.length === 0) {
+    return 1;
+  }
+  return Math.max(...chapters.map((chapter) => chapter.chapter_number)) + 1;
+}
+
+function generationResultSummary(result: Record<string, unknown> | null): string {
+  if (!result) {
+    return "";
+  }
+
+  const parts = [
+    asText(result.message, ""),
+    asText(result.outline_file, ""),
+    asText(result.characters_file, ""),
+    asText(result.chapter_file, ""),
+    asText(result.summary_file, ""),
+  ].filter(Boolean);
+
+  return parts.join(" · ");
+}
+
+function outlineSuccessMessage(result: OutlineCharactersGenerationResponse): string {
+  return `${result.message || "大纲与人物卡生成完成。"} ${result.outline_file} ${result.characters_file}`.trim();
+}
+
+function chapterSuccessMessage(result: ChapterGenerationResponse): string {
+  return `${result.message || "章节生成完成。"} 第 ${result.chapter_number} 章 ${result.title} ${result.chapter_file}`.trim();
+}
+
 export function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("loading");
   const [apiError, setApiError] = useState("");
@@ -61,6 +147,14 @@ export function App() {
   const [chapterContent, setChapterContent] = useState<ChapterContent | null>(null);
   const [chapterLoading, setChapterLoading] = useState(false);
   const [chapterError, setChapterError] = useState("");
+  const [generationStatus, setGenerationStatus] = useState<GenerationStatus | null>(null);
+  const [generationStatusLoading, setGenerationStatusLoading] = useState(false);
+  const [generationStatusError, setGenerationStatusError] = useState("");
+  const [generationMessage, setGenerationMessage] = useState("");
+  const [generationError, setGenerationError] = useState("");
+  const [outlineGenerating, setOutlineGenerating] = useState(false);
+  const [chapterGenerating, setChapterGenerating] = useState(false);
+  const [chapterNumberInput, setChapterNumberInput] = useState("1");
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -74,6 +168,25 @@ export function App() {
         : chapters.find((chapter) => chapter.chapter_number === selectedChapterNumber) ?? null,
     [chapters, selectedChapterNumber],
   );
+
+  const suggestedChapterNumber = useMemo(() => nextChapterSuggestion(chapters), [chapters]);
+  const generationBusy = Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating;
+
+  const refreshGenerationStatus = useCallback(async () => {
+    setGenerationStatusLoading(true);
+    setGenerationStatusError("");
+    try {
+      const status = await getGenerationStatus();
+      setGenerationStatus(status);
+      return status;
+    } catch (error) {
+      const message = publicErrorMessage(error, "生成状态读取失败。");
+      setGenerationStatusError(message);
+      return null;
+    } finally {
+      setGenerationStatusLoading(false);
+    }
+  }, []);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -109,6 +222,7 @@ export function App() {
           throw new Error("API health check failed.");
         }
         setApiStatus("online");
+        void refreshGenerationStatus();
         await loadProjects();
       } catch (error) {
         if (ignore) {
@@ -124,7 +238,41 @@ export function App() {
     return () => {
       ignore = true;
     };
-  }, [loadProjects]);
+  }, [loadProjects, refreshGenerationStatus]);
+
+  useEffect(() => {
+    if (apiStatus !== "online") {
+      return;
+    }
+    void refreshGenerationStatus();
+  }, [apiStatus, refreshGenerationStatus]);
+
+  useEffect(() => {
+    if (apiStatus !== "online" || !generationStatus?.running) {
+      return;
+    }
+
+    let ignore = false;
+    const intervalId = window.setInterval(() => {
+      void getGenerationStatus()
+        .then((status) => {
+          if (!ignore) {
+            setGenerationStatus(status);
+            setGenerationStatusError("");
+          }
+        })
+        .catch((error) => {
+          if (!ignore) {
+            setGenerationStatusError(publicErrorMessage(error, "生成状态读取失败。"));
+          }
+        });
+    }, 2000);
+
+    return () => {
+      ignore = true;
+      window.clearInterval(intervalId);
+    };
+  }, [apiStatus, generationStatus?.running]);
 
   useEffect(() => {
     let ignore = false;
@@ -182,6 +330,10 @@ export function App() {
   }, [selectedProjectRef]);
 
   useEffect(() => {
+    setChapterNumberInput(String(suggestedChapterNumber));
+  }, [selectedProjectRef, suggestedChapterNumber]);
+
+  useEffect(() => {
     let ignore = false;
 
     async function loadChapter(projectRef: string, chapterNumber: number) {
@@ -213,14 +365,119 @@ export function App() {
     };
   }, [selectedProjectRef, selectedChapterNumber]);
 
+  const refreshProjectAndChapters = useCallback(async (projectRef: string) => {
+    const [detail, nextChapters] = await Promise.all([getProject(projectRef), getChapters(projectRef)]);
+    setProjectDetail(detail);
+    setChapters(nextChapters);
+    return nextChapters;
+  }, []);
+
+  const loadChapterAfterGeneration = useCallback(async (projectRef: string, chapterNumber: number) => {
+    setSelectedChapterNumber(chapterNumber);
+    setChapterLoading(true);
+    setChapterError("");
+    setChapterContent(null);
+    try {
+      const content = await getChapter(projectRef, chapterNumber);
+      setChapterContent(content);
+      return true;
+    } catch (error) {
+      setChapterError(publicErrorMessage(error, "生成后章节读取失败。"));
+      return false;
+    } finally {
+      setChapterLoading(false);
+    }
+  }, []);
+
+  const ensureGenerationIdle = useCallback(async () => {
+    const status = await refreshGenerationStatus();
+    if (!status) {
+      setGenerationError("无法读取生成状态，请确认 API 正常运行。");
+      return false;
+    }
+    if (status.running) {
+      setGenerationError("已有生成任务正在运行，请稍后再试。");
+      return false;
+    }
+    return true;
+  }, [refreshGenerationStatus]);
+
+  const handleGenerateOutlineCharacters = useCallback(async () => {
+    if (!selectedProjectRef) {
+      setGenerationError("请先选择项目。");
+      return;
+    }
+
+    setGenerationMessage("");
+    setGenerationError("");
+    if (!(await ensureGenerationIdle())) {
+      return;
+    }
+
+    setOutlineGenerating(true);
+    try {
+      const result = await generateOutlineCharacters(selectedProjectRef, DEFAULT_GENERATION_REQUEST);
+      setGenerationMessage(outlineSuccessMessage(result));
+      await refreshGenerationStatus();
+    } catch (error) {
+      setGenerationError(publicErrorMessage(error, "大纲与人物卡生成失败。"));
+      await refreshGenerationStatus();
+    } finally {
+      setOutlineGenerating(false);
+    }
+  }, [ensureGenerationIdle, refreshGenerationStatus, selectedProjectRef]);
+
+  const handleGenerateChapter = useCallback(async () => {
+    if (!selectedProjectRef) {
+      setGenerationError("请先选择项目。");
+      return;
+    }
+
+    const chapterNumber = Number.parseInt(chapterNumberInput, 10);
+    if (!Number.isInteger(chapterNumber) || chapterNumber < 1) {
+      setGenerationError("章节号必须是正整数。");
+      return;
+    }
+
+    setGenerationMessage("");
+    setGenerationError("");
+    if (!(await ensureGenerationIdle())) {
+      return;
+    }
+
+    setChapterGenerating(true);
+    try {
+      const result = await generateChapter(selectedProjectRef, chapterNumber, DEFAULT_GENERATION_REQUEST);
+      setGenerationMessage(chapterSuccessMessage(result));
+      await refreshProjectAndChapters(selectedProjectRef);
+      const loaded = await loadChapterAfterGeneration(selectedProjectRef, result.chapter_number || chapterNumber);
+      if (!loaded) {
+        setGenerationError("章节已生成，但自动读取正文失败，请手动刷新或重新选择章节。");
+      }
+      await refreshGenerationStatus();
+    } catch (error) {
+      setGenerationError(publicErrorMessage(error, "章节生成失败。"));
+      await refreshGenerationStatus();
+    } finally {
+      setChapterGenerating(false);
+    }
+  }, [
+    chapterNumberInput,
+    ensureGenerationIdle,
+    loadChapterAfterGeneration,
+    refreshGenerationStatus,
+    refreshProjectAndChapters,
+    selectedProjectRef,
+  ]);
+
   const projectConfig = projectDetail?.config;
 
   return (
     <main className="app-shell">
       <header className="app-header">
         <div>
-          <h1>Novel Generator Reader</h1>
-          <p>React reader foundation for local project browsing and TXT exports.</p>
+          <h1>Novel Generator</h1>
+          <p>React reader and basic generation foundation for local projects.</p>
         </div>
         <div className={`status-pill status-${apiStatus}`}>{statusText(apiStatus)}</div>
       </header>
@@ -231,6 +488,37 @@ export function App() {
           <span>{apiError || "请先启动后端服务。"}</span>
           <code>python -m uvicorn api.main:app --host 127.0.0.1 --port 8000</code>
           <span>当前 API 地址：{API_BASE_URL}</span>
+        </section>
+      )}
+
+      {apiStatus === "online" && (
+        <section className="generation-status-bar" aria-live="polite">
+          <div>
+            <span>Generation</span>
+            <strong>{generationStatusLoading ? "Loading" : generationStatusText(generationStatus)}</strong>
+          </div>
+          <div>
+            <span>task_type</span>
+            <strong>{generationStatus?.task_type || "-"}</strong>
+          </div>
+          <div>
+            <span>target</span>
+            <strong>{generationStatus?.target || "-"}</strong>
+          </div>
+          <div>
+            <span>started_at</span>
+            <strong>{generationStatus?.started_at || "-"}</strong>
+          </div>
+          <div>
+            <span>finished_at</span>
+            <strong>{generationStatus?.finished_at || "-"}</strong>
+          </div>
+          {(generationStatusError || generationStatus?.last_error) && (
+            <p className="error-text">{generationStatusError || generationStatus?.last_error}</p>
+          )}
+          {!generationStatus?.last_error && generationStatus?.last_result && (
+            <p className="success-text">{generationResultSummary(generationStatus.last_result)}</p>
+          )}
         </section>
       )}
 
@@ -297,6 +585,52 @@ export function App() {
               </div>
             </div>
           )}
+
+          <section className="generation-controls">
+            <div className="section-header">
+              <h3>基础生成</h3>
+              <button
+                type="button"
+                onClick={() => void refreshGenerationStatus()}
+                disabled={generationStatusLoading || apiStatus !== "online"}
+              >
+                刷新状态
+              </button>
+            </div>
+            <div className="generation-actions">
+              <button
+                type="button"
+                onClick={() => void handleGenerateOutlineCharacters()}
+                disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
+              >
+                {outlineGenerating ? "正在生成大纲与人物卡..." : "生成 / 更新大纲与人物卡"}
+              </button>
+              <label className="chapter-number-field">
+                <span>章节号</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={chapterNumberInput}
+                  onChange={(event) => setChapterNumberInput(event.target.value)}
+                  disabled={!selectedProjectRef || generationBusy}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => void handleGenerateChapter()}
+                disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
+              >
+                {chapterGenerating ? "正在生成章节..." : "生成指定章节"}
+              </button>
+            </div>
+            <p className="muted">
+              建议下一章：第 {suggestedChapterNumber} 章；当前模型：{DEFAULT_GENERATION_REQUEST.model}，
+              max_tokens：{DEFAULT_GENERATION_REQUEST.max_tokens}
+            </p>
+            {generationMessage && <p className="success-text">{generationMessage}</p>}
+            {generationError && <p className="error-text">{generationError}</p>}
+          </section>
 
           <div className="section-header">
             <h3>章节列表</h3>

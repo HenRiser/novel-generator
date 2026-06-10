@@ -1,39 +1,84 @@
 import type {
   ChapterContent,
+  ChapterGenerationResponse,
   ChapterSummary,
+  GenerationRequest,
+  GenerationStatus,
   HealthResponse,
+  OutlineCharactersGenerationResponse,
   ProjectDetail,
   ProjectSummary,
 } from "./types";
 
 export const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, "") ||
-  "http://127.0.0.1:8000";
+  (import.meta as unknown as { readonly env?: { readonly VITE_API_BASE_URL?: string } })[
+    "env"
+  ]?.VITE_API_BASE_URL?.replace(/\/+$/, "") || "http://127.0.0.1:8000";
 
 function projectPath(projectRef: string): string {
   return encodeURIComponent(projectRef);
 }
 
+function errorObjectFromPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  if ("error" in payload) {
+    return payload.error;
+  }
+  if ("detail" in payload) {
+    const detail = payload.detail;
+    if (detail && typeof detail === "object" && "error" in detail) {
+      return detail.error;
+    }
+  }
+  return null;
+}
+
 function errorMessageFromPayload(payload: unknown, fallback: string): string {
+  const errorObject = errorObjectFromPayload(payload);
   if (
-    payload &&
-    typeof payload === "object" &&
-    "error" in payload &&
-    payload.error &&
-    typeof payload.error === "object" &&
-    "message" in payload.error &&
-    typeof payload.error.message === "string"
+    errorObject &&
+    typeof errorObject === "object" &&
+    "message" in errorObject &&
+    typeof errorObject.message === "string"
   ) {
-    return payload.error.message;
+    return errorObject.message;
   }
 
   return fallback;
 }
 
-async function apiFetch<T>(path: string): Promise<T> {
+function errorCodeFromPayload(payload: unknown): string {
+  const errorObject = errorObjectFromPayload(payload);
+  if (
+    errorObject &&
+    typeof errorObject === "object" &&
+    "code" in errorObject &&
+    typeof errorObject.code === "string"
+  ) {
+    return errorObject.code;
+  }
+
+  return "";
+}
+
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(message: string, status: number, code = "") {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`);
+    response = await fetch(`${API_BASE_URL}${path}`, init);
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : "API request failed.");
   }
@@ -45,10 +90,24 @@ async function apiFetch<T>(path: string): Promise<T> {
     } catch {
       payload = null;
     }
-    throw new Error(errorMessageFromPayload(payload, `API request failed with ${response.status}.`));
+    throw new ApiRequestError(
+      errorMessageFromPayload(payload, `API request failed with ${response.status}.`),
+      response.status,
+      errorCodeFromPayload(payload),
+    );
   }
 
   return response.json() as Promise<T>;
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
 }
 
 export function exportFullBookUrl(projectRef: string): string {
@@ -78,5 +137,30 @@ export function getChapters(projectRef: string): Promise<ChapterSummary[]> {
 export function getChapter(projectRef: string, chapterNumber: number): Promise<ChapterContent> {
   return apiFetch<ChapterContent>(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}`,
+  );
+}
+
+export function getGenerationStatus(): Promise<GenerationStatus> {
+  return apiFetch<GenerationStatus>("/api/generation/status");
+}
+
+export function generateOutlineCharacters(
+  projectRef: string,
+  request: GenerationRequest,
+): Promise<OutlineCharactersGenerationResponse> {
+  return postJson<OutlineCharactersGenerationResponse>(
+    `/api/projects/${projectPath(projectRef)}/outline-characters/generate`,
+    request,
+  );
+}
+
+export function generateChapter(
+  projectRef: string,
+  chapterNumber: number,
+  request: GenerationRequest,
+): Promise<ChapterGenerationResponse> {
+  return postJson<ChapterGenerationResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generate`,
+    request,
   );
 }
