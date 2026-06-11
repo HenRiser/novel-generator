@@ -14,6 +14,7 @@ import {
   getProject,
   getProjects,
   ApiRequestError,
+  safePublicMessage,
 } from "./api";
 import type {
   ApiStatus,
@@ -32,6 +33,8 @@ const DEFAULT_GENERATION_REQUEST: GenerationRequest = {
   model: "deepseek-v4-pro",
   max_tokens: 4000,
 };
+
+type StreamingPreviewStatus = "idle" | "streaming" | "saved" | "failed_unsaved";
 
 function asText(value: unknown, fallback = "未填写"): string {
   if (typeof value === "string" && value.trim()) {
@@ -81,6 +84,15 @@ function generationStatusText(status: GenerationStatus | null): string {
   return "Idle";
 }
 
+function publicFileName(value: unknown): string {
+  const text = asText(value, "");
+  if (!text) {
+    return "";
+  }
+  const parts = text.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : text;
+}
+
 function publicErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiRequestError) {
     if (error.status === 409) {
@@ -95,10 +107,16 @@ function publicErrorMessage(error: unknown, fallback: string): string {
     if (error.code === "model_config_missing") {
       return "模型配置缺失，请先在本地旧前端或环境配置中设置模型凭据。";
     }
-    return error.message || fallback;
+    if (error.code === "generation_failed") {
+      return `生成失败：${safePublicMessage(error.message, fallback)}`;
+    }
+    if (error.code === "project_not_found") {
+      return "项目不存在或无法读取。";
+    }
+    return safePublicMessage(error.message, fallback);
   }
 
-  return error instanceof Error ? error.message : fallback;
+  return safePublicMessage(error instanceof Error ? error.message : "", fallback);
 }
 
 function nextChapterSuggestion(chapters: ChapterSummary[]): number {
@@ -114,26 +132,90 @@ function generationResultSummary(result: Record<string, unknown> | null): string
   }
 
   const parts = [
-    asText(result.message, ""),
-    asText(result.outline_file, ""),
-    asText(result.characters_file, ""),
-    asText(result.chapter_file, ""),
-    asText(result.summary_file, ""),
+    safePublicMessage(asText(result.message, ""), ""),
+    publicFileName(result.outline_file),
+    publicFileName(result.characters_file),
+    publicFileName(result.chapter_file),
+    publicFileName(result.summary_file),
   ].filter(Boolean);
 
   return parts.join(" · ");
 }
 
+function generationSavedFiles(result: Record<string, unknown> | null): string {
+  if (!result) {
+    return "-";
+  }
+
+  return (
+    [
+      publicFileName(result.chapter_file),
+      publicFileName(result.summary_file),
+      publicFileName(result.outline_file),
+      publicFileName(result.characters_file),
+    ]
+      .filter(Boolean)
+      .join(" · ") || "-"
+  );
+}
+
 function outlineSuccessMessage(result: OutlineCharactersGenerationResponse): string {
-  return `${result.message || "大纲与人物卡生成完成。"} ${result.outline_file} ${result.characters_file}`.trim();
+  return [
+    result.message || "大纲与人物卡生成完成。",
+    publicFileName(result.outline_file),
+    publicFileName(result.characters_file),
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function chapterSuccessMessage(result: ChapterGenerationResponse): string {
-  return `${result.message || "章节生成完成。"} 第 ${result.chapter_number} 章 ${result.title} ${result.chapter_file}`.trim();
+  return [
+    result.message || "章节生成完成。",
+    `第 ${result.chapter_number} 章`,
+    result.title,
+    publicFileName(result.chapter_file),
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function chapterStreamSuccessMessage(result: ChapterStreamDoneEvent): string {
-  return `${result.message || "章节生成完成。"} 第 ${result.chapter_number} 章 ${result.title} ${result.chapter_file}`.trim();
+  return [
+    result.message || "章节生成完成。",
+    `第 ${result.chapter_number} 章`,
+    result.title,
+    publicFileName(result.chapter_file),
+    result.summary_file ? `摘要：${publicFileName(result.summary_file)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function streamingStatusLabel(status: StreamingPreviewStatus): string {
+  if (status === "streaming") {
+    return "生成中";
+  }
+  if (status === "saved") {
+    return "已保存";
+  }
+  if (status === "failed_unsaved") {
+    return "失败未保存";
+  }
+  return "等待内容";
+}
+
+function streamSaveSummary(result: ChapterStreamDoneEvent | null): string {
+  if (!result) {
+    return "流式生成已完成，章节已保存。";
+  }
+
+  return [
+    result.chapter_file ? `已保存为 ${publicFileName(result.chapter_file)}` : "章节已保存",
+    result.summary_file ? `摘要 ${publicFileName(result.summary_file)}` : "",
+  ]
+    .filter(Boolean)
+    .join("；");
 }
 
 export function App() {
@@ -164,8 +246,9 @@ export function App() {
   const [chapterNumberInput, setChapterNumberInput] = useState("1");
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingPreviewVisible, setStreamingPreviewVisible] = useState(false);
+  const [streamingPreviewStatus, setStreamingPreviewStatus] = useState<StreamingPreviewStatus>("idle");
   const [streamingError, setStreamingError] = useState("");
-  const [streamingSaved, setStreamingSaved] = useState(false);
+  const [streamingResult, setStreamingResult] = useState<ChapterStreamDoneEvent | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -181,6 +264,7 @@ export function App() {
   );
 
   const suggestedChapterNumber = useMemo(() => nextChapterSuggestion(chapters), [chapters]);
+  const streamingCharacterCount = streamingContent.length;
   const generationBusy =
     Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating || chapterStreaming;
 
@@ -212,7 +296,7 @@ export function App() {
           : currentProjectRef,
       );
     } catch (error) {
-      setProjectsError(error instanceof Error ? error.message : "项目列表加载失败。");
+      setProjectsError(publicErrorMessage(error, "项目列表加载失败。"));
       setProjects([]);
     } finally {
       setProjectsLoading(false);
@@ -241,7 +325,7 @@ export function App() {
           return;
         }
         setApiStatus("offline");
-        setApiError(error instanceof Error ? error.message : "无法连接 API。");
+        setApiError(publicErrorMessage(error, "无法连接 API，请确认后端服务已启动。"));
       }
     }
 
@@ -301,7 +385,8 @@ export function App() {
       setChapterError("");
       setStreamingContent("");
       setStreamingError("");
-      setStreamingSaved(false);
+      setStreamingResult(null);
+      setStreamingPreviewStatus("idle");
       setStreamingPreviewVisible(false);
       try {
         const [detail, nextChapters] = await Promise.all([getProject(projectRef), getChapters(projectRef)]);
@@ -317,7 +402,7 @@ export function App() {
         if (ignore) {
           return;
         }
-        const message = error instanceof Error ? error.message : "项目读取失败。";
+        const message = publicErrorMessage(error, "项目读取失败。");
         setProjectError(message);
         setChaptersError(message);
       } finally {
@@ -340,7 +425,8 @@ export function App() {
       setChapterError("");
       setStreamingContent("");
       setStreamingError("");
-      setStreamingSaved(false);
+      setStreamingResult(null);
+      setStreamingPreviewStatus("idle");
       setStreamingPreviewVisible(false);
     }
 
@@ -367,7 +453,7 @@ export function App() {
         }
       } catch (error) {
         if (!ignore) {
-          setChapterError(error instanceof Error ? error.message : "章节正文加载失败。");
+          setChapterError(publicErrorMessage(error, "章节正文加载失败。"));
         }
       } finally {
         if (!ignore) {
@@ -466,7 +552,8 @@ export function App() {
     }
     setStreamingContent("");
     setStreamingError("");
-    setStreamingSaved(false);
+    setStreamingResult(null);
+    setStreamingPreviewStatus("streaming");
     setStreamingPreviewVisible(true);
 
     setChapterStreaming(true);
@@ -474,17 +561,20 @@ export function App() {
       const result = await generateChapterStream(selectedProjectRef, chapterNumber, DEFAULT_GENERATION_REQUEST, {
         onDelta: (text) => {
           setStreamingContent((current) => `${current}${text}`);
+          setStreamingPreviewStatus("streaming");
         },
-        onDone: () => {
-          setStreamingSaved(true);
+        onDone: (doneEvent) => {
+          setStreamingResult(doneEvent);
+          setStreamingPreviewStatus("saved");
           setStreamingError("");
         },
         onError: (error) => {
-          setStreamingSaved(false);
-          setStreamingError(`${error.message || "章节流式生成失败。"} 当前预览未保存。`);
+          setStreamingPreviewStatus("failed_unsaved");
+          setStreamingError(`${safePublicMessage(error.message, "章节流式生成失败。")} 当前预览未保存。`);
         },
       });
-      setStreamingSaved(true);
+      setStreamingResult(result);
+      setStreamingPreviewStatus("saved");
       setGenerationMessage(chapterStreamSuccessMessage(result));
       await refreshProjectAndChapters(selectedProjectRef);
       const loaded = await loadChapterAfterGeneration(selectedProjectRef, result.chapter_number || chapterNumber);
@@ -494,7 +584,7 @@ export function App() {
       await refreshGenerationStatus();
     } catch (error) {
       const message = publicErrorMessage(error, "章节流式生成失败。");
-      setStreamingSaved(false);
+      setStreamingPreviewStatus("failed_unsaved");
       setStreamingError(`${message} 当前预览未保存。`);
       setGenerationError(message);
       await refreshGenerationStatus();
@@ -527,6 +617,11 @@ export function App() {
     if (!(await ensureGenerationIdle())) {
       return;
     }
+    setStreamingContent("");
+    setStreamingError("");
+    setStreamingResult(null);
+    setStreamingPreviewStatus("idle");
+    setStreamingPreviewVisible(false);
 
     setChapterGenerating(true);
     try {
@@ -577,30 +672,35 @@ export function App() {
       {apiStatus === "online" && (
         <section className="generation-status-bar" aria-live="polite">
           <div>
-            <span>Generation</span>
+            <span>状态</span>
             <strong>{generationStatusLoading ? "Loading" : generationStatusText(generationStatus)}</strong>
           </div>
           <div>
-            <span>task_type</span>
+            <span>任务类型</span>
             <strong>{generationStatus?.task_type || "-"}</strong>
           </div>
           <div>
-            <span>target</span>
+            <span>目标章节</span>
             <strong>{generationStatus?.target || "-"}</strong>
           </div>
           <div>
-            <span>started_at</span>
+            <span>开始时间</span>
             <strong>{generationStatus?.started_at || "-"}</strong>
           </div>
           <div>
-            <span>finished_at</span>
+            <span>完成时间</span>
             <strong>{generationStatus?.finished_at || "-"}</strong>
           </div>
-          {(generationStatusError || generationStatus?.last_error) && (
-            <p className="error-text">{generationStatusError || generationStatus?.last_error}</p>
+          <div>
+            <span>最近保存</span>
+            <strong>{generationSavedFiles(generationStatus?.last_result ?? null)}</strong>
+          </div>
+          {generationStatusError && <p className="error-text">状态读取失败：{generationStatusError}</p>}
+          {!generationStatusError && generationStatus?.last_error && (
+            <p className="error-text">最近错误：{safePublicMessage(generationStatus.last_error, "生成失败。")}</p>
           )}
-          {!generationStatus?.last_error && generationStatus?.last_result && (
-            <p className="success-text">{generationResultSummary(generationStatus.last_result)}</p>
+          {!generationStatusError && !generationStatus?.last_error && generationStatus?.last_result && (
+            <p className="success-text">最近结果：{generationResultSummary(generationStatus.last_result)}</p>
           )}
         </section>
       )}
@@ -715,35 +815,39 @@ export function App() {
                 {chapterGenerating ? "正在同步生成章节..." : "同步生成（备用）"}
               </button>
             </div>
+            <p className="muted">默认使用流式生成；同步生成仅作为流式异常时的备用 / 调试入口。</p>
             <p className="muted">
               建议下一章：第 {suggestedChapterNumber} 章；当前模型：{DEFAULT_GENERATION_REQUEST.model}，
               max_tokens：{DEFAULT_GENERATION_REQUEST.max_tokens}
             </p>
+            <p className="muted">如果生成内容明显中断，可提高 max_tokens 或重新生成该章节。</p>
             {generationMessage && <p className="success-text">{generationMessage}</p>}
             {generationError && <p className="error-text">{generationError}</p>}
             {streamingPreviewVisible && (
               <section
                 className={`streaming-preview ${
-                  streamingSaved ? "streaming-preview-saved" : streamingError ? "streaming-preview-error" : ""
+                  streamingPreviewStatus === "saved"
+                    ? "streaming-preview-saved"
+                    : streamingPreviewStatus === "failed_unsaved"
+                      ? "streaming-preview-error"
+                      : ""
                 }`}
                 aria-live="polite"
               >
                 <div className="streaming-preview-header">
-                  <h4>实时正文预览</h4>
-                  <span>
-                    {chapterStreaming
-                      ? "生成中"
-                      : streamingSaved
-                        ? "已保存"
-                        : streamingError
-                          ? "未保存"
-                          : "等待内容"}
-                  </span>
+                  <div>
+                    <h4>实时正文预览</h4>
+                    <p>{streamingCharacterCount} 字</p>
+                  </div>
+                  <span>{streamingStatusLabel(streamingPreviewStatus)}</span>
                 </div>
                 {streamingError && <p className="error-text">{streamingError}</p>}
-                {streamingSaved && <p className="success-text">流式生成已完成，章节已保存。</p>}
+                {streamingPreviewStatus === "saved" && (
+                  <p className="success-text">{streamSaveSummary(streamingResult)}</p>
+                )}
                 <pre className="streaming-content">
-                  {streamingContent || (chapterStreaming ? "等待模型返回内容..." : "暂无预览内容。")}
+                  {streamingContent ||
+                    (streamingPreviewStatus === "streaming" ? "等待模型返回正文..." : "暂无预览内容。")}
                 </pre>
               </section>
             )}

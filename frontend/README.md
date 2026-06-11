@@ -52,9 +52,9 @@ Implemented:
 - Generate / update outline and character files
 - Generate a specified chapter with streaming output by default
 - Keep synchronous specified-chapter generation as a fallback
-- Show live chapter text while streaming
+- Show live chapter text while streaming, including preview status and character count
 - Refresh chapters and open the generated chapter after generation
-- Basic loading and error states
+- Basic loading, generation status, saved-file, and error states
 
 Not implemented in this stage:
 
@@ -70,5 +70,14 @@ Not implemented in this stage:
 - WebSocket or SSE
 
 Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button.
+
+Streaming preview behavior:
+
+- The main chapter generation button uses streaming output by default.
+- Text shown before the `done` event is a live preview, not a saved chapter.
+- The chapter is marked saved only after the API finishes chapter save, summary save, and index update.
+- If streaming fails or the request is interrupted, the preview remains visible and is marked as unsaved.
+- Failed partial preview text is not written to the official chapter file.
+- If generated content appears cut off, increase `max_tokens` or regenerate that chapter.
 
 Streamlit currently continues to use the synchronous generation workflow.

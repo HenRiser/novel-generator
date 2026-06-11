@@ -23,8 +23,38 @@ function projectPath(projectRef: string): string {
   return encodeURIComponent(projectRef);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object");
+}
+
+export function safePublicMessage(message: unknown, fallback: string): string {
+  let text = typeof message === "string" ? message.trim() : "";
+  if (!text) {
+    return fallback;
+  }
+
+  if (/Traceback\s*\(/i.test(text) || /\n\s*File\s+["']/.test(text)) {
+    return fallback;
+  }
+
+  text = text.replace(/[A-Za-z]:[\\/][^\s"'<>]+/g, "[local path]");
+  text = text.replace(/\/h(?:ome)[^\s"'<>]*/g, "[local path]");
+  text = text.replace(/(api[\s_-]*key|token|secret|credential)\s*[:=]\s*["']?[^"'\s,;]+/gi, "$1=[hidden]");
+  return text.replace(/\s+/g, " ").trim() || fallback;
+}
+
+function messageFromValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (isRecord(value) && typeof value.message === "string") {
+    return value.message;
+  }
+  return "";
+}
+
 function errorObjectFromPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object") {
+  if (!isRecord(payload)) {
     return null;
   }
   if ("error" in payload) {
@@ -32,7 +62,7 @@ function errorObjectFromPayload(payload: unknown): unknown {
   }
   if ("detail" in payload) {
     const detail = payload.detail;
-    if (detail && typeof detail === "object" && "error" in detail) {
+    if (isRecord(detail) && "error" in detail) {
       return detail.error;
     }
   }
@@ -40,28 +70,42 @@ function errorObjectFromPayload(payload: unknown): unknown {
 }
 
 function errorMessageFromPayload(payload: unknown, fallback: string): string {
-  const errorObject = errorObjectFromPayload(payload);
-  if (
-    errorObject &&
-    typeof errorObject === "object" &&
-    "message" in errorObject &&
-    typeof errorObject.message === "string"
-  ) {
-    return errorObject.message;
+  const candidates: unknown[] = [errorObjectFromPayload(payload)];
+  if (isRecord(payload)) {
+    candidates.push(payload.message);
+    candidates.push(payload.detail);
+    if (isRecord(payload.detail)) {
+      candidates.push(payload.detail.message);
+      candidates.push(payload.detail.error);
+    }
+    candidates.push(payload.error);
+  }
+
+  for (const candidate of candidates) {
+    const message = messageFromValue(candidate);
+    if (message) {
+      return safePublicMessage(message, fallback);
+    }
   }
 
   return fallback;
 }
 
 function errorCodeFromPayload(payload: unknown): string {
-  const errorObject = errorObjectFromPayload(payload);
-  if (
-    errorObject &&
-    typeof errorObject === "object" &&
-    "code" in errorObject &&
-    typeof errorObject.code === "string"
-  ) {
-    return errorObject.code;
+  const candidates: unknown[] = [errorObjectFromPayload(payload)];
+  if (isRecord(payload)) {
+    candidates.push(payload);
+    candidates.push(payload.error);
+    candidates.push(payload.detail);
+    if (isRecord(payload.detail)) {
+      candidates.push(payload.detail.error);
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (isRecord(candidate) && typeof candidate.code === "string") {
+      return candidate.code;
+    }
   }
 
   return "";
@@ -84,7 +128,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${API_BASE_URL}${path}`, init);
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "API request failed.");
+    throw new Error(safePublicMessage(error instanceof Error ? error.message : "", "API request failed."));
   }
 
   if (!response.ok) {
@@ -120,7 +164,7 @@ function isStreamEvent(payload: unknown): payload is ChapterStreamEvent {
 
 function streamErrorFromEvent(event: ChapterStreamErrorEvent): ApiRequestError {
   return new ApiRequestError(
-    event.message || "Chapter streaming generation failed.",
+    safePublicMessage(event.message, "Chapter streaming generation failed."),
     200,
     event.code || "generation_failed",
   );
@@ -139,7 +183,7 @@ function handleStreamLine(
   try {
     payload = JSON.parse(trimmed);
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "Invalid streaming response.");
+    throw new Error(safePublicMessage(error instanceof Error ? error.message : "", "Invalid streaming response."));
   }
 
   if (!isStreamEvent(payload)) {
@@ -237,7 +281,7 @@ export async function generateChapterStream(
       },
     );
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "API request failed.");
+    throw new Error(safePublicMessage(error instanceof Error ? error.message : "", "API request failed."));
   }
 
   if (!response.ok) {

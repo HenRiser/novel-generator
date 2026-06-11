@@ -64,9 +64,9 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-This first-stage API exposes only health, project listing/detail, chapter reading, and TXT export endpoints. It does not implement generation endpoints, streaming output, WebSocket, task queues, user accounts, or save APIs.
+The API exposes health, project listing/detail, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or save APIs.
 
-Start the first-stage React reader frontend after the API is running:
+Start the React reader and generation frontend after the API is running:
 
 ```bat
 cd frontend
@@ -80,7 +80,15 @@ The React reader is available at:
 http://127.0.0.1:5173
 ```
 
-The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. This first-stage frontend only supports project browsing, chapter reading, and TXT export links. It does not support generation, saving, API Key settings, streaming output, or task status APIs.
+The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file.
+
+Current React limits:
+
+- no batch streaming generation
+- no cancellation API
+- no draft recovery for failed partial output
+- no model or API Key settings migration
+- no Streamlit streaming UI
 
 ## API / Model Configuration
 
