@@ -5,6 +5,7 @@ import {
   exportChapterUrl,
   exportFullBookUrl,
   generateChapter,
+  generateChapterStream,
   generateOutlineCharacters,
   getChapter,
   getChapters,
@@ -19,6 +20,7 @@ import type {
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
+  ChapterStreamDoneEvent,
   GenerationRequest,
   GenerationStatus,
   OutlineCharactersGenerationResponse,
@@ -130,6 +132,10 @@ function chapterSuccessMessage(result: ChapterGenerationResponse): string {
   return `${result.message || "章节生成完成。"} 第 ${result.chapter_number} 章 ${result.title} ${result.chapter_file}`.trim();
 }
 
+function chapterStreamSuccessMessage(result: ChapterStreamDoneEvent): string {
+  return `${result.message || "章节生成完成。"} 第 ${result.chapter_number} 章 ${result.title} ${result.chapter_file}`.trim();
+}
+
 export function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("loading");
   const [apiError, setApiError] = useState("");
@@ -154,7 +160,12 @@ export function App() {
   const [generationError, setGenerationError] = useState("");
   const [outlineGenerating, setOutlineGenerating] = useState(false);
   const [chapterGenerating, setChapterGenerating] = useState(false);
+  const [chapterStreaming, setChapterStreaming] = useState(false);
   const [chapterNumberInput, setChapterNumberInput] = useState("1");
+  const [streamingContent, setStreamingContent] = useState("");
+  const [streamingPreviewVisible, setStreamingPreviewVisible] = useState(false);
+  const [streamingError, setStreamingError] = useState("");
+  const [streamingSaved, setStreamingSaved] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -170,7 +181,8 @@ export function App() {
   );
 
   const suggestedChapterNumber = useMemo(() => nextChapterSuggestion(chapters), [chapters]);
-  const generationBusy = Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating;
+  const generationBusy =
+    Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating || chapterStreaming;
 
   const refreshGenerationStatus = useCallback(async () => {
     setGenerationStatusLoading(true);
@@ -287,6 +299,10 @@ export function App() {
       setSelectedChapterNumber(null);
       setChapterContent(null);
       setChapterError("");
+      setStreamingContent("");
+      setStreamingError("");
+      setStreamingSaved(false);
+      setStreamingPreviewVisible(false);
       try {
         const [detail, nextChapters] = await Promise.all([getProject(projectRef), getChapters(projectRef)]);
         if (ignore) {
@@ -322,6 +338,10 @@ export function App() {
       setSelectedChapterNumber(null);
       setChapterContent(null);
       setChapterError("");
+      setStreamingContent("");
+      setStreamingError("");
+      setStreamingSaved(false);
+      setStreamingPreviewVisible(false);
     }
 
     return () => {
@@ -426,6 +446,69 @@ export function App() {
       setOutlineGenerating(false);
     }
   }, [ensureGenerationIdle, refreshGenerationStatus, selectedProjectRef]);
+
+  const handleGenerateChapterStream = useCallback(async () => {
+    if (!selectedProjectRef) {
+      setGenerationError("请选择项目后再生成章节。");
+      return;
+    }
+
+    const chapterNumber = Number.parseInt(chapterNumberInput, 10);
+    if (!Number.isInteger(chapterNumber) || chapterNumber < 1) {
+      setGenerationError("章节号必须是正整数。");
+      return;
+    }
+
+    setGenerationMessage("");
+    setGenerationError("");
+    if (!(await ensureGenerationIdle())) {
+      return;
+    }
+    setStreamingContent("");
+    setStreamingError("");
+    setStreamingSaved(false);
+    setStreamingPreviewVisible(true);
+
+    setChapterStreaming(true);
+    try {
+      const result = await generateChapterStream(selectedProjectRef, chapterNumber, DEFAULT_GENERATION_REQUEST, {
+        onDelta: (text) => {
+          setStreamingContent((current) => `${current}${text}`);
+        },
+        onDone: () => {
+          setStreamingSaved(true);
+          setStreamingError("");
+        },
+        onError: (error) => {
+          setStreamingSaved(false);
+          setStreamingError(`${error.message || "章节流式生成失败。"} 当前预览未保存。`);
+        },
+      });
+      setStreamingSaved(true);
+      setGenerationMessage(chapterStreamSuccessMessage(result));
+      await refreshProjectAndChapters(selectedProjectRef);
+      const loaded = await loadChapterAfterGeneration(selectedProjectRef, result.chapter_number || chapterNumber);
+      if (!loaded) {
+        setGenerationError("章节已生成，但自动读取正文失败，请手动刷新或重新选择章节。");
+      }
+      await refreshGenerationStatus();
+    } catch (error) {
+      const message = publicErrorMessage(error, "章节流式生成失败。");
+      setStreamingSaved(false);
+      setStreamingError(`${message} 当前预览未保存。`);
+      setGenerationError(message);
+      await refreshGenerationStatus();
+    } finally {
+      setChapterStreaming(false);
+    }
+  }, [
+    chapterNumberInput,
+    ensureGenerationIdle,
+    loadChapterAfterGeneration,
+    refreshGenerationStatus,
+    refreshProjectAndChapters,
+    selectedProjectRef,
+  ]);
 
   const handleGenerateChapter = useCallback(async () => {
     if (!selectedProjectRef) {
@@ -618,10 +701,18 @@ export function App() {
               </label>
               <button
                 type="button"
+                onClick={() => void handleGenerateChapterStream()}
+                disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
+              >
+                {chapterStreaming ? "正在流式生成章节..." : "生成章节"}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
                 onClick={() => void handleGenerateChapter()}
                 disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
               >
-                {chapterGenerating ? "正在生成章节..." : "生成指定章节"}
+                {chapterGenerating ? "正在同步生成章节..." : "同步生成（备用）"}
               </button>
             </div>
             <p className="muted">
@@ -630,6 +721,32 @@ export function App() {
             </p>
             {generationMessage && <p className="success-text">{generationMessage}</p>}
             {generationError && <p className="error-text">{generationError}</p>}
+            {streamingPreviewVisible && (
+              <section
+                className={`streaming-preview ${
+                  streamingSaved ? "streaming-preview-saved" : streamingError ? "streaming-preview-error" : ""
+                }`}
+                aria-live="polite"
+              >
+                <div className="streaming-preview-header">
+                  <h4>实时正文预览</h4>
+                  <span>
+                    {chapterStreaming
+                      ? "生成中"
+                      : streamingSaved
+                        ? "已保存"
+                        : streamingError
+                          ? "未保存"
+                          : "等待内容"}
+                  </span>
+                </div>
+                {streamingError && <p className="error-text">{streamingError}</p>}
+                {streamingSaved && <p className="success-text">流式生成已完成，章节已保存。</p>}
+                <pre className="streaming-content">
+                  {streamingContent || (chapterStreaming ? "等待模型返回内容..." : "暂无预览内容。")}
+                </pre>
+              </section>
+            )}
           </section>
 
           <div className="section-header">

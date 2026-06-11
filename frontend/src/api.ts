@@ -2,6 +2,10 @@ import type {
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
+  ChapterStreamDoneEvent,
+  ChapterStreamErrorEvent,
+  ChapterStreamEvent,
+  ChapterStreamHandlers,
   GenerationRequest,
   GenerationStatus,
   HealthResponse,
@@ -110,6 +114,54 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+function isStreamEvent(payload: unknown): payload is ChapterStreamEvent {
+  return Boolean(payload && typeof payload === "object" && "type" in payload);
+}
+
+function streamErrorFromEvent(event: ChapterStreamErrorEvent): ApiRequestError {
+  return new ApiRequestError(
+    event.message || "Chapter streaming generation failed.",
+    200,
+    event.code || "generation_failed",
+  );
+}
+
+function handleStreamLine(
+  line: string,
+  handlers: ChapterStreamHandlers,
+): ChapterStreamDoneEvent | ChapterStreamErrorEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(trimmed);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Invalid streaming response.");
+  }
+
+  if (!isStreamEvent(payload)) {
+    throw new Error("Invalid streaming response event.");
+  }
+
+  if (payload.type === "delta") {
+    if (payload.text) {
+      handlers.onDelta?.(payload.text);
+    }
+    return null;
+  }
+
+  if (payload.type === "done") {
+    handlers.onDone?.(payload);
+    return payload;
+  }
+
+  handlers.onError?.(payload);
+  return payload;
+}
+
 export function exportFullBookUrl(projectRef: string): string {
   return `${API_BASE_URL}/api/projects/${projectPath(projectRef)}/exports/full.txt`;
 }
@@ -163,4 +215,103 @@ export function generateChapter(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generate`,
     request,
   );
+}
+
+export async function generateChapterStream(
+  projectRef: string,
+  chapterNumber: number,
+  request: GenerationRequest,
+  handlers: ChapterStreamHandlers = {},
+): Promise<ChapterStreamDoneEvent> {
+  let response: Response;
+  try {
+    response = await fetch(
+      `${API_BASE_URL}/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generate/stream`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/x-ndjson",
+        },
+        body: JSON.stringify(request),
+      },
+    );
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "API request failed.");
+  }
+
+  if (!response.ok) {
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    throw new ApiRequestError(
+      errorMessageFromPayload(payload, `API request failed with ${response.status}.`),
+      response.status,
+      errorCodeFromPayload(payload),
+    );
+  }
+
+  if (!response.body) {
+    throw new Error("Streaming response body is not available.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let doneEvent: ChapterStreamDoneEvent | null = null;
+  let errorEvent: ChapterStreamErrorEvent | null = null;
+
+  function consumeBuffer(final = false) {
+    let newlineIndex = buffer.indexOf("\n");
+    while (newlineIndex >= 0) {
+      const line = buffer.slice(0, newlineIndex);
+      buffer = buffer.slice(newlineIndex + 1);
+      const event = handleStreamLine(line, handlers);
+      if (event?.type === "done") {
+        doneEvent = event;
+      }
+      if (event?.type === "error") {
+        errorEvent = event;
+      }
+      newlineIndex = buffer.indexOf("\n");
+    }
+
+    if (final && buffer.trim()) {
+      const event = handleStreamLine(buffer, handlers);
+      if (event?.type === "done") {
+        doneEvent = event;
+      }
+      if (event?.type === "error") {
+        errorEvent = event;
+      }
+      buffer = "";
+    }
+  }
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffer += decoder.decode(value, { stream: true });
+    consumeBuffer();
+    if (errorEvent) {
+      throw streamErrorFromEvent(errorEvent);
+    }
+  }
+
+  buffer += decoder.decode();
+  consumeBuffer(true);
+
+  if (errorEvent) {
+    throw streamErrorFromEvent(errorEvent);
+  }
+  if (!doneEvent) {
+    throw new Error("Streaming response ended before a done event.");
+  }
+
+  return doneEvent;
 }

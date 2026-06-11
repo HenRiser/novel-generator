@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from deepseek_client import DeepSeekClientError, generate_text
+from deepseek_client import DeepSeekClientError, generate_text, stream_generate_text
 from file_manager import (
     read_history_summaries,
     read_latest_characters,
@@ -164,6 +164,150 @@ def generate_outline_and_characters(
     )
 
 
+def _validate_chapter_request(
+    project_ref: str,
+    chapter_number: int,
+    task_models: dict[str, str],
+) -> tuple[bool, int, str, str]:
+    try:
+        number = int(chapter_number)
+    except (TypeError, ValueError):
+        return False, 0, "", "Chapter number must be a positive integer."
+    if number < 1:
+        return False, number, "", "Chapter number must be a positive integer."
+
+    ref = str(project_ref or "").strip()
+    if not ref:
+        return False, number, "", "Project reference is required."
+
+    if not _model(task_models, "chapter"):
+        return False, number, ref, "Chapter model is required."
+    if not _model(task_models, "summary"):
+        return False, number, ref, "Summary model is required."
+
+    return True, number, ref, ""
+
+
+def _finalize_generated_chapter(
+    project_ref: str,
+    chapter_number: int,
+    chapter_content: str,
+    task_models: dict[str, str],
+    notices: list[str] | None = None,
+) -> ChapterGenerationResult:
+    notices = list(notices or [])
+    chapter_model = _model(task_models, "chapter")
+    summary_model = _model(task_models, "summary")
+    chapter_title_model = chapter_model
+    chapter_title = extract_chapter_title(chapter_content)
+
+    try:
+        chapter_path = save_chapter(project_ref, chapter_number, chapter_content)
+    except Exception as exc:
+        return ChapterGenerationResult(
+            False,
+            chapter_number=chapter_number,
+            title=chapter_title,
+            content=chapter_content,
+            notices=notices,
+            message=f"Chapter save failed: {exc}",
+            chapter_model=chapter_model,
+            chapter_title_model=chapter_title_model,
+            summary_model=summary_model,
+        )
+
+    summary = ""
+    summary_path = ""
+    summary_error = None
+    try:
+        summary_messages = build_summary_prompt(chapter_content, chapter_number)
+        summary = generate_text(
+            messages=summary_messages,
+            model=summary_model,
+            temperature=0.2,
+            max_tokens=512,
+        )
+        summary_path = str(save_summary(project_ref, chapter_number, summary))
+    except DeepSeekClientError as exc:
+        summary_error = str(exc)
+    except Exception as exc:
+        summary_error = f"Summary save failed: {exc}"
+
+    try:
+        index_path = update_chapter_index(
+            title=project_ref,
+            chapter_number=chapter_number,
+            chapter_title=chapter_title,
+            chapter_path=Path(chapter_path),
+            model=chapter_model,
+            summary=summary,
+        )
+    except Exception as exc:
+        return ChapterGenerationResult(
+            False,
+            chapter_number=chapter_number,
+            title=chapter_title,
+            content=chapter_content,
+            chapter_path=str(chapter_path),
+            summary=summary,
+            summary_path=summary_path,
+            notices=notices,
+            summary_error=summary_error,
+            message=f"Chapter index update failed: {exc}",
+            chapter_model=chapter_model,
+            chapter_title_model=chapter_title_model,
+            summary_model=summary_model,
+        )
+
+    return ChapterGenerationResult(
+        True,
+        chapter_number=chapter_number,
+        title=chapter_title,
+        content=chapter_content,
+        chapter_path=str(chapter_path),
+        summary=summary,
+        summary_path=summary_path,
+        index_path=str(index_path),
+        notices=notices,
+        summary_error=summary_error,
+        chapter_model=chapter_model,
+        chapter_title_model=chapter_title_model,
+        summary_model=summary_model,
+    )
+
+
+def _stream_error_event(
+    message: str,
+    chapter_number: int = 0,
+    partial_length: int = 0,
+    code: str = "generation_failed",
+) -> dict[str, Any]:
+    return {
+        "type": "error",
+        "ok": False,
+        "code": code,
+        "chapter_number": int(chapter_number or 0),
+        "message": str(message or "Chapter generation failed."),
+        "partial_length": int(partial_length or 0),
+    }
+
+
+def _stream_done_event(result: ChapterGenerationResult) -> dict[str, Any]:
+    event: dict[str, Any] = {
+        "type": "done",
+        "ok": True,
+        "chapter_number": result.chapter_number,
+        "title": result.title,
+        "chapter_file": Path(result.chapter_path).name if result.chapter_path else "",
+        "summary_file": Path(result.summary_path).name if result.summary_path else "",
+        "index_file": Path(result.index_path).name if result.index_path else "",
+        "message": "Chapter generated.",
+    }
+    if result.summary_error:
+        event["summary_error"] = result.summary_error
+    return event
+
+
 def generate_single_chapter(
     project_ref: str,
     chapter_number: int,
@@ -173,25 +317,11 @@ def generate_single_chapter(
     max_tokens: int,
     use_previous_context: bool,
 ) -> ChapterGenerationResult:
-    try:
-        number = int(chapter_number)
-    except (TypeError, ValueError):
-        return _chapter_failure(0, "Chapter number must be a positive integer.", task_models)
-    if number < 1:
-        return _chapter_failure(number, "Chapter number must be a positive integer.", task_models)
-
-    ref = str(project_ref or "").strip()
-    if not ref:
-        return _chapter_failure(number, "Project reference is required.", task_models)
+    valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
+    if not valid:
+        return _chapter_failure(number, validation_message, task_models)
 
     chapter_model = _model(task_models, "chapter")
-    summary_model = _model(task_models, "summary")
-    if not chapter_model:
-        return _chapter_failure(number, "Chapter model is required.", task_models)
-    if not summary_model:
-        return _chapter_failure(number, "Summary model is required.", task_models)
-
-    chapter_title_model = chapter_model
 
     try:
         messages, notices = build_generation_messages(
@@ -212,78 +342,61 @@ def generate_single_chapter(
     except Exception as exc:
         return _chapter_failure(number, f"Chapter generation failed: {exc}", task_models)
 
-    chapter_title = extract_chapter_title(chapter_content)
+    return _finalize_generated_chapter(ref, number, chapter_content, task_models, notices)
+
+
+def stream_generate_single_chapter(
+    project_ref: str,
+    chapter_number: int,
+    project_config: dict[str, Any],
+    task_models: dict[str, str],
+    temperature: float,
+    max_tokens: int,
+    use_previous_context: bool,
+) -> Iterator[dict[str, Any]]:
+    valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
+    if not valid:
+        yield _stream_error_event(validation_message, number, code="invalid_request")
+        return
+
+    chapter_model = _model(task_models, "chapter")
+    chunks: list[str] = []
 
     try:
-        chapter_path = save_chapter(ref, number, chapter_content)
-    except Exception as exc:
-        return ChapterGenerationResult(
-            False,
+        messages, notices = build_generation_messages(
+            project_ref=ref,
+            mode=CHAPTER_MODE,
+            project_config=project_config,
             chapter_number=number,
-            title=chapter_title,
-            content=chapter_content,
-            notices=notices,
-            message=f"Chapter save failed: {exc}",
-            chapter_model=chapter_model,
-            chapter_title_model=chapter_title_model,
-            summary_model=summary_model,
+            use_previous_context=use_previous_context,
         )
-
-    summary = ""
-    summary_path = ""
-    summary_error = None
-    try:
-        summary_messages = build_summary_prompt(chapter_content, number)
-        summary = generate_text(
-            messages=summary_messages,
-            model=summary_model,
-            temperature=0.2,
-            max_tokens=512,
-        )
-        summary_path = str(save_summary(ref, number, summary))
-    except DeepSeekClientError as exc:
-        summary_error = str(exc)
-    except Exception as exc:
-        summary_error = f"Summary save failed: {exc}"
-
-    try:
-        index_path = update_chapter_index(
-            title=ref,
-            chapter_number=number,
-            chapter_title=chapter_title,
-            chapter_path=Path(chapter_path),
+        for delta in stream_generate_text(
+            messages=messages,
             model=chapter_model,
-            summary=summary,
-        )
+            temperature=temperature,
+            max_tokens=int(max_tokens),
+        ):
+            chunks.append(delta)
+            yield {"type": "delta", "text": delta}
+    except DeepSeekClientError as exc:
+        yield _stream_error_event(str(exc), number, partial_length=len("".join(chunks)))
+        return
     except Exception as exc:
-        return ChapterGenerationResult(
-            False,
-            chapter_number=number,
-            title=chapter_title,
-            content=chapter_content,
-            chapter_path=str(chapter_path),
-            summary=summary,
-            summary_path=summary_path,
-            notices=notices,
-            summary_error=summary_error,
-            message=f"Chapter index update failed: {exc}",
-            chapter_model=chapter_model,
-            chapter_title_model=chapter_title_model,
-            summary_model=summary_model,
-        )
+        yield _stream_error_event(f"Chapter generation failed: {exc}", number, partial_length=len("".join(chunks)))
+        return
 
-    return ChapterGenerationResult(
-        True,
-        chapter_number=number,
-        title=chapter_title,
-        content=chapter_content,
-        chapter_path=str(chapter_path),
-        summary=summary,
-        summary_path=summary_path,
-        index_path=str(index_path),
-        notices=notices,
-        summary_error=summary_error,
-        chapter_model=chapter_model,
-        chapter_title_model=chapter_title_model,
-        summary_model=summary_model,
-    )
+    chapter_content = "".join(chunks).strip()
+    if not chapter_content:
+        yield _stream_error_event(
+            "Model returned empty content. Adjust the prompt or try again later.",
+            number,
+            partial_length=0,
+        )
+        return
+
+    result = _finalize_generated_chapter(ref, number, chapter_content, task_models, notices)
+    if not result.ok:
+        yield _stream_error_event(result.message, number, partial_length=len(chapter_content))
+        return
+
+    yield _stream_done_event(result)

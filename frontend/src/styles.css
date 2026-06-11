@@ -239,7 +239,7 @@ code {
 .generation-actions {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1.2fr) minmax(120px, 160px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(120px, 150px) minmax(0, 1fr) minmax(0, 1fr);
 }
 
 .generation-actions button,
@@ -251,10 +251,21 @@ code {
   padding: 8px 11px;
 }
 
+.generation-actions .secondary-button {
+  background: #eef2f4;
+  border: 1px solid #cfd7dd;
+  color: #21313c;
+}
+
 .generation-actions button:disabled,
 .generation-controls .section-header button:disabled {
   background: #b7c0c7;
   cursor: not-allowed;
+}
+
+.generation-actions .secondary-button:disabled {
+  background: #eef2f4;
+  color: #7d8991;
 }
 
 .chapter-number-field {
@@ -314,6 +325,54 @@ code {
   max-height: calc(100vh - 190px);
   overflow: auto;
   padding: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.streaming-preview {
+  border: 1px solid #d8e0e5;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.streaming-preview-saved {
+  border-color: #9bd2b4;
+}
+
+.streaming-preview-error {
+  border-color: #e5aaa0;
+}
+
+.streaming-preview-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.streaming-preview-header h4 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.streaming-preview-header span {
+  color: #61717c;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.streaming-content {
+  background: #fbfcfd;
+  border: 1px solid #e2e8ec;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.7;
+  margin: 0;
+  max-height: 360px;
+  min-height: 160px;
+  overflow: auto;
+  padding: 14px;
   white-space: pre-wrap;
   word-break: break-word;
 }

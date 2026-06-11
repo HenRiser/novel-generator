@@ -1,6 +1,6 @@
 # React Reader / Generation Foundation
 
-This frontend is the first-stage React reader and basic generation surface for `novel-generator`. It consumes the existing FastAPI read and synchronous generation endpoints.
+This frontend is the React reader and generation surface for `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, and keeps the synchronous generation endpoint as a fallback path.
 
 ## Start the API
 
@@ -50,7 +50,9 @@ Implemented:
 - Single chapter TXT link
 - Full book TXT link
 - Generate / update outline and character files
-- Generate a specified chapter
+- Generate a specified chapter with streaming output by default
+- Keep synchronous specified-chapter generation as a fallback
+- Show live chapter text while streaming
 - Refresh chapters and open the generated chapter after generation
 - Basic loading and error states
 
@@ -59,9 +61,14 @@ Not implemented in this stage:
 - Setting expansion
 - Batch generation
 - Batch generation API
+- Batch streaming generation
 - Save APIs
 - Model or API Key settings
-- Streaming output
+- Streamlit streaming UI
+- Cancellation API
+- Draft recovery for partial streaming output
 - WebSocket or SSE
 
-Generation requests are currently synchronous and can take a while to complete. The UI disables generation buttons while an API generation task is running.
+Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button.
+
+Streamlit currently continues to use the synchronous generation workflow.

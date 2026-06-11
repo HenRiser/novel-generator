@@ -66,3 +66,40 @@ export type ChapterGenerationResponse = {
   index_file?: string;
   message: string;
 };
+
+export type ChapterStreamDeltaEvent = {
+  type: "delta";
+  text: string;
+};
+
+export type ChapterStreamDoneEvent = {
+  type: "done";
+  ok: true;
+  chapter_number: number;
+  title: string;
+  chapter_file: string;
+  summary_file: string;
+  index_file?: string;
+  message: string;
+  summary_error?: string;
+};
+
+export type ChapterStreamErrorEvent = {
+  type: "error";
+  ok: false;
+  code?: string;
+  chapter_number?: number;
+  message: string;
+  partial_length?: number;
+};
+
+export type ChapterStreamEvent =
+  | ChapterStreamDeltaEvent
+  | ChapterStreamDoneEvent
+  | ChapterStreamErrorEvent;
+
+export type ChapterStreamHandlers = {
+  onDelta?: (text: string) => void;
+  onDone?: (result: ChapterStreamDoneEvent) => void;
+  onError?: (error: ChapterStreamErrorEvent) => void;
+};

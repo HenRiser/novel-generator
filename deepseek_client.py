@@ -1,6 +1,6 @@
 import os
 import re
-from typing import Any
+from typing import Any, Iterator
 
 from dotenv import load_dotenv
 from openai import (
@@ -57,6 +57,47 @@ def _extract_message_text(message: Any) -> str:
         if text:
             return text
     return ""
+
+
+def _extract_delta_text(delta: Any) -> str:
+    """Extract readable text from OpenAI-style stream delta objects or dicts."""
+    candidates = [
+        getattr(delta, "content", None),
+        getattr(delta, "reasoning_content", None),
+    ]
+    if isinstance(delta, dict):
+        candidates.extend([delta.get("content"), delta.get("reasoning_content")])
+
+    for value in candidates:
+        if value is None:
+            continue
+        text = value if isinstance(value, str) else str(value)
+        if text:
+            return text
+    return ""
+
+
+def _extract_delta_field_text(delta: Any, field_name: str) -> str:
+    value = getattr(delta, field_name, None)
+    if isinstance(delta, dict):
+        value = delta.get(field_name)
+    if value is None:
+        return ""
+    return value if isinstance(value, str) else str(value)
+
+
+def _stream_chunk_delta(chunk: Any) -> Any:
+    choices = getattr(chunk, "choices", None)
+    if isinstance(chunk, dict):
+        choices = chunk.get("choices")
+    if not choices:
+        return None
+
+    choice = choices[0]
+    delta = getattr(choice, "delta", None)
+    if isinstance(choice, dict):
+        delta = choice.get("delta")
+    return delta
 
 
 def _get_api_key() -> str:
@@ -169,3 +210,72 @@ def generate_text(
         raise DeepSeekClientError("模型返回内容为空，请调整 Prompt 或稍后重试。")
 
     return content
+
+
+def stream_generate_text(
+    messages: list[dict[str, str]],
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 4000,
+) -> Iterator[str]:
+    """Stream DeepSeek text deltas through the OpenAI-compatible Chat Completions API."""
+    if not messages:
+        raise DeepSeekClientError("Prompt is empty; cannot generate content.")
+
+    api_key = _get_api_key()
+    client = OpenAI(api_key=api_key, base_url=_get_base_url())
+
+    try:
+        stream = client.chat.completions.create(
+            model=(model or DEFAULT_MODEL).strip() or DEFAULT_MODEL,
+            messages=messages,
+            temperature=float(temperature),
+            max_tokens=int(max_tokens),
+            stream=True,
+        )
+        seen_content = False
+        reasoning_fallback_chunks: list[str] = []
+        for chunk in stream:
+            delta = _stream_chunk_delta(chunk)
+            content = _extract_delta_field_text(delta, "content")
+            if content:
+                if not seen_content:
+                    seen_content = True
+                    reasoning_fallback_chunks.clear()
+                yield content
+                continue
+
+            reasoning_content = _extract_delta_field_text(delta, "reasoning_content")
+            if reasoning_content and not seen_content:
+                reasoning_fallback_chunks.append(reasoning_content)
+
+        if not seen_content and reasoning_fallback_chunks:
+            raise DeepSeekClientError(
+                "Model stream ended without final content. Increase max_tokens or use a non-reasoning model for streaming generation."
+            )
+    except AuthenticationError as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        detail = f" Details: {safe_message}" if safe_message else ""
+        raise DeepSeekClientError(
+            f"DeepSeek API key validation failed. Check DEEPSEEK_API_KEY in .env.{detail}"
+        ) from exc
+    except RateLimitError as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        detail = f" Details: {safe_message}" if safe_message else ""
+        raise DeepSeekClientError(f"DeepSeek API rate limit or quota was reached. Try again later.{detail}") from exc
+    except BadRequestError as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"DeepSeek API rejected this request: {safe_message}") from exc
+    except APIConnectionError as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        detail = f" Details: {safe_message}" if safe_message else ""
+        raise DeepSeekClientError(f"Unable to connect to DeepSeek API. Check network or proxy settings.{detail}") from exc
+    except APIError as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"DeepSeek API returned an error: {safe_message}") from exc
+    except OpenAIError as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"OpenAI SDK error while calling DeepSeek: {safe_message}") from exc
+    except Exception as exc:
+        safe_message = _sanitize_error_message(exc, api_key)
+        raise DeepSeekClientError(f"Generation failed: {safe_message}") from exc
