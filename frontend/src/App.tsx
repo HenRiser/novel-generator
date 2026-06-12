@@ -84,6 +84,22 @@ function generationStatusText(status: GenerationStatus | null): string {
   return "Idle";
 }
 
+function generationStatusClass(status: GenerationStatus | null): string {
+  if (!status) {
+    return "status-loading";
+  }
+  if (status.running) {
+    return "status-running";
+  }
+  if (status.last_error) {
+    return "status-error";
+  }
+  if (status.last_result) {
+    return "status-success";
+  }
+  return "status-idle";
+}
+
 function publicFileName(value: unknown): string {
   const text = asText(value, "");
   if (!text) {
@@ -653,126 +669,181 @@ export function App() {
   return (
     <main className="app-shell">
       <header className="app-header">
-        <div>
+        <div className="app-title-block">
+          <span className="app-eyebrow">Local novel workspace</span>
           <h1>Novel Generator</h1>
-          <p>React reader and basic generation foundation for local projects.</p>
+          <p>React reader and streaming generation surface for local projects.</p>
         </div>
-        <div className={`status-pill status-${apiStatus}`}>{statusText(apiStatus)}</div>
+        <div className="header-meta">
+          <span>{selectedProject?.title || "未选择项目"}</span>
+          <div className={`status-pill status-${apiStatus}`}>{statusText(apiStatus)}</div>
+        </div>
       </header>
 
       {apiStatus === "offline" && (
         <section className="notice error-notice">
           <strong>无法连接 API。</strong>
-          <span>{apiError || "请先启动后端服务。"}</span>
+          <span>{apiError || "请先启动 FastAPI 后端服务。"}</span>
           <code>python -m uvicorn api.main:app --host 127.0.0.1 --port 8000</code>
           <span>当前 API 地址：{API_BASE_URL}</span>
         </section>
       )}
 
-      {apiStatus === "online" && (
-        <section className="generation-status-bar" aria-live="polite">
-          <div>
-            <span>状态</span>
-            <strong>{generationStatusLoading ? "Loading" : generationStatusText(generationStatus)}</strong>
-          </div>
-          <div>
-            <span>任务类型</span>
-            <strong>{generationStatus?.task_type || "-"}</strong>
-          </div>
-          <div>
-            <span>目标章节</span>
-            <strong>{generationStatus?.target || "-"}</strong>
-          </div>
-          <div>
-            <span>开始时间</span>
-            <strong>{generationStatus?.started_at || "-"}</strong>
-          </div>
-          <div>
-            <span>完成时间</span>
-            <strong>{generationStatus?.finished_at || "-"}</strong>
-          </div>
-          <div>
-            <span>最近保存</span>
-            <strong>{generationSavedFiles(generationStatus?.last_result ?? null)}</strong>
-          </div>
-          {generationStatusError && <p className="error-text">状态读取失败：{generationStatusError}</p>}
-          {!generationStatusError && generationStatus?.last_error && (
-            <p className="error-text">最近错误：{safePublicMessage(generationStatus.last_error, "生成失败。")}</p>
-          )}
-          {!generationStatusError && !generationStatus?.last_error && generationStatus?.last_result && (
-            <p className="success-text">最近结果：{generationResultSummary(generationStatus.last_result)}</p>
-          )}
-        </section>
-      )}
-
-      <section className="reader-layout">
-        <aside className="panel project-list">
-          <div className="panel-header">
-            <h2>项目列表</h2>
-            <button type="button" onClick={() => void loadProjects()} disabled={projectsLoading || apiStatus !== "online"}>
-              刷新
-            </button>
-          </div>
-
-          {projectsLoading && <p className="muted">正在加载项目...</p>}
-          {projectsError && <p className="error-text">{projectsError}</p>}
-          {!projectsLoading && !projectsError && projects.length === 0 && <p className="muted">暂无项目。</p>}
-
-          <div className="project-items">
-            {projects.map((project) => (
+      <section className="workspace-layout">
+        <aside className="sidebar-stack" aria-label="项目与章节导航">
+          <section className="panel project-list">
+            <div className="panel-header">
+              <div>
+                <span className="section-kicker">Projects</span>
+                <h2>项目列表</h2>
+              </div>
               <button
-                className={`project-item ${project.project_ref === selectedProjectRef ? "selected" : ""}`}
-                key={project.project_ref}
+                className="button secondary-button compact-button"
                 type="button"
-                onClick={() => setSelectedProjectRef(project.project_ref)}
+                onClick={() => void loadProjects()}
+                disabled={projectsLoading || apiStatus !== "online"}
               >
-                <strong>{project.title || "未命名小说"}</strong>
-                <span>{project.storage_type || "unknown"}</span>
-                <span>{project.updated_at || "无更新时间"}</span>
-                <code>{project.project_ref}</code>
+                刷新
               </button>
-            ))}
-          </div>
+            </div>
+
+            {projectsLoading && <p className="state-text loading-text">正在加载项目...</p>}
+            {projectsError && <p className="state-text error-text">{projectsError}</p>}
+            {!projectsLoading && !projectsError && projects.length === 0 && (
+              <p className="empty-state">暂无项目。请先在 Streamlit 旧前端创建或导入项目。</p>
+            )}
+
+            <div className="project-items">
+              {projects.map((project) => (
+                <button
+                  className={`project-item ${project.project_ref === selectedProjectRef ? "selected" : ""}`}
+                  key={project.project_ref}
+                  type="button"
+                  onClick={() => setSelectedProjectRef(project.project_ref)}
+                >
+                  <strong>{project.title || "未命名小说"}</strong>
+                  <span>{project.storage_type || "unknown"} · {project.updated_at || "无更新时间"}</span>
+                  <code>{project.project_ref}</code>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="panel chapter-list-panel">
+            <div className="panel-header">
+              <div>
+                <span className="section-kicker">Chapters</span>
+                <h2>章节列表</h2>
+              </div>
+              {selectedProjectRef && (
+                <a className="button secondary-button compact-button" href={exportFullBookUrl(selectedProjectRef)}>
+                  整本 TXT
+                </a>
+              )}
+            </div>
+            {chaptersLoading && <p className="state-text loading-text">正在加载章节...</p>}
+            {chaptersError && <p className="state-text error-text">{chaptersError}</p>}
+            {!chaptersLoading && !chaptersError && selectedProjectRef && chapters.length === 0 && (
+              <p className="empty-state">当前项目暂无章节。</p>
+            )}
+            {!selectedProjectRef && <p className="empty-state">选择项目后显示章节。</p>}
+            <div className="chapter-list">
+              {chapters.map((chapter) => (
+                <button
+                  className={`chapter-item ${
+                    chapter.chapter_number === selectedChapterNumber ? "selected" : ""
+                  }`}
+                  key={`${chapter.chapter_number}-${chapter.filename}`}
+                  type="button"
+                  onClick={() => setSelectedChapterNumber(chapter.chapter_number)}
+                >
+                  <strong>{chapter.display_label || chapter.title || `第 ${chapter.chapter_number} 章`}</strong>
+                  <span>{chapter.filename}</span>
+                  <span>{chapter.is_version ? `版本 v${chapter.version}` : "主版本"}</span>
+                </button>
+              ))}
+            </div>
+          </section>
         </aside>
 
-        <section className="panel project-detail">
-          <h2>项目详情</h2>
-          {!selectedProjectRef && <p className="muted">请选择一个项目。</p>}
-          {projectLoading && <p className="muted">正在加载项目详情...</p>}
-          {projectError && <p className="error-text">{projectError}</p>}
-          {selectedProject && projectDetail && (
-            <div className="detail-grid">
+        <section className="main-stack">
+          <section className="panel project-detail">
+            <div className="panel-header">
               <div>
-                <span>标题</span>
-                <strong>{projectDetail.title || selectedProject.title || "未命名小说"}</strong>
-              </div>
-              <div>
-                <span>project_ref</span>
-                <code>{projectDetail.project_ref}</code>
-              </div>
-              <div>
-                <span>类型</span>
-                <strong>{asText(configValue(projectConfig, "genre"))}</strong>
-              </div>
-              <div>
-                <span>风格</span>
-                <strong>{asText(configValue(projectConfig, "style"))}</strong>
-              </div>
-              <div>
-                <span>写作模式</span>
-                <strong>{asText(settingOptionValue(projectConfig, "writing_mode"))}</strong>
-              </div>
-              <div>
-                <span>期望章节数</span>
-                <strong>{asText(settingOptionValue(projectConfig, "expected_chapters"))}</strong>
+                <span className="section-kicker">Project</span>
+                <h2>项目详情</h2>
               </div>
             </div>
-          )}
+            {!selectedProjectRef && <p className="empty-state">请选择一个项目。</p>}
+            {projectLoading && <p className="state-text loading-text">正在加载项目详情...</p>}
+            {projectError && <p className="state-text error-text">{projectError}</p>}
+            {selectedProject && projectDetail && (
+              <div className="detail-grid">
+                <div className="detail-item detail-item-wide">
+                  <span>标题</span>
+                  <strong>{projectDetail.title || selectedProject.title || "未命名小说"}</strong>
+                </div>
+                <div className="detail-item">
+                  <span>类型</span>
+                  <strong>{asText(configValue(projectConfig, "genre"))}</strong>
+                </div>
+                <div className="detail-item">
+                  <span>风格</span>
+                  <strong>{asText(configValue(projectConfig, "style"))}</strong>
+                </div>
+                <div className="detail-item">
+                  <span>写作模式</span>
+                  <strong>{asText(settingOptionValue(projectConfig, "writing_mode"))}</strong>
+                </div>
+                <div className="detail-item">
+                  <span>期望章节数</span>
+                  <strong>{asText(settingOptionValue(projectConfig, "expected_chapters"))}</strong>
+                </div>
+                <div className="detail-item detail-item-wide">
+                  <span>project_ref</span>
+                  <code>{projectDetail.project_ref}</code>
+                </div>
+              </div>
+            )}
+          </section>
 
-          <section className="generation-controls">
-            <div className="section-header">
-              <h3>基础生成</h3>
+          <section className="panel chapter-reader">
+            <div className="reader-header">
+              <div>
+                <span className="section-kicker">Reader</span>
+                <h2>{chapterContent?.title || selectedChapter?.title || "章节正文"}</h2>
+                <p>{chapterContent?.filename || selectedChapter?.filename || "选择章节后显示正文。"}</p>
+              </div>
+              {selectedProjectRef && selectedChapterNumber !== null && (
+                <a className="button secondary-button download-button" href={exportChapterUrl(selectedProjectRef, selectedChapterNumber)}>
+                  下载本章 TXT
+                </a>
+              )}
+            </div>
+
+            {chapterLoading && <p className="state-text loading-text">正在加载章节正文...</p>}
+            {chapterError && <p className="state-text error-text">{chapterError}</p>}
+            {!chapterLoading && !chapterError && chapterContent && (
+              <pre className="chapter-content">{chapterContent.content}</pre>
+            )}
+            {!chapterLoading && !chapterError && selectedProjectRef && selectedChapterNumber === null && (
+              <p className="empty-state">请选择一个章节。</p>
+            )}
+            {!chapterLoading && !chapterError && !selectedProjectRef && (
+              <p className="empty-state">选择项目和章节后，这里显示正文。</p>
+            )}
+          </section>
+        </section>
+
+        <aside className="tool-stack" aria-label="生成与状态">
+          <section className="panel generation-panel">
+            <div className="panel-header">
+              <div>
+                <span className="section-kicker">Generation</span>
+                <h2>单章生成</h2>
+              </div>
               <button
+                className="button secondary-button compact-button"
                 type="button"
                 onClick={() => void refreshGenerationStatus()}
                 disabled={generationStatusLoading || apiStatus !== "online"}
@@ -780,8 +851,10 @@ export function App() {
                 刷新状态
               </button>
             </div>
+
             <div className="generation-actions">
               <button
+                className="button secondary-button"
                 type="button"
                 onClick={() => void handleGenerateOutlineCharacters()}
                 disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
@@ -800,6 +873,7 @@ export function App() {
                 />
               </label>
               <button
+                className="button primary-button"
                 type="button"
                 onClick={() => void handleGenerateChapterStream()}
                 disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
@@ -807,7 +881,7 @@ export function App() {
                 {chapterStreaming ? "正在流式生成章节..." : "生成章节"}
               </button>
               <button
-                className="secondary-button"
+                className="button subtle-button"
                 type="button"
                 onClick={() => void handleGenerateChapter()}
                 disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
@@ -815,14 +889,16 @@ export function App() {
                 {chapterGenerating ? "正在同步生成章节..." : "同步生成（备用）"}
               </button>
             </div>
-            <p className="muted">默认使用流式生成；同步生成仅作为流式异常时的备用 / 调试入口。</p>
-            <p className="muted">
-              建议下一章：第 {suggestedChapterNumber} 章；当前模型：{DEFAULT_GENERATION_REQUEST.model}，
-              max_tokens：{DEFAULT_GENERATION_REQUEST.max_tokens}
-            </p>
-            <p className="muted">如果生成内容明显中断，可提高 max_tokens 或重新生成该章节。</p>
-            {generationMessage && <p className="success-text">{generationMessage}</p>}
-            {generationError && <p className="error-text">{generationError}</p>}
+            <div className="hint-box">
+              <p>默认使用流式生成；同步生成仅作为流式异常时的备用 / 调试入口。</p>
+              <p>
+                建议下一章：第 {suggestedChapterNumber} 章；模型：{DEFAULT_GENERATION_REQUEST.model}；
+                max_tokens：{DEFAULT_GENERATION_REQUEST.max_tokens}
+              </p>
+              <p>如果生成内容明显中断，可提高 max_tokens 或重新生成该章节。</p>
+            </div>
+            {generationMessage && <p className="state-text success-text">{generationMessage}</p>}
+            {generationError && <p className="state-text error-text">{generationError}</p>}
             {streamingPreviewVisible && (
               <section
                 className={`streaming-preview ${
@@ -836,14 +912,17 @@ export function App() {
               >
                 <div className="streaming-preview-header">
                   <div>
-                    <h4>实时正文预览</h4>
+                    <span className="section-kicker">Streaming preview</span>
+                    <h3>实时正文预览</h3>
                     <p>{streamingCharacterCount} 字</p>
                   </div>
-                  <span>{streamingStatusLabel(streamingPreviewStatus)}</span>
+                  <span className={`streaming-status streaming-status-${streamingPreviewStatus}`}>
+                    {streamingStatusLabel(streamingPreviewStatus)}
+                  </span>
                 </div>
-                {streamingError && <p className="error-text">{streamingError}</p>}
+                {streamingError && <p className="state-text error-text">{streamingError}</p>}
                 {streamingPreviewStatus === "saved" && (
-                  <p className="success-text">{streamSaveSummary(streamingResult)}</p>
+                  <p className="state-text success-text">{streamSaveSummary(streamingResult)}</p>
                 )}
                 <pre className="streaming-content">
                   {streamingContent ||
@@ -853,59 +932,51 @@ export function App() {
             )}
           </section>
 
-          <div className="section-header">
-            <h3>章节列表</h3>
-            {selectedProjectRef && (
-              <a className="text-link" href={exportFullBookUrl(selectedProjectRef)}>
-                下载整本 TXT
-              </a>
-            )}
-          </div>
-          {chaptersLoading && <p className="muted">正在加载章节...</p>}
-          {chaptersError && <p className="error-text">{chaptersError}</p>}
-          {!chaptersLoading && !chaptersError && selectedProjectRef && chapters.length === 0 && (
-            <p className="muted">当前项目暂无章节。</p>
+          {apiStatus === "online" && (
+            <section className={`panel generation-status-card ${generationStatusClass(generationStatus)}`} aria-live="polite">
+              <div className="panel-header">
+                <div>
+                  <span className="section-kicker">Status</span>
+                  <h2>生成状态</h2>
+                </div>
+                <span className="status-badge">
+                  {generationStatusLoading ? "Loading" : generationStatusText(generationStatus)}
+                </span>
+              </div>
+              <div className="status-grid">
+                <div>
+                  <span>任务类型</span>
+                  <strong>{generationStatus?.task_type || "-"}</strong>
+                </div>
+                <div>
+                  <span>目标章节</span>
+                  <strong>{generationStatus?.target || "-"}</strong>
+                </div>
+                <div>
+                  <span>开始时间</span>
+                  <strong>{generationStatus?.started_at || "-"}</strong>
+                </div>
+                <div>
+                  <span>完成时间</span>
+                  <strong>{generationStatus?.finished_at || "-"}</strong>
+                </div>
+                <div className="status-grid-wide">
+                  <span>最近保存</span>
+                  <strong>{generationSavedFiles(generationStatus?.last_result ?? null)}</strong>
+                </div>
+              </div>
+              {generationStatusError && <p className="state-text error-text">状态读取失败：{generationStatusError}</p>}
+              {!generationStatusError && generationStatus?.last_error && (
+                <p className="state-text error-text">
+                  最近错误：{safePublicMessage(generationStatus.last_error, "生成失败。")}
+                </p>
+              )}
+              {!generationStatusError && !generationStatus?.last_error && generationStatus?.last_result && (
+                <p className="state-text success-text">最近结果：{generationResultSummary(generationStatus.last_result)}</p>
+              )}
+            </section>
           )}
-          <div className="chapter-list">
-            {chapters.map((chapter) => (
-              <button
-                className={`chapter-item ${
-                  chapter.chapter_number === selectedChapterNumber ? "selected" : ""
-                }`}
-                key={`${chapter.chapter_number}-${chapter.filename}`}
-                type="button"
-                onClick={() => setSelectedChapterNumber(chapter.chapter_number)}
-              >
-                <strong>{chapter.display_label || chapter.title || `第 ${chapter.chapter_number} 章`}</strong>
-                <span>{chapter.filename}</span>
-                <span>{chapter.is_version ? `版本 v${chapter.version}` : "主版本"}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel chapter-reader">
-          <div className="reader-header">
-            <div>
-              <h2>{chapterContent?.title || selectedChapter?.title || "章节正文"}</h2>
-              <p>{chapterContent?.filename || selectedChapter?.filename || "选择章节后显示正文。"}</p>
-            </div>
-            {selectedProjectRef && selectedChapterNumber !== null && (
-              <a className="download-button" href={exportChapterUrl(selectedProjectRef, selectedChapterNumber)}>
-                下载本章 TXT
-              </a>
-            )}
-          </div>
-
-          {chapterLoading && <p className="muted">正在加载章节正文...</p>}
-          {chapterError && <p className="error-text">{chapterError}</p>}
-          {!chapterLoading && !chapterError && chapterContent && (
-            <pre className="chapter-content">{chapterContent.content}</pre>
-          )}
-          {!chapterLoading && !chapterError && selectedProjectRef && selectedChapterNumber === null && (
-            <p className="muted">请选择一个章节。</p>
-          )}
-        </section>
+        </aside>
       </section>
     </main>
   );

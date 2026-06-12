@@ -38,10 +38,11 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEFAULT_MODEL=deepseek-v4-flash
 ```
 
-Start the app:
+Start the Streamlit legacy frontend:
 
 ```bat
-streamlit run app.py
+cd /d D:\vibecoding\novel-generator
+.venv\Scripts\python.exe -m streamlit run app.py
 ```
 
 Then open:
@@ -50,11 +51,34 @@ Then open:
 http://localhost:8501
 ```
 
-Windows users can also run `setup.bat` and `start.bat`.
+Windows users can also run `setup.bat` and `start.bat`. `start.bat` is reserved for the Streamlit legacy frontend.
 
-Start the first-stage read-only API backend in a separate terminal:
+## React Frontend
+
+The React frontend is separate from Streamlit. It requires the FastAPI backend.
+
+One-command startup on Windows:
 
 ```bat
+cd /d D:\vibecoding\novel-generator
+start-react.bat
+```
+
+The script starts:
+
+```text
+FastAPI: http://127.0.0.1:8000
+React:   http://127.0.0.1:5173
+```
+
+If `frontend\node_modules` is missing, the React terminal window runs `npm install` before starting Vite. `start-react.bat` does not start Streamlit, and `start.bat` does not start React.
+
+Manual startup uses two terminals.
+
+Terminal 1, start FastAPI:
+
+```bat
+cd /d D:\vibecoding\novel-generator
 .venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
@@ -66,15 +90,15 @@ http://127.0.0.1:8000
 
 The API exposes health, project listing/detail, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or save APIs.
 
-Start the React reader and generation frontend after the API is running:
+Terminal 2, start React:
 
 ```bat
-cd frontend
+cd /d D:\vibecoding\novel-generator\frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-The React reader is available at:
+The React frontend is available at:
 
 ```text
 http://127.0.0.1:5173
@@ -89,6 +113,8 @@ Current React limits:
 - no draft recovery for failed partial output
 - no model or API Key settings migration
 - no Streamlit streaming UI
+
+For frontend-specific notes, see `frontend/README.md`.
 
 ## API / Model Configuration
 
