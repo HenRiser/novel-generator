@@ -32,6 +32,23 @@ class ProjectDetailResponse(BaseModel):
     config: dict[str, Any]
 
 
+class CreateProjectRequest(BaseModel):
+    title: str | None = None
+    seed_prompt: str | None = None
+    genre: str | None = None
+    style: str | None = None
+    model: str | None = None
+    max_tokens: Any = None
+    temperature: Any = None
+
+
+class CreateProjectResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    title: str
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   API_BASE_URL,
+  createProject,
   exportChapterUrl,
   exportFullBookUrl,
   generateChapter,
@@ -22,9 +23,11 @@ import type {
   ChapterGenerationResponse,
   ChapterSummary,
   ChapterStreamDoneEvent,
+  CreateProjectRequest,
   GenerationRequest,
   GenerationStatus,
   OutlineCharactersGenerationResponse,
+  ProjectOnboardingState,
   ProjectDetail,
   ProjectSummary,
 } from "./types";
@@ -34,7 +37,18 @@ const DEFAULT_GENERATION_REQUEST: GenerationRequest = {
   max_tokens: 4000,
 };
 
+const DEFAULT_CREATE_PROJECT_FORM: CreateProjectRequest = {
+  title: "",
+  seedPrompt: "",
+  genre: "",
+  style: "",
+  model: "deepseek-v4-flash",
+  maxTokens: 4000,
+  temperature: 0.7,
+};
+
 type StreamingPreviewStatus = "idle" | "streaming" | "saved" | "failed_unsaved";
+type CreateProjectPanelTarget = "" | "sidebar" | "detail" | "reader";
 
 function asText(value: unknown, fallback = "未填写"): string {
   if (typeof value === "string" && value.trim()) {
@@ -238,13 +252,46 @@ function streamSaveSummary(result: ChapterStreamDoneEvent | null): string {
     .join("；");
 }
 
-function NewProjectPlaceholder({
+function onboardingStateForProject(
+  projectRef: string,
+  chapters: ChapterSummary[],
+  assetReadyProjectRefs: string[],
+): ProjectOnboardingState {
+  if (!projectRef) {
+    return "empty";
+  }
+  if (chapters.length > 0) {
+    return "chapters_ready";
+  }
+  if (assetReadyProjectRefs.includes(projectRef)) {
+    return "ready_for_first_chapter";
+  }
+  return "needs_assets";
+}
+
+function ProjectCreatePanel({
   open,
   onToggle,
+  form,
+  onChange,
+  onSubmit,
+  onCancel,
+  submitting,
+  error,
+  message,
+  disabled,
   variant = "default",
 }: {
   open: boolean;
   onToggle: () => void;
+  form: CreateProjectRequest;
+  onChange: <K extends keyof CreateProjectRequest>(key: K, value: CreateProjectRequest[K]) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+  submitting: boolean;
+  error: string;
+  message: string;
+  disabled: boolean;
   variant?: "default" | "compact";
 }) {
   return (
@@ -254,21 +301,204 @@ function NewProjectPlaceholder({
         type="button"
         aria-expanded={open}
         onClick={onToggle}
+        disabled={disabled && !open}
       >
         新建小说项目
       </button>
+      {!open && message && <p className="state-text success-text">{message}</p>}
       {open && (
-        <div className="new-project-card" role="note">
-          <strong>React 新建小说项目流程待接入。</strong>
-          <p>
-            当前如需创建新项目，请使用 Streamlit 旧前端入口 <code>start.bat</code>；
-            React 当前主要用于项目阅读、章节生成、流式预览与导出。
+        <form
+          className="new-project-card project-create-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit();
+          }}
+        >
+          <div>
+            <strong>新建小说项目</strong>
+            <p>先创建项目与基础设定，创建后可继续生成大纲人物卡和第一章。</p>
+          </div>
+          <label className="form-field">
+            <span>小说标题 *</span>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(event) => onChange("title", event.target.value)}
+              placeholder="例如：废土演员"
+              disabled={submitting}
+              maxLength={80}
+              required
+            />
+          </label>
+          <label className="form-field">
+            <span>一句话设定 / 创作种子 *</span>
+            <textarea
+              value={form.seedPrompt}
+              onChange={(event) => onChange("seedPrompt", event.target.value)}
+              placeholder="一个在废土剧场中醒来的演员，发现自己正在被世界观看。"
+              disabled={submitting}
+              maxLength={4000}
+              required
+            />
+          </label>
+          <div className="form-grid">
+            <label className="form-field">
+              <span>题材</span>
+              <input
+                type="text"
+                value={form.genre || ""}
+                onChange={(event) => onChange("genre", event.target.value)}
+                placeholder="废土 / 科幻"
+                disabled={submitting}
+                maxLength={200}
+              />
+            </label>
+            <label className="form-field">
+              <span>风格</span>
+              <input
+                type="text"
+                value={form.style || ""}
+                onChange={(event) => onChange("style", event.target.value)}
+                placeholder="冷峻、文学化"
+                disabled={submitting}
+                maxLength={200}
+              />
+            </label>
+          </div>
+          <div className="form-grid">
+            <label className="form-field">
+              <span>模型</span>
+              <select
+                value={form.model || "deepseek-v4-flash"}
+                onChange={(event) => onChange("model", event.target.value)}
+                disabled={submitting}
+              >
+                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+              </select>
+            </label>
+            <label className="form-field">
+              <span>max_tokens</span>
+              <input
+                type="number"
+                min="512"
+                max="32768"
+                step="1"
+                value={form.maxTokens ?? 4000}
+                onChange={(event) => onChange("maxTokens", Number(event.target.value))}
+                disabled={submitting}
+              />
+            </label>
+            <label className="form-field">
+              <span>temperature</span>
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step="0.1"
+                value={form.temperature ?? 0.7}
+                onChange={(event) => onChange("temperature", Number(event.target.value))}
+                disabled={submitting}
+              />
+            </label>
+          </div>
+          <p className="form-note">
+            React 会创建 workspace 项目；创建项目不会调用模型。Streamlit 旧入口仍保留：
+            <code>start.bat</code>；React 入口：<code>start-react.bat</code>。
           </p>
-          <p>
-            <code>start.bat</code> = Streamlit 入口；<code>start-react.bat</code> = FastAPI + React 入口。
-          </p>
-        </div>
+          {error && <p className="state-text error-text">{error}</p>}
+          {message && <p className="state-text success-text">{message}</p>}
+          <div className="form-actions">
+            <button className="button subtle-button" type="button" onClick={onCancel} disabled={submitting}>
+              取消
+            </button>
+            <button className="button primary-button" type="submit" disabled={submitting || disabled}>
+              {submitting ? "创建中..." : "创建项目"}
+            </button>
+          </div>
+        </form>
       )}
+    </section>
+  );
+}
+
+function ProjectOnboardingPanel({
+  state,
+  suggestedChapterNumber,
+  generationBusy,
+  apiStatus,
+  onGenerateAssets,
+  onGenerateChapter,
+}: {
+  state: ProjectOnboardingState;
+  suggestedChapterNumber: number;
+  generationBusy: boolean;
+  apiStatus: ApiStatus;
+  onGenerateAssets: () => void;
+  onGenerateChapter: (chapterNumber: number) => void;
+}) {
+  if (state === "empty") {
+    return null;
+  }
+
+  const assetsDone = state === "ready_for_first_chapter" || state === "chapters_ready";
+  const firstChapterDone = state === "chapters_ready";
+  const nextAction =
+    state === "needs_assets"
+      ? {
+          text: "项目已创建。下一步建议生成大纲与人物卡，用于后续章节生成。",
+          button: "生成 / 更新大纲与人物卡",
+          onClick: onGenerateAssets,
+        }
+      : state === "ready_for_first_chapter"
+        ? {
+            text: "大纲与人物卡已准备好。下一步可以生成第一章。",
+            button: "生成第一章",
+            onClick: () => onGenerateChapter(1),
+          }
+        : {
+            text: "可以继续生成下一章，或选择已有章节阅读。",
+            button: `生成第 ${suggestedChapterNumber} 章`,
+            onClick: () => onGenerateChapter(suggestedChapterNumber),
+          };
+
+  return (
+    <section className="panel onboarding-panel">
+      <div className="panel-header">
+        <div>
+          <span className="section-kicker">Onboarding</span>
+          <h2>当前项目进度</h2>
+        </div>
+      </div>
+      <ol className="onboarding-steps">
+        <li className="step-item step-complete">
+          <span className="step-status">已完成</span>
+          <strong>1. 项目已创建</strong>
+        </li>
+        <li className={`step-item ${assetsDone ? "step-complete" : ""}`}>
+          <span className="step-status">{assetsDone ? "已完成" : "待办"}</span>
+          <strong>2. 生成大纲与人物卡</strong>
+        </li>
+        <li className={`step-item ${firstChapterDone ? "step-complete" : ""}`}>
+          <span className="step-status">{firstChapterDone ? "已完成" : "待办"}</span>
+          <strong>3. 生成第一章</strong>
+        </li>
+        <li className={`step-item ${state === "chapters_ready" ? "step-current" : ""}`}>
+          <span className="step-status">{state === "chapters_ready" ? "可继续" : "待办"}</span>
+          <strong>4. 继续章节创作</strong>
+        </li>
+      </ol>
+      <div className="onboarding-next">
+        <p>{nextAction.text}</p>
+        <button
+          className="button secondary-button"
+          type="button"
+          onClick={nextAction.onClick}
+          disabled={generationBusy || apiStatus !== "online"}
+        >
+          {nextAction.button}
+        </button>
+      </div>
     </section>
   );
 }
@@ -304,7 +534,12 @@ export function App() {
   const [streamingPreviewStatus, setStreamingPreviewStatus] = useState<StreamingPreviewStatus>("idle");
   const [streamingError, setStreamingError] = useState("");
   const [streamingResult, setStreamingResult] = useState<ChapterStreamDoneEvent | null>(null);
-  const [newProjectPanelOpen, setNewProjectPanelOpen] = useState(false);
+  const [newProjectPanelTarget, setNewProjectPanelTarget] = useState<CreateProjectPanelTarget>("");
+  const [createProjectForm, setCreateProjectForm] = useState<CreateProjectRequest>(DEFAULT_CREATE_PROJECT_FORM);
+  const [createProjectSubmitting, setCreateProjectSubmitting] = useState(false);
+  const [createProjectError, setCreateProjectError] = useState("");
+  const [createProjectMessage, setCreateProjectMessage] = useState("");
+  const [assetReadyProjectRefs, setAssetReadyProjectRefs] = useState<string[]>([]);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -323,6 +558,10 @@ export function App() {
   const streamingCharacterCount = streamingContent.length;
   const generationBusy =
     Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating || chapterStreaming;
+  const projectOnboardingState = useMemo(
+    () => onboardingStateForProject(selectedProjectRef, chapters, assetReadyProjectRefs),
+    [assetReadyProjectRefs, chapters, selectedProjectRef],
+  );
   const headerProjectLabel = selectedProject?.title || "未选择项目";
   const headerChapterLabel =
     selectedChapterNumber === null
@@ -356,9 +595,11 @@ export function App() {
           ? ""
           : currentProjectRef,
       );
+      return nextProjects;
     } catch (error) {
       setProjectsError(publicErrorMessage(error, "项目列表加载失败。"));
       setProjects([]);
+      return [];
     } finally {
       setProjectsLoading(false);
     }
@@ -569,6 +810,72 @@ export function App() {
     return true;
   }, [refreshGenerationStatus]);
 
+  const updateCreateProjectForm = useCallback(
+    <K extends keyof CreateProjectRequest>(key: K, value: CreateProjectRequest[K]) => {
+      setCreateProjectForm((current) => ({
+        ...current,
+        [key]: value,
+      }));
+      setCreateProjectError("");
+    },
+    [],
+  );
+
+  const handleCancelCreateProject = useCallback(() => {
+    setNewProjectPanelTarget("");
+    setCreateProjectError("");
+  }, []);
+
+  const handleCreateProject = useCallback(async () => {
+    const title = createProjectForm.title.trim();
+    const seedPrompt = createProjectForm.seedPrompt.trim();
+    const maxTokens = createProjectForm.maxTokens ?? 4000;
+    const temperature = createProjectForm.temperature ?? 0.7;
+
+    if (!title) {
+      setCreateProjectError("请填写小说标题。");
+      return;
+    }
+    if (!seedPrompt) {
+      setCreateProjectError("请填写一句话设定 / 创作种子。");
+      return;
+    }
+    if (!Number.isFinite(maxTokens) || maxTokens < 512 || maxTokens > 32768) {
+      setCreateProjectError("max_tokens 必须是 512 到 32768 之间的整数。");
+      return;
+    }
+    if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+      setCreateProjectError("temperature 必须是 0 到 2 之间的数字。");
+      return;
+    }
+
+    setCreateProjectSubmitting(true);
+    setCreateProjectError("");
+    setCreateProjectMessage("");
+    try {
+      const result = await createProject({
+        ...createProjectForm,
+        title,
+        seedPrompt,
+        genre: createProjectForm.genre?.trim(),
+        style: createProjectForm.style?.trim(),
+        maxTokens,
+        temperature,
+      });
+      setCreateProjectMessage(`项目已创建：${result.title || title}`);
+      setCreateProjectForm(DEFAULT_CREATE_PROJECT_FORM);
+      setNewProjectPanelTarget("");
+      await loadProjects();
+      setSelectedProjectRef(result.project_ref);
+      setGenerationMessage("项目已创建。下一步建议生成大纲与人物卡。");
+      setGenerationError("");
+    } catch (error) {
+      setCreateProjectError(publicErrorMessage(error, "项目创建失败。"));
+    } finally {
+      setCreateProjectSubmitting(false);
+    }
+  }, [createProjectForm, loadProjects]);
+
   const handleGenerateOutlineCharacters = useCallback(async () => {
     if (!selectedProjectRef) {
       setGenerationError("请先选择项目。");
@@ -585,6 +892,9 @@ export function App() {
     try {
       const result = await generateOutlineCharacters(selectedProjectRef, DEFAULT_GENERATION_REQUEST);
       setGenerationMessage(outlineSuccessMessage(result));
+      setAssetReadyProjectRefs((current) =>
+        current.includes(selectedProjectRef) ? current : [...current, selectedProjectRef],
+      );
       await refreshGenerationStatus();
     } catch (error) {
       setGenerationError(publicErrorMessage(error, "大纲与人物卡生成失败。"));
@@ -594,13 +904,13 @@ export function App() {
     }
   }, [ensureGenerationIdle, refreshGenerationStatus, selectedProjectRef]);
 
-  const handleGenerateChapterStream = useCallback(async () => {
+  const handleGenerateChapterStream = useCallback(async (chapterNumberOverride?: number) => {
     if (!selectedProjectRef) {
       setGenerationError("请选择项目后再生成章节。");
       return;
     }
 
-    const chapterNumber = Number.parseInt(chapterNumberInput, 10);
+    const chapterNumber = chapterNumberOverride ?? Number.parseInt(chapterNumberInput, 10);
     if (!Number.isInteger(chapterNumber) || chapterNumber < 1) {
       setGenerationError("章节号必须是正整数。");
       return;
@@ -737,9 +1047,17 @@ export function App() {
 
       <section className="workspace-layout">
         <aside className="sidebar-stack" aria-label="项目与章节导航">
-          <NewProjectPlaceholder
-            open={newProjectPanelOpen}
-            onToggle={() => setNewProjectPanelOpen((current) => !current)}
+          <ProjectCreatePanel
+            open={newProjectPanelTarget === "sidebar"}
+            onToggle={() => setNewProjectPanelTarget((current) => (current === "sidebar" ? "" : "sidebar"))}
+            form={createProjectForm}
+            onChange={updateCreateProjectForm}
+            onSubmit={() => void handleCreateProject()}
+            onCancel={handleCancelCreateProject}
+            submitting={createProjectSubmitting}
+            error={createProjectError}
+            message={createProjectMessage}
+            disabled={apiStatus !== "online"}
           />
 
           <section className="panel project-list">
@@ -761,7 +1079,7 @@ export function App() {
             {projectsLoading && <p className="state-text loading-text">正在加载项目...</p>}
             {projectsError && <p className="state-text error-text">{projectsError}</p>}
             {!projectsLoading && !projectsError && projects.length === 0 && (
-              <p className="empty-state">暂无项目。请使用上方入口查看当前新建项目方式。</p>
+              <p className="empty-state">暂无项目。可使用上方入口创建 workspace 小说项目。</p>
             )}
 
             <div className="project-items">
@@ -827,10 +1145,18 @@ export function App() {
             </div>
             {!selectedProjectRef && (
               <div className="empty-stack">
-                <p className="empty-state">请选择一个项目开始阅读、生成或导出。</p>
-                <NewProjectPlaceholder
-                  open={newProjectPanelOpen}
-                  onToggle={() => setNewProjectPanelOpen((current) => !current)}
+                <p className="empty-state">请选择一个项目开始阅读、生成或导出；没有项目时，可先创建小说项目。</p>
+                <ProjectCreatePanel
+                  open={newProjectPanelTarget === "detail"}
+                  onToggle={() => setNewProjectPanelTarget((current) => (current === "detail" ? "" : "detail"))}
+                  form={createProjectForm}
+                  onChange={updateCreateProjectForm}
+                  onSubmit={() => void handleCreateProject()}
+                  onCancel={handleCancelCreateProject}
+                  submitting={createProjectSubmitting}
+                  error={createProjectError}
+                  message={createProjectMessage}
+                  disabled={apiStatus !== "online"}
                   variant="compact"
                 />
               </div>
@@ -867,6 +1193,15 @@ export function App() {
             )}
           </section>
 
+          <ProjectOnboardingPanel
+            state={projectOnboardingState}
+            suggestedChapterNumber={suggestedChapterNumber}
+            generationBusy={generationBusy}
+            apiStatus={apiStatus}
+            onGenerateAssets={() => void handleGenerateOutlineCharacters()}
+            onGenerateChapter={(chapterNumber) => void handleGenerateChapterStream(chapterNumber)}
+          />
+
           <section className="panel chapter-reader">
             <div className="reader-header">
               <div>
@@ -891,10 +1226,18 @@ export function App() {
             )}
             {!chapterLoading && !chapterError && !selectedProjectRef && (
               <div className="empty-stack reader-empty-stack">
-                <p className="empty-state">选择项目和章节后，这里显示正文。没有项目时，可先查看新建小说项目入口说明。</p>
-                <NewProjectPlaceholder
-                  open={newProjectPanelOpen}
-                  onToggle={() => setNewProjectPanelOpen((current) => !current)}
+                <p className="empty-state">选择项目和章节后，这里显示正文。没有项目时，可先创建小说项目。</p>
+                <ProjectCreatePanel
+                  open={newProjectPanelTarget === "reader"}
+                  onToggle={() => setNewProjectPanelTarget((current) => (current === "reader" ? "" : "reader"))}
+                  form={createProjectForm}
+                  onChange={updateCreateProjectForm}
+                  onSubmit={() => void handleCreateProject()}
+                  onCancel={handleCancelCreateProject}
+                  submitting={createProjectSubmitting}
+                  error={createProjectError}
+                  message={createProjectMessage}
+                  disabled={apiStatus !== "online"}
                   variant="compact"
                 />
               </div>

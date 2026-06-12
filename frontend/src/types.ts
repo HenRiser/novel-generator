@@ -16,6 +16,25 @@ export type ProjectDetail = {
   config: Record<string, unknown>;
 };
 
+export type CreateProjectRequest = {
+  title: string;
+  seedPrompt: string;
+  genre?: string;
+  style?: string;
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+};
+
+export type CreateProjectResponse = {
+  ok: boolean;
+  project_ref: string;
+  title: string;
+  message: string;
+};
+
+export type ProjectOnboardingState = "empty" | "needs_assets" | "ready_for_first_chapter" | "chapters_ready";
+
 export type ChapterSummary = {
   chapter_number: number;
   title: string;

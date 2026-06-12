@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from file_manager import (
+    create_workspace_project as file_create_workspace_project,
     list_projects as list_project_records,
     load_project_config as file_load_project_config,
     resolve_project_context,
@@ -20,6 +22,7 @@ from project_context import (
 )
 
 from .schemas import (
+    ProjectCreateResult,
     ProjectDirectoryResult,
     ProjectLoadResult,
     ProjectSaveResult,
@@ -39,6 +42,84 @@ BASIC_CONFIG_FIELDS = {
     "style": "写作风格",
     "word_count_range": "单章字数范围",
 }
+CREATE_TITLE_MAX_LENGTH = 80
+CREATE_SEED_PROMPT_MAX_LENGTH = 4000
+CREATE_OPTIONAL_TEXT_MAX_LENGTH = 200
+CREATE_PROJECT_MODEL_CHOICES = {"deepseek-v4-flash", "deepseek-v4-pro"}
+DEFAULT_CREATE_PROJECT_MODEL = "deepseek-v4-flash"
+DEFAULT_CREATE_PROJECT_MAX_TOKENS = 4000
+DEFAULT_CREATE_PROJECT_TEMPERATURE = 0.7
+DEFAULT_CREATE_PROJECT_WORD_COUNT_RANGE = "3000-5000 字"
+
+
+def _clean_create_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _coerce_optional_int(value: Any, default: int) -> int | None:
+    if value is None or value == "":
+        return default
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return None
+    return coerced
+
+
+def _coerce_optional_float(value: Any, default: float) -> float | None:
+    if value is None or value == "":
+        return default
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return None
+    return coerced
+
+
+def _workspace_support_dirs(ctx: Any) -> list[Path]:
+    return [
+        ctx.project_dir / "settings",
+        ctx.project_dir / "outline",
+        ctx.chapters_dir,
+        ctx.summaries_dir,
+        ctx.project_dir / "preferences",
+        ctx.project_dir / "revisions",
+        ctx.exports_dir,
+        ctx.logs_dir,
+    ]
+
+
+def _build_created_project_config(
+    title: str,
+    seed_prompt: str,
+    genre: str,
+    style: str,
+    model: str,
+    max_tokens: int,
+    temperature: float,
+) -> dict[str, Any]:
+    story_seed = seed_prompt.strip()
+    return {
+        "title": title,
+        "genre": genre or "未指定",
+        "style": style or "未指定",
+        "word_count_range": DEFAULT_CREATE_PROJECT_WORD_COUNT_RANGE,
+        "protagonist": story_seed,
+        "supporting_characters": story_seed,
+        "worldview": story_seed,
+        "core_conflict": story_seed,
+        "extra_requirements": story_seed,
+        "seed_prompt": story_seed,
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "setting_generation_options": {
+            "writing_mode": "电影式长剧情",
+            "expected_chapters": 12,
+        },
+        "created_from": "react",
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def is_placeholder_title(title: Any) -> bool:
@@ -124,6 +205,85 @@ def list_project_summaries(
         build_project_summary(record)
         for record in list_project_records(outputs_root=outputs_root, books_root=books_root)
     ]
+
+
+def create_workspace_project(
+    title: Any,
+    seed_prompt: Any,
+    genre: Any = "",
+    style: Any = "",
+    model: Any = None,
+    max_tokens: Any = None,
+    temperature: Any = None,
+    books_root: Path | None = None,
+) -> ProjectCreateResult:
+    cleaned_title = _clean_create_text(title)
+    cleaned_seed_prompt = _clean_create_text(seed_prompt)
+    cleaned_genre = _clean_create_text(genre)
+    cleaned_style = _clean_create_text(style)
+    cleaned_model = _clean_create_text(model) or DEFAULT_CREATE_PROJECT_MODEL
+
+    if not cleaned_title:
+        return ProjectCreateResult(False, message="小说标题不能为空。")
+    if len(cleaned_title) > CREATE_TITLE_MAX_LENGTH:
+        return ProjectCreateResult(False, message=f"小说标题不能超过 {CREATE_TITLE_MAX_LENGTH} 个字符。")
+    if not cleaned_seed_prompt:
+        return ProjectCreateResult(False, message="一句话设定 / 创作种子不能为空。")
+    if len(cleaned_seed_prompt) > CREATE_SEED_PROMPT_MAX_LENGTH:
+        return ProjectCreateResult(False, message=f"创作种子不能超过 {CREATE_SEED_PROMPT_MAX_LENGTH} 个字符。")
+    if len(cleaned_genre) > CREATE_OPTIONAL_TEXT_MAX_LENGTH:
+        return ProjectCreateResult(False, message=f"题材不能超过 {CREATE_OPTIONAL_TEXT_MAX_LENGTH} 个字符。")
+    if len(cleaned_style) > CREATE_OPTIONAL_TEXT_MAX_LENGTH:
+        return ProjectCreateResult(False, message=f"风格不能超过 {CREATE_OPTIONAL_TEXT_MAX_LENGTH} 个字符。")
+    if cleaned_model not in CREATE_PROJECT_MODEL_CHOICES:
+        return ProjectCreateResult(False, message="模型只能选择 deepseek-v4-flash 或 deepseek-v4-pro。")
+
+    resolved_max_tokens = _coerce_optional_int(max_tokens, DEFAULT_CREATE_PROJECT_MAX_TOKENS)
+    if resolved_max_tokens is None or resolved_max_tokens < 512 or resolved_max_tokens > 32768:
+        return ProjectCreateResult(False, message="max_tokens 必须是 512 到 32768 之间的整数。")
+
+    resolved_temperature = _coerce_optional_float(temperature, DEFAULT_CREATE_PROJECT_TEMPERATURE)
+    if resolved_temperature is None or resolved_temperature < 0 or resolved_temperature > 2:
+        return ProjectCreateResult(False, message="temperature 必须是 0 到 2 之间的数字。")
+
+    ctx = None
+    try:
+        ctx = file_create_workspace_project(cleaned_title, books_root=books_root)
+        for path in _workspace_support_dirs(ctx):
+            path.mkdir(parents=True, exist_ok=True)
+
+        project_ref = f"book:{ctx.book_id}"
+        project_config = _build_created_project_config(
+            cleaned_title,
+            cleaned_seed_prompt,
+            cleaned_genre,
+            cleaned_style,
+            cleaned_model,
+            resolved_max_tokens,
+            resolved_temperature,
+        )
+        _save_project_config(project_ref, project_config, books_root=books_root)
+        _save_setting_expansion(
+            project_ref,
+            cleaned_seed_prompt,
+            {
+                "seed_prompt": cleaned_seed_prompt,
+                "genre": cleaned_genre,
+                "style": cleaned_style,
+            },
+            books_root=books_root,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        if ctx is not None and ctx.project_dir.exists():
+            shutil.rmtree(ctx.project_dir, ignore_errors=True)
+        return ProjectCreateResult(False, title=cleaned_title, message=f"项目创建失败：{exc}")
+
+    return ProjectCreateResult(
+        True,
+        project_ref=project_ref,
+        title=cleaned_title,
+        message="Project created.",
+    )
 
 
 def project_summary_label(project_ref: str, project_map: dict[str, ProjectSummary]) -> str:

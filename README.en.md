@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, project listing/detail, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or save APIs.
+The API exposes health, workspace project creation, project listing/detail, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -108,20 +108,23 @@ The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://
 
 Current React support:
 
+- basic workspace project creation
 - project reading and chapter navigation
+- outline and character generation after creation
 - single-chapter streaming generation
 - live manuscript preview
 - generation status display
 - current-chapter TXT export and full-book TXT export
-- a "New novel project" entry placeholder
 
-The React "New novel project" button is not a complete creation flow yet. It only explains the current workflow and does not write to `workspace/`. Create new projects through the Streamlit legacy frontend:
+The React "New novel project" button creates a `workspace/books/{book_id}/` project, saves the initial configuration and writing seed, refreshes the project list, and selects the new project. Creating a project does not call the model automatically. After creation, React guides the user to generate or update outline and character files, then generate the first chapter.
+
+Streamlit legacy frontend remains available for the older full workflow:
 
 ```bat
 start.bat
 ```
 
-Use the React frontend for reading, generation, streaming preview, and export:
+Use the React frontend for basic project creation, reading, generation, streaming preview, and export:
 
 ```bat
 start-react.bat
@@ -129,7 +132,8 @@ start-react.bat
 
 Current React limits:
 
-- no complete new project flow
+- no project deletion / rename / archive
+- no full Streamlit settings migration
 - no batch streaming generation
 - no cancellation API
 - no draft recovery for failed partial output

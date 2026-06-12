@@ -9,11 +9,13 @@ from fastapi.responses import PlainTextResponse
 from api.schemas import (
     ChapterContentResponse,
     ChapterSummaryResponse,
+    CreateProjectRequest,
+    CreateProjectResponse,
     ProjectDetailResponse,
     ProjectSummaryResponse,
 )
 from config import PROJECT_ROOT
-from services.project_service import list_project_summaries, load_project_detail
+from services.project_service import create_workspace_project, list_project_summaries, load_project_detail
 from services.reader_service import (
     build_full_book_export_payload,
     build_reader_project_snapshot,
@@ -86,6 +88,28 @@ def _chapter_summary_response(chapter: Any) -> ChapterSummaryResponse:
 @router.get("", response_model=list[ProjectSummaryResponse])
 def list_projects() -> list[ProjectSummaryResponse]:
     return [_project_summary_response(summary) for summary in list_project_summaries()]
+
+
+@router.post("", response_model=CreateProjectResponse)
+def create_project(request: CreateProjectRequest) -> CreateProjectResponse:
+    result = create_workspace_project(
+        title=request.title,
+        seed_prompt=request.seed_prompt,
+        genre=request.genre,
+        style=request.style,
+        model=request.model,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+    )
+    if not result.ok:
+        _error(400, "project_create_invalid", result.message or "Project creation failed.")
+
+    return CreateProjectResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        title=result.title,
+        message=result.message,
+    )
 
 
 @router.get("/{project_ref}", response_model=ProjectDetailResponse)

@@ -130,6 +130,14 @@ class ProjectSaveResult:
 
 
 @dataclass(frozen=True)
+class ProjectCreateResult:
+    ok: bool
+    project_ref: str = ""
+    title: str = ""
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class ProjectDirectoryResult:
     ok: bool
     project_ref: str = ""

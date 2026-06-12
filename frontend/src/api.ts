@@ -6,6 +6,8 @@ import type {
   ChapterStreamErrorEvent,
   ChapterStreamEvent,
   ChapterStreamHandlers,
+  CreateProjectRequest,
+  CreateProjectResponse,
   GenerationRequest,
   GenerationStatus,
   HealthResponse,
@@ -220,6 +222,18 @@ export function getHealth(): Promise<HealthResponse> {
 
 export function getProjects(): Promise<ProjectSummary[]> {
   return apiFetch<ProjectSummary[]>("/api/projects");
+}
+
+export function createProject(request: CreateProjectRequest): Promise<CreateProjectResponse> {
+  return postJson<CreateProjectResponse>("/api/projects", {
+    title: request.title,
+    seed_prompt: request.seedPrompt,
+    genre: request.genre || undefined,
+    style: request.style || undefined,
+    model: request.model || undefined,
+    max_tokens: request.maxTokens,
+    temperature: request.temperature,
+  });
 }
 
 export function getProject(projectRef: string): Promise<ProjectDetail> {

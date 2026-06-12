@@ -95,6 +95,7 @@ Implemented:
 - API health status
 - API generation status
 - Project list
+- Basic workspace project creation
 - Project detail summary
 - Chapter list
 - Chapter content reading
@@ -106,12 +107,14 @@ Implemented:
 - Show live chapter text while streaming, including preview status and character count
 - Refresh chapters and open the generated chapter after generation
 - Export current chapter TXT and full book TXT
-- A "New novel project" entry placeholder that explains the current creation path
+- A "New novel project" form that creates a `workspace/books/{book_id}/` project
+- Post-creation guidance for outline/character generation and first-chapter generation
 - Basic loading, generation status, saved-file, and error states
 
 Not implemented in this stage:
 
-- Full React new project flow
+- Full project management
+- Project deletion / rename / archive
 - Setting expansion
 - Batch generation
 - Batch generation API
@@ -123,13 +126,15 @@ Not implemented in this stage:
 - Draft recovery for partial streaming output
 - WebSocket or SSE
 
-The "New novel project" button in React is an entry placeholder only. It does not create files and does not write to `workspace/`. To create a project today, use the Streamlit legacy frontend:
+The "New novel project" button in React now supports the basic creation loop. It creates a workspace project, writes the initial `book.json`, `project_config.json`, and seed setting data, refreshes the project list, and selects the new project. Creating the project does not call the model, does not generate outline/character files, and does not generate chapters. After creation, use the React guidance panel to generate / update outline and character files, then generate the first chapter.
+
+Streamlit remains available for the legacy full workflow:
 
 ```bat
 .\start.bat
 ```
 
-Use React for reading existing projects, single-chapter generation, streaming preview, and TXT export:
+Use React for basic project creation, reading projects, outline/character generation, single-chapter generation, streaming preview, and TXT export:
 
 ```bat
 .\start-react.bat
