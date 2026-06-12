@@ -55,7 +55,7 @@ Windows users can also run `setup.bat` and `start.bat`. `start.bat` is reserved 
 
 ## React Frontend
 
-The React frontend is separate from Streamlit. It requires the FastAPI backend.
+The React frontend is separate from Streamlit. It requires the FastAPI backend. Its current visual direction is a reading-first writing workspace: warm paper surfaces, low-saturation status colors, comfortable long-form text width, and a manuscript-like streaming preview rather than an AI demo or dashboard-heavy interface.
 
 One-command startup on Windows:
 
@@ -106,8 +106,30 @@ http://127.0.0.1:5173
 
 The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file.
 
+Current React support:
+
+- project reading and chapter navigation
+- single-chapter streaming generation
+- live manuscript preview
+- generation status display
+- current-chapter TXT export and full-book TXT export
+- a "New novel project" entry placeholder
+
+The React "New novel project" button is not a complete creation flow yet. It only explains the current workflow and does not write to `workspace/`. Create new projects through the Streamlit legacy frontend:
+
+```bat
+start.bat
+```
+
+Use the React frontend for reading, generation, streaming preview, and export:
+
+```bat
+start-react.bat
+```
+
 Current React limits:
 
+- no complete new project flow
 - no batch streaming generation
 - no cancellation API
 - no draft recovery for failed partial output

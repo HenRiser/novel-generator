@@ -60,12 +60,12 @@ function settingOptionValue(config: Record<string, unknown> | undefined, key: st
 
 function statusText(status: ApiStatus): string {
   if (status === "online") {
-    return "API online";
+    return "API Online";
   }
   if (status === "offline") {
-    return "API offline";
+    return "API Offline";
   }
-  return "loading";
+  return "Loading";
 }
 
 function generationStatusText(status: GenerationStatus | null): string {
@@ -76,10 +76,10 @@ function generationStatusText(status: GenerationStatus | null): string {
     return "Running";
   }
   if (status.last_error) {
-    return "Last error";
+    return "Error";
   }
   if (status.last_result) {
-    return "Last success";
+    return "Saved";
   }
   return "Idle";
 }
@@ -132,7 +132,11 @@ function publicErrorMessage(error: unknown, fallback: string): string {
     return safePublicMessage(error.message, fallback);
   }
 
-  return safePublicMessage(error instanceof Error ? error.message : "", fallback);
+  const rawMessage = error instanceof Error ? error.message : "";
+  if (/failed to fetch|networkerror|load failed/i.test(rawMessage)) {
+    return fallback;
+  }
+  return safePublicMessage(rawMessage, fallback);
 }
 
 function nextChapterSuggestion(chapters: ChapterSummary[]): number {
@@ -234,6 +238,41 @@ function streamSaveSummary(result: ChapterStreamDoneEvent | null): string {
     .join("；");
 }
 
+function NewProjectPlaceholder({
+  open,
+  onToggle,
+  variant = "default",
+}: {
+  open: boolean;
+  onToggle: () => void;
+  variant?: "default" | "compact";
+}) {
+  return (
+    <section className={`new-project-placeholder ${variant === "compact" ? "new-project-placeholder-compact" : ""}`}>
+      <button
+        className="button secondary-button create-project-button"
+        type="button"
+        aria-expanded={open}
+        onClick={onToggle}
+      >
+        新建小说项目
+      </button>
+      {open && (
+        <div className="new-project-card" role="note">
+          <strong>React 新建小说项目流程待接入。</strong>
+          <p>
+            当前如需创建新项目，请使用 Streamlit 旧前端入口 <code>start.bat</code>；
+            React 当前主要用于项目阅读、章节生成、流式预览与导出。
+          </p>
+          <p>
+            <code>start.bat</code> = Streamlit 入口；<code>start-react.bat</code> = FastAPI + React 入口。
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function App() {
   const [apiStatus, setApiStatus] = useState<ApiStatus>("loading");
   const [apiError, setApiError] = useState("");
@@ -265,6 +304,7 @@ export function App() {
   const [streamingPreviewStatus, setStreamingPreviewStatus] = useState<StreamingPreviewStatus>("idle");
   const [streamingError, setStreamingError] = useState("");
   const [streamingResult, setStreamingResult] = useState<ChapterStreamDoneEvent | null>(null);
+  const [newProjectPanelOpen, setNewProjectPanelOpen] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -283,6 +323,11 @@ export function App() {
   const streamingCharacterCount = streamingContent.length;
   const generationBusy =
     Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating || chapterStreaming;
+  const headerProjectLabel = selectedProject?.title || "未选择项目";
+  const headerChapterLabel =
+    selectedChapterNumber === null
+      ? "未选择章节"
+      : `第 ${selectedChapterNumber} 章 · ${selectedChapter?.title || chapterContent?.title || "章节正文"}`;
 
   const refreshGenerationStatus = useCallback(async () => {
     setGenerationStatusLoading(true);
@@ -670,12 +715,13 @@ export function App() {
     <main className="app-shell">
       <header className="app-header">
         <div className="app-title-block">
-          <span className="app-eyebrow">Local novel workspace</span>
+          <span className="app-eyebrow">Local writing desk</span>
           <h1>Novel Generator</h1>
-          <p>React reader and streaming generation surface for local projects.</p>
+          <p>面向长篇阅读、章节生成与本地导出的纸张感创作工作台。</p>
         </div>
         <div className="header-meta">
-          <span>{selectedProject?.title || "未选择项目"}</span>
+          <span>{headerProjectLabel}</span>
+          <span className="header-chapter-summary">{headerChapterLabel}</span>
           <div className={`status-pill status-${apiStatus}`}>{statusText(apiStatus)}</div>
         </div>
       </header>
@@ -691,6 +737,11 @@ export function App() {
 
       <section className="workspace-layout">
         <aside className="sidebar-stack" aria-label="项目与章节导航">
+          <NewProjectPlaceholder
+            open={newProjectPanelOpen}
+            onToggle={() => setNewProjectPanelOpen((current) => !current)}
+          />
+
           <section className="panel project-list">
             <div className="panel-header">
               <div>
@@ -710,7 +761,7 @@ export function App() {
             {projectsLoading && <p className="state-text loading-text">正在加载项目...</p>}
             {projectsError && <p className="state-text error-text">{projectsError}</p>}
             {!projectsLoading && !projectsError && projects.length === 0 && (
-              <p className="empty-state">暂无项目。请先在 Streamlit 旧前端创建或导入项目。</p>
+              <p className="empty-state">暂无项目。请使用上方入口查看当前新建项目方式。</p>
             )}
 
             <div className="project-items">
@@ -744,7 +795,7 @@ export function App() {
             {chaptersLoading && <p className="state-text loading-text">正在加载章节...</p>}
             {chaptersError && <p className="state-text error-text">{chaptersError}</p>}
             {!chaptersLoading && !chaptersError && selectedProjectRef && chapters.length === 0 && (
-              <p className="empty-state">当前项目暂无章节。</p>
+              <p className="empty-state">当前项目暂无章节。可先生成大纲与人物卡，再从右侧生成第 1 章。</p>
             )}
             {!selectedProjectRef && <p className="empty-state">选择项目后显示章节。</p>}
             <div className="chapter-list">
@@ -774,7 +825,16 @@ export function App() {
                 <h2>项目详情</h2>
               </div>
             </div>
-            {!selectedProjectRef && <p className="empty-state">请选择一个项目。</p>}
+            {!selectedProjectRef && (
+              <div className="empty-stack">
+                <p className="empty-state">请选择一个项目开始阅读、生成或导出。</p>
+                <NewProjectPlaceholder
+                  open={newProjectPanelOpen}
+                  onToggle={() => setNewProjectPanelOpen((current) => !current)}
+                  variant="compact"
+                />
+              </div>
+            )}
             {projectLoading && <p className="state-text loading-text">正在加载项目详情...</p>}
             {projectError && <p className="state-text error-text">{projectError}</p>}
             {selectedProject && projectDetail && (
@@ -812,7 +872,7 @@ export function App() {
               <div>
                 <span className="section-kicker">Reader</span>
                 <h2>{chapterContent?.title || selectedChapter?.title || "章节正文"}</h2>
-                <p>{chapterContent?.filename || selectedChapter?.filename || "选择章节后显示正文。"}</p>
+                <p>{chapterContent?.filename || selectedChapter?.filename || "选择章节后显示正文，阅读区会保留舒适行宽。"}</p>
               </div>
               {selectedProjectRef && selectedChapterNumber !== null && (
                 <a className="button secondary-button download-button" href={exportChapterUrl(selectedProjectRef, selectedChapterNumber)}>
@@ -830,7 +890,14 @@ export function App() {
               <p className="empty-state">请选择一个章节。</p>
             )}
             {!chapterLoading && !chapterError && !selectedProjectRef && (
-              <p className="empty-state">选择项目和章节后，这里显示正文。</p>
+              <div className="empty-stack reader-empty-stack">
+                <p className="empty-state">选择项目和章节后，这里显示正文。没有项目时，可先查看新建小说项目入口说明。</p>
+                <NewProjectPlaceholder
+                  open={newProjectPanelOpen}
+                  onToggle={() => setNewProjectPanelOpen((current) => !current)}
+                  variant="compact"
+                />
+              </div>
             )}
           </section>
         </section>
@@ -839,7 +906,7 @@ export function App() {
           <section className="panel generation-panel">
             <div className="panel-header">
               <div>
-                <span className="section-kicker">Generation</span>
+                <span className="section-kicker">Draft control</span>
                 <h2>单章生成</h2>
               </div>
               <button
@@ -912,8 +979,8 @@ export function App() {
               >
                 <div className="streaming-preview-header">
                   <div>
-                    <span className="section-kicker">Streaming preview</span>
-                    <h3>实时正文预览</h3>
+                    <span className="section-kicker">Draft preview</span>
+                    <h3>手稿实时预览</h3>
                     <p>{streamingCharacterCount} 字</p>
                   </div>
                   <span className={`streaming-status streaming-status-${streamingPreviewStatus}`}>
@@ -923,6 +990,18 @@ export function App() {
                 {streamingError && <p className="state-text error-text">{streamingError}</p>}
                 {streamingPreviewStatus === "saved" && (
                   <p className="state-text success-text">{streamSaveSummary(streamingResult)}</p>
+                )}
+                {streamingPreviewStatus === "saved" && streamingResult && (
+                  <dl className="saved-file-list">
+                    <div>
+                      <dt>章节文件</dt>
+                      <dd>{publicFileName(streamingResult.chapter_file) || "-"}</dd>
+                    </div>
+                    <div>
+                      <dt>摘要文件</dt>
+                      <dd>{publicFileName(streamingResult.summary_file) || "-"}</dd>
+                    </div>
+                  </dl>
                 )}
                 <pre className="streaming-content">
                   {streamingContent ||

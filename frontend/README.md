@@ -1,6 +1,6 @@
 # React Reader / Generation Foundation
 
-This frontend is the React reader and generation surface for `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, and keeps the synchronous generation endpoint as a fallback path.
+This frontend is the React reader and generation surface for `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, and keeps the synchronous generation endpoint as a fallback path. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
 
 ## Frontend entry points
 
@@ -91,6 +91,7 @@ http://localhost:8501
 
 Implemented:
 
+- Warm paper reading/workbench visual theme
 - API health status
 - API generation status
 - Project list
@@ -104,10 +105,13 @@ Implemented:
 - Keep synchronous specified-chapter generation as a fallback
 - Show live chapter text while streaming, including preview status and character count
 - Refresh chapters and open the generated chapter after generation
+- Export current chapter TXT and full book TXT
+- A "New novel project" entry placeholder that explains the current creation path
 - Basic loading, generation status, saved-file, and error states
 
 Not implemented in this stage:
 
+- Full React new project flow
 - Setting expansion
 - Batch generation
 - Batch generation API
@@ -118,6 +122,18 @@ Not implemented in this stage:
 - Cancellation API
 - Draft recovery for partial streaming output
 - WebSocket or SSE
+
+The "New novel project" button in React is an entry placeholder only. It does not create files and does not write to `workspace/`. To create a project today, use the Streamlit legacy frontend:
+
+```bat
+.\start.bat
+```
+
+Use React for reading existing projects, single-chapter generation, streaming preview, and TXT export:
+
+```bat
+.\start-react.bat
+```
 
 Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button.
 
