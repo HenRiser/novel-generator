@@ -87,6 +87,134 @@ export type GenerationSettingsResponse = {
   message: string;
 };
 
+export type NarrativeGraphLayer = "core" | "major" | "detail" | "background";
+
+export type NarrativeGraphNodeType =
+  | "character"
+  | "scene"
+  | "item"
+  | "foreshadowing"
+  | "relationship_note"
+  | "plot_direction"
+  | "world_fact"
+  | "event"
+  | "organization";
+
+export type NarrativeGraphTagCategory =
+  | "plot_scope"
+  | "organization"
+  | "narrative_function"
+  | "theme"
+  | "custom";
+
+export type NarrativeGraphTagEntry = {
+  category: NarrativeGraphTagCategory | string;
+  description: string;
+  aliases: string[];
+  status: string;
+};
+
+export type NarrativeGraphNode = {
+  id: string;
+  type: NarrativeGraphNodeType | string;
+  label: string;
+  aliases: string[];
+  summary: string;
+  importance: number;
+  layer: NarrativeGraphLayer | string;
+  parent_id: string | null;
+  status: string;
+  tags: string[];
+  properties: Record<string, unknown>;
+  notes: string;
+  source?: Record<string, unknown>;
+};
+
+export type NarrativeGraphEdge = {
+  id: string;
+  source: string;
+  target: string;
+  type: string;
+  label: string;
+  summary: string;
+  importance: number;
+  layer: NarrativeGraphLayer | string;
+  status: string;
+  properties: Record<string, unknown>;
+  notes: string;
+  source_info?: Record<string, unknown>;
+};
+
+export type NarrativeGraphDocument = {
+  version: number;
+  metadata: Record<string, unknown>;
+  tag_registry: Record<string, NarrativeGraphTagEntry>;
+  graph: {
+    nodes: NarrativeGraphNode[];
+    edges: NarrativeGraphEdge[];
+  };
+};
+
+export type NarrativeGraphViewsDocument = {
+  version: number;
+  metadata: Record<string, unknown>;
+  views: Array<Record<string, unknown>>;
+};
+
+export type NarrativeGraphResponse = {
+  ok: boolean;
+  project_ref: string;
+  graph: NarrativeGraphDocument;
+  views: NarrativeGraphViewsDocument;
+  message: string;
+};
+
+export type NarrativeGraphTagRequest = {
+  name: string;
+  category: NarrativeGraphTagCategory;
+  description: string;
+  aliases: string[];
+};
+
+export type NarrativeGraphTagResponse = NarrativeGraphResponse & {
+  tag: Record<string, NarrativeGraphTagEntry>;
+};
+
+export type NarrativeGraphNodeRequest = {
+  type: NarrativeGraphNodeType;
+  label: string;
+  aliases: string[];
+  summary: string;
+  importance: number;
+  layer: NarrativeGraphLayer;
+  parent_id?: string | null;
+  status: string;
+  tags: string[];
+  properties: Record<string, unknown>;
+  notes: string;
+};
+
+export type NarrativeGraphNodeResponse = NarrativeGraphResponse & {
+  node: NarrativeGraphNode;
+};
+
+export type NarrativeGraphEdgeRequest = {
+  source: string;
+  target: string;
+  type: string;
+  label: string;
+  summary: string;
+  importance: number;
+  layer: NarrativeGraphLayer;
+  status: string;
+  properties: Record<string, unknown>;
+  notes: string;
+};
+
+export type NarrativeGraphEdgeResponse = NarrativeGraphResponse & {
+  edge: NarrativeGraphEdge;
+};
+
 export type OutlineCharactersGenerationResponse = {
   ok: boolean;
   outline_file: string;

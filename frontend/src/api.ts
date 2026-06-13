@@ -13,6 +13,13 @@ import type {
   GenerationRequest,
   GenerationStatus,
   HealthResponse,
+  NarrativeGraphEdgeRequest,
+  NarrativeGraphEdgeResponse,
+  NarrativeGraphNodeRequest,
+  NarrativeGraphNodeResponse,
+  NarrativeGraphResponse,
+  NarrativeGraphTagRequest,
+  NarrativeGraphTagResponse,
   OutlineCharactersGenerationResponse,
   ProjectDetail,
   ProjectSummary,
@@ -258,6 +265,40 @@ export function updateGenerationSettings(
 ): Promise<GenerationSettingsResponse> {
   return patchJson<GenerationSettingsResponse>(
     `/api/projects/${projectPath(projectRef)}/generation-settings`,
+    request,
+  );
+}
+
+export function getNarrativeGraph(projectRef: string): Promise<NarrativeGraphResponse> {
+  return apiFetch<NarrativeGraphResponse>(`/api/projects/${projectPath(projectRef)}/narrative-graph`);
+}
+
+export function createNarrativeGraphTag(
+  projectRef: string,
+  request: NarrativeGraphTagRequest,
+): Promise<NarrativeGraphTagResponse> {
+  return postJson<NarrativeGraphTagResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/tags`,
+    request,
+  );
+}
+
+export function createNarrativeGraphNode(
+  projectRef: string,
+  request: NarrativeGraphNodeRequest,
+): Promise<NarrativeGraphNodeResponse> {
+  return postJson<NarrativeGraphNodeResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/nodes`,
+    request,
+  );
+}
+
+export function createNarrativeGraphEdge(
+  projectRef: string,
+  request: NarrativeGraphEdgeRequest,
+): Promise<NarrativeGraphEdgeResponse> {
+  return postJson<NarrativeGraphEdgeResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/edges`,
     request,
   );
 }

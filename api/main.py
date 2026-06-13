@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from api.routers import generation, health, projects
+from api.routers import generation, health, narrative_graph, projects
 
 
 app = FastAPI(title="novel-generator API")
@@ -24,6 +24,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(projects.router)
+app.include_router(narrative_graph.router)
 app.include_router(generation.router)
 
 

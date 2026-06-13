@@ -157,6 +157,18 @@ class ProjectDirectoryResult:
 
 
 @dataclass(frozen=True)
+class NarrativeGraphResult:
+    ok: bool
+    project_ref: str = ""
+    graph: dict[str, Any] = field(default_factory=dict)
+    views: dict[str, Any] = field(default_factory=dict)
+    node: dict[str, Any] | None = None
+    edge: dict[str, Any] | None = None
+    tag: dict[str, Any] | None = None
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class ReaderChapterItem:
     chapter_number: int
     title: str

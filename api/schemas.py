@@ -62,6 +62,60 @@ class UpdateGenerationSettingsResponse(BaseModel):
     message: str = ""
 
 
+class NarrativeGraphResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    graph: dict[str, Any]
+    views: dict[str, Any]
+    message: str = ""
+
+
+class NarrativeGraphTagRequest(BaseModel):
+    name: str | None = None
+    category: str | None = None
+    description: str | None = None
+    aliases: Any = None
+
+
+class NarrativeGraphTagResponse(NarrativeGraphResponse):
+    tag: dict[str, Any]
+
+
+class NarrativeGraphNodeRequest(BaseModel):
+    type: str | None = None
+    label: str | None = None
+    aliases: Any = None
+    summary: str | None = None
+    importance: Any = None
+    layer: str | None = None
+    parent_id: str | None = None
+    status: str | None = None
+    tags: Any = None
+    properties: Any = None
+    notes: str | None = None
+
+
+class NarrativeGraphNodeResponse(NarrativeGraphResponse):
+    node: dict[str, Any]
+
+
+class NarrativeGraphEdgeRequest(BaseModel):
+    source: str | None = None
+    target: str | None = None
+    type: str | None = None
+    label: str | None = None
+    summary: str | None = None
+    importance: Any = None
+    layer: str | None = None
+    status: str | None = None
+    properties: Any = None
+    notes: str | None = None
+
+
+class NarrativeGraphEdgeResponse(NarrativeGraphResponse):
+    edge: dict[str, Any]
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

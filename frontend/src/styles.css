@@ -977,6 +977,200 @@ code {
   gap: var(--space-2);
 }
 
+.library-workspace {
+  align-items: start;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  margin: 0 auto;
+  max-width: 1680px;
+}
+
+.library-main {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.library-stats-grid,
+.library-forms-grid,
+.library-browser-grid {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.library-stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.library-forms-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.library-browser-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.library-stat-card {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.library-stat-card span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.library-stat-card strong {
+  font-size: 28px;
+}
+
+.graph-form {
+  align-content: start;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.graph-form textarea {
+  min-height: 78px;
+}
+
+.graph-form select[multiple] {
+  min-height: 94px;
+}
+
+.json-field {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  min-height: 112px !important;
+}
+
+.graph-filter-bar {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: var(--space-4);
+}
+
+.graph-list {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.graph-list-item,
+.tag-registry-item {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+  text-align: left;
+}
+
+.graph-list-item {
+  cursor: pointer;
+}
+
+.graph-list-item:hover,
+.graph-list-item.selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary-soft);
+}
+
+.graph-list-item strong,
+.tag-registry-item strong {
+  overflow-wrap: anywhere;
+}
+
+.graph-list-item span,
+.graph-list-item small,
+.tag-registry-item span,
+.tag-registry-item small,
+.tag-registry-item p {
+  color: var(--color-text-muted);
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.entity-inspector {
+  align-content: start;
+  display: grid;
+  gap: var(--space-4);
+  position: sticky;
+  top: var(--space-4);
+}
+
+.entity-inspector h2,
+.entity-inspector h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.entity-inspector p {
+  line-height: 1.65;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.inspector-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.inspector-list div {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-2);
+}
+
+.inspector-list dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.inspector-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.inspector-summary,
+.inspector-note {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.inspector-section {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.inspector-section pre {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+  padding: var(--space-3);
+}
+
 .future-chip-list {
   display: flex;
   flex-wrap: wrap;
@@ -1358,8 +1552,13 @@ code {
 
   .workspace-layout,
   .project-settings-layout,
+  .library-workspace,
   .tool-stack {
     grid-template-columns: 1fr;
+  }
+
+  .entity-inspector {
+    position: static;
   }
 
   .home-card-grid,
@@ -1387,6 +1586,10 @@ code {
   .status-grid,
   .home-card-grid,
   .library-grid,
+  .library-stats-grid,
+  .library-forms-grid,
+  .library-browser-grid,
+  .graph-filter-bar,
   .system-grid,
   .quick-start-grid {
     grid-template-columns: 1fr;

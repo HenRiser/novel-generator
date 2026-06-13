@@ -13,11 +13,11 @@ Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        
 - Clicking the logo mark or `Braipen` returns to the home page.
 - `创作` is for project creation, onboarding, outline/character generation, single-chapter streaming generation, synchronous fallback generation, and generation status.
 - `阅读` is for chapter navigation, long-form reading, current-chapter TXT export, and full-book TXT export.
-- `资料库` is a placeholder for the future Narrative Graph and creative knowledge browser.
+- `资料库` provides the Narrative Graph foundation: manual nodes, edges, tag registry, and an Entity Inspector.
 - `项目配置` separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`.
 - `系统设置` shows API status, the API base URL, generation status, and startup command references.
 
-This stage does not add React Router, Three.js, React Three Fiber, GSAP, a full Narrative Graph, complete API Key management, or a replacement for the Streamlit legacy frontend.
+This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, complex approximate search, prompt integration, complete API Key management, or a replacement for the Streamlit legacy frontend.
 
 ## Frontend entry points
 
@@ -116,6 +116,12 @@ Implemented:
 - Project list
 - Basic workspace project creation
 - Project detail summary
+- Narrative Graph foundation in the library page
+- Manual Narrative Graph nodes and edges
+- Tag registry management for controlled `tags`
+- Entity Inspector for selected nodes and edges
+- Clear boundaries between controlled `tags`, free-form `aliases`, and free-form `notes`
+- `importance` on a 1-10 scale and `layer` values of `core`, `major`, `detail`, or `background`
 - Project settings with read-only Genesis fields
 - Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
 - Chapter list
@@ -137,8 +143,13 @@ Not implemented in this stage:
 - React Router / URL deep links
 - Three.js / React Three Fiber 3D hero animation
 - GSAP timeline animation
-- Full Narrative Graph
 - 2D/3D graph visualization
+- React Flow graph editor
+- Complex approximate search
+- Vector search or embeddings
+- Context Pack Builder
+- Narrative Graph injection into chapter generation prompts
+- AI automatic graph extraction or AI automatic tagging
 - Full project management
 - Project deletion / rename / archive
 - Setting expansion

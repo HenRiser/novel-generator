@@ -1437,7 +1437,7 @@ export function App() {
       return renderReadPage();
     }
     if (activePage === "library") {
-      return <LibraryPage selectedProject={selectedProject} />;
+      return <LibraryPage selectedProject={selectedProject} apiStatus={apiStatus} />;
     }
     if (activePage === "projectSettings") {
       return (
