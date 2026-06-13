@@ -1,6 +1,23 @@
 # React Reader / Generation Foundation
 
-This frontend is the React reader and generation surface for `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, and keeps the synchronous generation endpoint as a fallback path. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
+This frontend is the React reader and generation surface for `novel-generator`. The React UI now uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, and keeps the synchronous generation endpoint as a fallback path. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
+
+## Workspace navigation
+
+React opens to the Braipen home page by default. The header structure is:
+
+```text
+Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
+```
+
+- Clicking the logo mark or `Braipen` returns to the home page.
+- `创作` is for project creation, onboarding, outline/character generation, single-chapter streaming generation, synchronous fallback generation, and generation status.
+- `阅读` is for chapter navigation, long-form reading, current-chapter TXT export, and full-book TXT export.
+- `资料库` is a placeholder for the future Narrative Graph and creative knowledge browser.
+- `项目配置` currently shows selected project configuration as read-only data.
+- `系统设置` shows API status, the API base URL, generation status, and startup command references.
+
+This stage does not add React Router, Three.js, React Three Fiber, GSAP, a full Narrative Graph, complete API Key management, or a replacement for the Streamlit legacy frontend.
 
 ## Frontend entry points
 
@@ -91,6 +108,8 @@ http://localhost:8501
 
 Implemented:
 
+- Braipen home page as the default React entry
+- Header workspace navigation for creation, reading, library, project settings, and system settings
 - Warm paper reading/workbench visual theme
 - API health status
 - API generation status
@@ -113,6 +132,11 @@ Implemented:
 
 Not implemented in this stage:
 
+- React Router / URL deep links
+- Three.js / React Three Fiber 3D hero animation
+- GSAP timeline animation
+- Full Narrative Graph
+- 2D/3D graph visualization
 - Full project management
 - Project deletion / rename / archive
 - Setting expansion

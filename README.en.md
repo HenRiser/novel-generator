@@ -55,7 +55,7 @@ Windows users can also run `setup.bat` and `start.bat`. `start.bat` is reserved 
 
 ## React Frontend
 
-The React frontend is separate from Streamlit. It requires the FastAPI backend. Its current visual direction is a reading-first writing workspace: warm paper surfaces, low-saturation status colors, comfortable long-form text width, and a manuscript-like streaming preview rather than an AI demo or dashboard-heavy interface.
+The React frontend is separate from Streamlit. It requires the FastAPI backend. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. Its current visual direction is a reading-first writing workspace: warm paper surfaces, low-saturation status colors, comfortable long-form text width, and a manuscript-like streaming preview rather than an AI demo or dashboard-heavy interface.
 
 One-command startup on Windows:
 
@@ -106,8 +106,18 @@ http://127.0.0.1:5173
 
 The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file.
 
+React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
+
+```text
+Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
+```
+
+The creation page is for project creation, onboarding, outline/character generation, streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page is currently a placeholder for the future Narrative Graph. The project settings page is read-only in this stage. The system settings page shows API status, the API base URL, generation status, and startup command references.
+
 Current React support:
 
+- Braipen home page as the default React entry
+- workspace navigation across creation, reading, library, project settings, and system settings
 - basic workspace project creation
 - project reading and chapter navigation
 - outline and character generation after creation
@@ -132,6 +142,11 @@ start-react.bat
 
 Current React limits:
 
+- no React Router / URL deep links
+- no Three.js or React Three Fiber 3D hero animation
+- no GSAP timeline animation
+- no full Narrative Graph
+- no 2D/3D graph visualization
 - no project deletion / rename / archive
 - no full Streamlit settings migration
 - no batch streaming generation
