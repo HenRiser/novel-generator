@@ -176,6 +176,13 @@ export type NarrativeGraphTagRequest = {
   aliases: string[];
 };
 
+export type NarrativeGraphTagUpdateRequest = {
+  category?: NarrativeGraphTagCategory;
+  description?: string;
+  aliases?: string[];
+  status?: string;
+};
+
 export type NarrativeGraphTagResponse = NarrativeGraphResponse & {
   tag: Record<string, NarrativeGraphTagEntry>;
 };
@@ -213,6 +220,10 @@ export type NarrativeGraphEdgeRequest = {
 
 export type NarrativeGraphEdgeResponse = NarrativeGraphResponse & {
   edge: NarrativeGraphEdge;
+};
+
+export type NarrativeGraphNodeDeleteOptions = {
+  deleteEdges?: boolean;
 };
 
 export type OutlineCharactersGenerationResponse = {

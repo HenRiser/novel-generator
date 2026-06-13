@@ -16,10 +16,12 @@ import type {
   NarrativeGraphEdgeRequest,
   NarrativeGraphEdgeResponse,
   NarrativeGraphNodeRequest,
+  NarrativeGraphNodeDeleteOptions,
   NarrativeGraphNodeResponse,
   NarrativeGraphResponse,
   NarrativeGraphTagRequest,
   NarrativeGraphTagResponse,
+  NarrativeGraphTagUpdateRequest,
   OutlineCharactersGenerationResponse,
   ProjectDetail,
   ProjectSummary,
@@ -179,6 +181,12 @@ function patchJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+function deleteJson<T>(path: string): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "DELETE",
+  });
+}
+
 function isStreamEvent(payload: unknown): payload is ChapterStreamEvent {
   return Boolean(payload && typeof payload === "object" && "type" in payload);
 }
@@ -283,6 +291,26 @@ export function createNarrativeGraphTag(
   );
 }
 
+export function updateNarrativeGraphTag(
+  projectRef: string,
+  tagName: string,
+  request: NarrativeGraphTagUpdateRequest,
+): Promise<NarrativeGraphTagResponse> {
+  return patchJson<NarrativeGraphTagResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/tags/${encodeURIComponent(tagName)}`,
+    request,
+  );
+}
+
+export function deleteNarrativeGraphTag(
+  projectRef: string,
+  tagName: string,
+): Promise<NarrativeGraphTagResponse> {
+  return deleteJson<NarrativeGraphTagResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/tags/${encodeURIComponent(tagName)}`,
+  );
+}
+
 export function createNarrativeGraphNode(
   projectRef: string,
   request: NarrativeGraphNodeRequest,
@@ -293,6 +321,28 @@ export function createNarrativeGraphNode(
   );
 }
 
+export function updateNarrativeGraphNode(
+  projectRef: string,
+  nodeId: string,
+  request: NarrativeGraphNodeRequest,
+): Promise<NarrativeGraphNodeResponse> {
+  return patchJson<NarrativeGraphNodeResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/nodes/${encodeURIComponent(nodeId)}`,
+    request,
+  );
+}
+
+export function deleteNarrativeGraphNode(
+  projectRef: string,
+  nodeId: string,
+  options: NarrativeGraphNodeDeleteOptions = {},
+): Promise<NarrativeGraphNodeResponse> {
+  const query = options.deleteEdges ? "?delete_edges=true" : "";
+  return deleteJson<NarrativeGraphNodeResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/nodes/${encodeURIComponent(nodeId)}${query}`,
+  );
+}
+
 export function createNarrativeGraphEdge(
   projectRef: string,
   request: NarrativeGraphEdgeRequest,
@@ -300,6 +350,26 @@ export function createNarrativeGraphEdge(
   return postJson<NarrativeGraphEdgeResponse>(
     `/api/projects/${projectPath(projectRef)}/narrative-graph/edges`,
     request,
+  );
+}
+
+export function updateNarrativeGraphEdge(
+  projectRef: string,
+  edgeId: string,
+  request: NarrativeGraphEdgeRequest,
+): Promise<NarrativeGraphEdgeResponse> {
+  return patchJson<NarrativeGraphEdgeResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/edges/${encodeURIComponent(edgeId)}`,
+    request,
+  );
+}
+
+export function deleteNarrativeGraphEdge(
+  projectRef: string,
+  edgeId: string,
+): Promise<NarrativeGraphEdgeResponse> {
+  return deleteJson<NarrativeGraphEdgeResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/edges/${encodeURIComponent(edgeId)}`,
   );
 }
 

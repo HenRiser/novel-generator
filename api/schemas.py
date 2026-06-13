@@ -77,6 +77,13 @@ class NarrativeGraphTagRequest(BaseModel):
     aliases: Any = None
 
 
+class NarrativeGraphTagUpdateRequest(BaseModel):
+    category: str | None = None
+    description: str | None = None
+    aliases: Any = None
+    status: str | None = None
+
+
 class NarrativeGraphTagResponse(NarrativeGraphResponse):
     tag: dict[str, Any]
 

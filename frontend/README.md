@@ -17,7 +17,9 @@ Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        
 - `项目配置` separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`.
 - `系统设置` shows API status, the API base URL, generation status, and startup command references.
 
-This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, complex approximate search, prompt integration, complete API Key management, or a replacement for the Streamlit legacy frontend.
+The library page has moved beyond the initial foundation: it supports safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector.
+
+This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, prompt integration, complete API Key management, or a replacement for the Streamlit legacy frontend.
 
 ## Frontend entry points
 
@@ -116,10 +118,13 @@ Implemented:
 - Project list
 - Basic workspace project creation
 - Project detail summary
-- Narrative Graph foundation in the library page
-- Manual Narrative Graph nodes and edges
-- Tag registry management for controlled `tags`
-- Entity Inspector for selected nodes and edges
+- Narrative Graph usability foundation in the library page
+- Manual create/edit/delete for Narrative Graph nodes and edges
+- Tag registry create/edit/delete with safe deletion checks
+- Safe node deletion that refuses to silently drop connected edges
+- Properties JSON templates for common node types
+- Local rule-based approximate browsing across labels, aliases, tags, summaries, notes, properties, and neighbor context
+- Enhanced Entity Inspector for selected nodes and edges
 - Clear boundaries between controlled `tags`, free-form `aliases`, and free-form `notes`
 - `importance` on a 1-10 scale and `layer` values of `core`, `major`, `detail`, or `background`
 - Project settings with read-only Genesis fields
@@ -145,8 +150,9 @@ Not implemented in this stage:
 - GSAP timeline animation
 - 2D/3D graph visualization
 - React Flow graph editor
-- Complex approximate search
 - Vector search or embeddings
+- External search APIs
+- AI semantic search
 - Context Pack Builder
 - Narrative Graph injection into chapter generation prompts
 - AI automatic graph extraction or AI automatic tagging

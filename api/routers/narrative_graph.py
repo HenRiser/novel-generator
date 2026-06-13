@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from api.schemas import (
     NarrativeGraphEdgeRequest,
@@ -12,13 +12,20 @@ from api.schemas import (
     NarrativeGraphResponse,
     NarrativeGraphTagRequest,
     NarrativeGraphTagResponse,
+    NarrativeGraphTagUpdateRequest,
 )
 from config import PROJECT_ROOT
 from services.narrative_graph_service import (
     add_graph_edge,
     add_graph_node,
     add_graph_tag,
+    delete_graph_edge,
+    delete_graph_node,
+    delete_graph_tag,
     load_narrative_graph,
+    update_graph_edge,
+    update_graph_node,
+    update_graph_tag,
 )
 
 
@@ -92,6 +99,40 @@ def create_narrative_graph_tag(
     )
 
 
+@router.patch("/tags/{tag_name}", response_model=NarrativeGraphTagResponse)
+def update_narrative_graph_tag(
+    project_ref: str,
+    tag_name: str,
+    request: NarrativeGraphTagUpdateRequest,
+) -> NarrativeGraphTagResponse:
+    result = update_graph_tag(project_ref, tag_name, request.model_dump(exclude_unset=True))
+    if not result.ok:
+        _error(_status_for_message(result.message), "narrative_graph_tag_invalid", result.message)
+    return NarrativeGraphTagResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        graph=_sanitize_payload(result.graph),
+        views=_sanitize_payload(result.views),
+        tag=_sanitize_payload(result.tag or {}),
+        message=result.message,
+    )
+
+
+@router.delete("/tags/{tag_name}", response_model=NarrativeGraphTagResponse)
+def delete_narrative_graph_tag(project_ref: str, tag_name: str) -> NarrativeGraphTagResponse:
+    result = delete_graph_tag(project_ref, tag_name)
+    if not result.ok:
+        _error(_status_for_message(result.message), "narrative_graph_tag_invalid", result.message)
+    return NarrativeGraphTagResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        graph=_sanitize_payload(result.graph),
+        views=_sanitize_payload(result.views),
+        tag=_sanitize_payload(result.tag or {}),
+        message=result.message,
+    )
+
+
 @router.post("/nodes", response_model=NarrativeGraphNodeResponse)
 def create_narrative_graph_node(
     project_ref: str,
@@ -110,12 +151,84 @@ def create_narrative_graph_node(
     )
 
 
+@router.patch("/nodes/{node_id}", response_model=NarrativeGraphNodeResponse)
+def update_narrative_graph_node(
+    project_ref: str,
+    node_id: str,
+    request: NarrativeGraphNodeRequest,
+) -> NarrativeGraphNodeResponse:
+    result = update_graph_node(project_ref, node_id, request.model_dump(exclude_unset=True))
+    if not result.ok:
+        _error(_status_for_message(result.message), "narrative_graph_node_invalid", result.message)
+    return NarrativeGraphNodeResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        graph=_sanitize_payload(result.graph),
+        views=_sanitize_payload(result.views),
+        node=_sanitize_payload(result.node or {}),
+        message=result.message,
+    )
+
+
+@router.delete("/nodes/{node_id}", response_model=NarrativeGraphNodeResponse)
+def delete_narrative_graph_node(
+    project_ref: str,
+    node_id: str,
+    delete_edges: bool = Query(default=False),
+) -> NarrativeGraphNodeResponse:
+    result = delete_graph_node(project_ref, node_id, delete_edges=delete_edges)
+    if not result.ok:
+        _error(_status_for_message(result.message), "narrative_graph_node_invalid", result.message)
+    return NarrativeGraphNodeResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        graph=_sanitize_payload(result.graph),
+        views=_sanitize_payload(result.views),
+        node=_sanitize_payload(result.node or {}),
+        message=result.message,
+    )
+
+
 @router.post("/edges", response_model=NarrativeGraphEdgeResponse)
 def create_narrative_graph_edge(
     project_ref: str,
     request: NarrativeGraphEdgeRequest,
 ) -> NarrativeGraphEdgeResponse:
     result = add_graph_edge(project_ref, request.model_dump())
+    if not result.ok:
+        _error(_status_for_message(result.message), "narrative_graph_edge_invalid", result.message)
+    return NarrativeGraphEdgeResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        graph=_sanitize_payload(result.graph),
+        views=_sanitize_payload(result.views),
+        edge=_sanitize_payload(result.edge or {}),
+        message=result.message,
+    )
+
+
+@router.patch("/edges/{edge_id}", response_model=NarrativeGraphEdgeResponse)
+def update_narrative_graph_edge(
+    project_ref: str,
+    edge_id: str,
+    request: NarrativeGraphEdgeRequest,
+) -> NarrativeGraphEdgeResponse:
+    result = update_graph_edge(project_ref, edge_id, request.model_dump(exclude_unset=True))
+    if not result.ok:
+        _error(_status_for_message(result.message), "narrative_graph_edge_invalid", result.message)
+    return NarrativeGraphEdgeResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        graph=_sanitize_payload(result.graph),
+        views=_sanitize_payload(result.views),
+        edge=_sanitize_payload(result.edge or {}),
+        message=result.message,
+    )
+
+
+@router.delete("/edges/{edge_id}", response_model=NarrativeGraphEdgeResponse)
+def delete_narrative_graph_edge(project_ref: str, edge_id: str) -> NarrativeGraphEdgeResponse:
+    result = delete_graph_edge(project_ref, edge_id)
     if not result.ok:
         _error(_status_for_message(result.message), "narrative_graph_edge_invalid", result.message)
     return NarrativeGraphEdgeResponse(

@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph foundation endpoints, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
+The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -112,7 +112,7 @@ React opens to the Braipen home page by default. Clicking the logo mark or `Brai
 Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
 ```
 
-The creation page is for project creation, onboarding, outline/character generation, streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides the Narrative Graph foundation: manual nodes, edges, tag registry, and an Entity Inspector. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
+The creation page is for project creation, onboarding, outline/character generation, streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
 
 Current React support:
 
@@ -124,9 +124,13 @@ Current React support:
 - single-chapter streaming generation
 - live manuscript preview
 - generation status display
-- Narrative Graph foundation in the library page
-- manual nodes, edges, and tag registry management
-- Entity Inspector for selected nodes and edges
+- Narrative Graph usability foundation in the library page
+- manual create/edit/delete for nodes and edges
+- tag registry create/edit/delete with safe deletion checks
+- safe node deletion that refuses to silently drop connected edges
+- properties JSON templates for common node types
+- local rule-based approximate browsing across labels, aliases, tags, summaries, notes, properties, and neighbor context
+- enhanced Entity Inspector for selected nodes and edges
 - controlled `tags`, free-form `aliases`, and free-form `notes`
 - `importance` on a 1-10 scale and `layer` values of `core`, `major`, `detail`, or `background`
 - read-only Genesis settings display in the project settings page
@@ -154,7 +158,7 @@ Current React limits:
 - no GSAP timeline animation
 - no 2D/3D graph visualization
 - no React Flow graph editor
-- no complex approximate search, vector search, or embeddings
+- no vector search, embeddings, external search API, or AI semantic search
 - no Context Pack Builder
 - no Narrative Graph injection into chapter generation prompts
 - no AI auto-extraction or AI auto-tagging for graph entities
