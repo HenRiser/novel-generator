@@ -14,7 +14,7 @@ Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        
 - `创作` is for project creation, onboarding, outline/character generation, single-chapter streaming generation, synchronous fallback generation, and generation status.
 - `阅读` is for chapter navigation, long-form reading, current-chapter TXT export, and full-book TXT export.
 - `资料库` is a placeholder for the future Narrative Graph and creative knowledge browser.
-- `项目配置` currently shows selected project configuration as read-only data.
+- `项目配置` separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`.
 - `系统设置` shows API status, the API base URL, generation status, and startup command references.
 
 This stage does not add React Router, Three.js, React Three Fiber, GSAP, a full Narrative Graph, complete API Key management, or a replacement for the Streamlit legacy frontend.
@@ -116,6 +116,8 @@ Implemented:
 - Project list
 - Basic workspace project creation
 - Project detail summary
+- Project settings with read-only Genesis fields
+- Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
 - Chapter list
 - Chapter content reading
 - Single chapter TXT link
@@ -143,8 +145,8 @@ Not implemented in this stage:
 - Batch generation
 - Batch generation API
 - Batch streaming generation
-- Save APIs
-- Model or API Key settings
+- Full project save APIs beyond safe Generation Settings updates
+- Full model or API Key settings
 - Streamlit streaming UI
 - Cancellation API
 - Draft recovery for partial streaming output

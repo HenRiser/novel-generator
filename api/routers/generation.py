@@ -65,6 +65,10 @@ def _request_max_tokens(max_tokens: int | None) -> int:
     return int(max_tokens or DEFAULT_MAX_TOKENS)
 
 
+def _request_temperature(temperature: float | None) -> float:
+    return float(DEFAULT_TEMPERATURE if temperature is None else temperature)
+
+
 def _task_models(model: str) -> dict[str, str]:
     return {key: model for key in TASK_MODEL_KEYS}
 
@@ -219,7 +223,7 @@ def generate_project_outline_characters(
             project_ref=project_ref,
             project_config=project_config,
             task_models=_task_models(_request_model(payload.model)),
-            temperature=DEFAULT_TEMPERATURE,
+            temperature=_request_temperature(payload.temperature),
             max_tokens=_request_max_tokens(payload.max_tokens),
         )
         if not result.ok:
@@ -261,7 +265,7 @@ def generate_project_chapter(
             chapter_number=chapter_number,
             project_config=project_config,
             task_models=_task_models(_request_model(payload.model)),
-            temperature=DEFAULT_TEMPERATURE,
+            temperature=_request_temperature(payload.temperature),
             max_tokens=_request_max_tokens(payload.max_tokens),
             use_previous_context=True,
         )
@@ -304,6 +308,7 @@ def generate_project_chapter_stream(
 
     task_models = _task_models(_request_model(payload.model))
     max_tokens = _request_max_tokens(payload.max_tokens)
+    temperature = _request_temperature(payload.temperature)
 
     def stream_events():
         terminal_event_seen = False
@@ -314,7 +319,7 @@ def generate_project_chapter_stream(
                 chapter_number=chapter_number,
                 project_config=project_config,
                 task_models=task_models,
-                temperature=DEFAULT_TEMPERATURE,
+                temperature=temperature,
                 max_tokens=max_tokens,
                 use_previous_context=True,
             ):

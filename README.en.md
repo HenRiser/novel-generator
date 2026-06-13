@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, workspace project creation, project listing/detail, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
+The API exposes health, workspace project creation, project listing/detail, project generation settings updates, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -112,7 +112,7 @@ React opens to the Braipen home page by default. Clicking the logo mark or `Brai
 Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
 ```
 
-The creation page is for project creation, onboarding, outline/character generation, streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page is currently a placeholder for the future Narrative Graph. The project settings page is read-only in this stage. The system settings page shows API status, the API base URL, generation status, and startup command references.
+The creation page is for project creation, onboarding, outline/character generation, streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page is currently a placeholder for the future Narrative Graph. The project settings page now separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
 
 Current React support:
 
@@ -124,6 +124,8 @@ Current React support:
 - single-chapter streaming generation
 - live manuscript preview
 - generation status display
+- read-only Genesis settings display in the project settings page
+- editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
 - current-chapter TXT export and full-book TXT export
 
 The React "New novel project" button creates a `workspace/books/{book_id}/` project, saves the initial configuration and writing seed, refreshes the project list, and selects the new project. Creating a project does not call the model automatically. After creation, React guides the user to generate or update outline and character files, then generate the first chapter.
@@ -152,7 +154,7 @@ Current React limits:
 - no batch streaming generation
 - no cancellation API
 - no draft recovery for failed partial output
-- no model or API Key settings migration
+- no full model or API Key settings migration beyond per-project `model`, `max_tokens`, and `temperature`
 - no Streamlit streaming UI
 
 For frontend-specific notes, see `frontend/README.md`.

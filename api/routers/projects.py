@@ -13,9 +13,16 @@ from api.schemas import (
     CreateProjectResponse,
     ProjectDetailResponse,
     ProjectSummaryResponse,
+    UpdateGenerationSettingsRequest,
+    UpdateGenerationSettingsResponse,
 )
 from config import PROJECT_ROOT
-from services.project_service import create_workspace_project, list_project_summaries, load_project_detail
+from services.project_service import (
+    create_workspace_project,
+    list_project_summaries,
+    load_project_detail,
+    update_generation_settings,
+)
 from services.reader_service import (
     build_full_book_export_payload,
     build_reader_project_snapshot,
@@ -27,7 +34,8 @@ from services.reader_service import (
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 ChapterNumber = Annotated[int, Path(gt=0)]
 
-SENSITIVE_KEY_PARTS = ("api_key", "apikey", "token", "password", "secret")
+SENSITIVE_KEY_PARTS = ("api_key", "apikey", "password", "secret")
+SENSITIVE_EXACT_KEYS = ("token", "access_token", "refresh_token", "auth_token", "bearer_token")
 PROJECT_ROOT_TEXT = str(PROJECT_ROOT)
 
 
@@ -43,7 +51,7 @@ def _sanitize_config(value: Any) -> Any:
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
             lowered_key = str(key).lower()
-            if any(part in lowered_key for part in SENSITIVE_KEY_PARTS):
+            if lowered_key in SENSITIVE_EXACT_KEYS or any(part in lowered_key for part in SENSITIVE_KEY_PARTS):
                 sanitized[key] = "[redacted]"
             else:
                 sanitized[key] = _sanitize_config(item)
@@ -124,6 +132,31 @@ def get_project(project_ref: str) -> ProjectDetailResponse:
         project_ref=result.project_ref,
         title=result.title,
         config=_sanitize_config(result.config or {}),
+    )
+
+
+@router.patch("/{project_ref}/generation-settings", response_model=UpdateGenerationSettingsResponse)
+def update_project_generation_settings(
+    project_ref: str,
+    request: UpdateGenerationSettingsRequest,
+) -> UpdateGenerationSettingsResponse:
+    result = update_generation_settings(
+        project_ref=project_ref,
+        model=request.model,
+        max_tokens=request.max_tokens,
+        temperature=request.temperature,
+    )
+    if not result.ok:
+        message = result.message or "Generation settings could not be saved."
+        if message == "Project config was not found." or "not found" in message.lower():
+            _error(404, "project_not_found", "Project not found or unreadable.")
+        _error(400, "generation_settings_invalid", message)
+
+    return UpdateGenerationSettingsResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        config=_sanitize_config(result.config),
+        message=result.message,
     )
 
 

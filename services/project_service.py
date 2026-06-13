@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from project_context import (
 from .schemas import (
     ProjectCreateResult,
     ProjectDirectoryResult,
+    ProjectGenerationSettingsResult,
     ProjectLoadResult,
     ProjectSaveResult,
     ProjectSummary,
@@ -49,6 +51,10 @@ CREATE_PROJECT_MODEL_CHOICES = {"deepseek-v4-flash", "deepseek-v4-pro"}
 DEFAULT_CREATE_PROJECT_MODEL = "deepseek-v4-flash"
 DEFAULT_CREATE_PROJECT_MAX_TOKENS = 4000
 DEFAULT_CREATE_PROJECT_TEMPERATURE = 0.7
+GENERATION_MAX_TOKENS_MIN = 512
+GENERATION_MAX_TOKENS_MAX = 32768
+GENERATION_TEMPERATURE_MIN = 0.0
+GENERATION_TEMPERATURE_MAX = 2.0
 DEFAULT_CREATE_PROJECT_WORD_COUNT_RANGE = "3000-5000 字"
 
 
@@ -74,6 +80,28 @@ def _coerce_optional_float(value: Any, default: float) -> float | None:
     except (TypeError, ValueError):
         return None
     return coerced
+
+
+def _coerce_generation_max_tokens(value: Any) -> int | None:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    if isinstance(value, float) and not value.is_integer():
+        return None
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return None
+    return coerced
+
+
+def _coerce_generation_temperature(value: Any) -> float | None:
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        coerced = float(value)
+    except (TypeError, ValueError):
+        return None
+    return coerced if isfinite(coerced) else None
 
 
 def _workspace_support_dirs(ctx: Any) -> list[Path]:
@@ -420,6 +448,102 @@ def save_project_configuration(
         return ProjectSaveResult(False, project_ref=ref, message=f"项目配置保存失败：{exc}")
 
     return ProjectSaveResult(True, project_ref=ref, path=path, result_paths=[path])
+
+
+def update_generation_settings(
+    project_ref: str,
+    model: Any,
+    max_tokens: Any,
+    temperature: Any,
+    outputs_root: Path | None = None,
+    books_root: Path | None = None,
+) -> ProjectGenerationSettingsResult:
+    ref = str(project_ref or "").strip()
+    if not ref:
+        return ProjectGenerationSettingsResult(False, message="Project ref is required.")
+
+    cleaned_model = _clean_create_text(model)
+    if cleaned_model not in CREATE_PROJECT_MODEL_CHOICES:
+        return ProjectGenerationSettingsResult(
+            False,
+            project_ref=ref,
+            message="model must be deepseek-v4-flash or deepseek-v4-pro.",
+        )
+
+    resolved_max_tokens = _coerce_generation_max_tokens(max_tokens)
+    if (
+        resolved_max_tokens is None
+        or resolved_max_tokens < GENERATION_MAX_TOKENS_MIN
+        or resolved_max_tokens > GENERATION_MAX_TOKENS_MAX
+    ):
+        return ProjectGenerationSettingsResult(
+            False,
+            project_ref=ref,
+            message=(
+                f"max_tokens must be an integer between {GENERATION_MAX_TOKENS_MIN} "
+                f"and {GENERATION_MAX_TOKENS_MAX}."
+            ),
+        )
+
+    resolved_temperature = _coerce_generation_temperature(temperature)
+    if (
+        resolved_temperature is None
+        or resolved_temperature < GENERATION_TEMPERATURE_MIN
+        or resolved_temperature > GENERATION_TEMPERATURE_MAX
+    ):
+        return ProjectGenerationSettingsResult(
+            False,
+            project_ref=ref,
+            message=(
+                f"temperature must be a number between {GENERATION_TEMPERATURE_MIN:g} "
+                f"and {GENERATION_TEMPERATURE_MAX:g}."
+            ),
+        )
+
+    try:
+        ctx = resolve_project_context(ref, outputs_root=outputs_root, books_root=books_root)
+    except (FileNotFoundError, ValueError) as exc:
+        return ProjectGenerationSettingsResult(False, project_ref=ref, message=str(exc))
+
+    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
+        return ProjectGenerationSettingsResult(
+            False,
+            project_ref=ref,
+            message="Generation settings can only be saved for workspace projects.",
+        )
+
+    try:
+        project_config = _load_project_config(ref, outputs_root=outputs_root, books_root=books_root)
+    except (FileNotFoundError, ValueError) as exc:
+        return ProjectGenerationSettingsResult(False, project_ref=ref, message=str(exc))
+    if project_config is None:
+        return ProjectGenerationSettingsResult(
+            False,
+            project_ref=ref,
+            message="Project config was not found.",
+        )
+
+    updated_config = dict(project_config)
+    updated_config["model"] = cleaned_model
+    updated_config["max_tokens"] = resolved_max_tokens
+    updated_config["temperature"] = resolved_temperature
+
+    try:
+        path = _save_project_config(ref, updated_config, outputs_root=outputs_root, books_root=books_root)
+    except (OSError, FileNotFoundError, ValueError) as exc:
+        return ProjectGenerationSettingsResult(False, project_ref=ref, message=f"Generation settings save failed: {exc}")
+
+    return ProjectGenerationSettingsResult(
+        True,
+        project_ref=ref,
+        path=path,
+        config={
+            "model": cleaned_model,
+            "max_tokens": resolved_max_tokens,
+            "temperature": resolved_temperature,
+        },
+        message="Generation settings saved.",
+    )
 
 
 def save_setting_assets(

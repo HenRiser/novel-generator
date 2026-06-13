@@ -915,6 +915,14 @@ code {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.project-settings-layout {
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 520px);
+  margin: 0 auto;
+  max-width: 1280px;
+}
+
 .settings-item,
 .system-list div {
   background: var(--color-surface-quiet);
@@ -935,6 +943,33 @@ code {
 .settings-item strong,
 .system-list dd {
   overflow-wrap: anywhere;
+}
+
+.generation-settings-form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.generation-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.range-field {
+  grid-column: 1 / -1;
+}
+
+.range-field input[type="range"] {
+  accent-color: var(--color-primary);
+  padding: 0;
+}
+
+.range-field small {
+  color: var(--color-text-muted);
+  line-height: 1.55;
+}
+
+.settings-actions {
+  flex-wrap: wrap;
 }
 
 .library-module {
@@ -1059,6 +1094,11 @@ code {
 
 .success-text {
   color: var(--color-success);
+  overflow-wrap: anywhere;
+}
+
+.warning-text {
+  color: var(--color-warning);
   overflow-wrap: anywhere;
 }
 
@@ -1317,6 +1357,7 @@ code {
   }
 
   .workspace-layout,
+  .project-settings-layout,
   .tool-stack {
     grid-template-columns: 1fr;
   }

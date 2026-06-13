@@ -8,6 +8,8 @@ import type {
   ChapterStreamHandlers,
   CreateProjectRequest,
   CreateProjectResponse,
+  GenerationSettingsRequest,
+  GenerationSettingsResponse,
   GenerationRequest,
   GenerationStatus,
   HealthResponse,
@@ -160,6 +162,16 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+function patchJson<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
 function isStreamEvent(payload: unknown): payload is ChapterStreamEvent {
   return Boolean(payload && typeof payload === "object" && "type" in payload);
 }
@@ -238,6 +250,16 @@ export function createProject(request: CreateProjectRequest): Promise<CreateProj
 
 export function getProject(projectRef: string): Promise<ProjectDetail> {
   return apiFetch<ProjectDetail>(`/api/projects/${projectPath(projectRef)}`);
+}
+
+export function updateGenerationSettings(
+  projectRef: string,
+  request: GenerationSettingsRequest,
+): Promise<GenerationSettingsResponse> {
+  return patchJson<GenerationSettingsResponse>(
+    `/api/projects/${projectPath(projectRef)}/generation-settings`,
+    request,
+  );
 }
 
 export function getChapters(projectRef: string): Promise<ChapterSummary[]> {

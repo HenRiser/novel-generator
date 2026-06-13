@@ -67,6 +67,24 @@ export type GenerationStatus = {
 export type GenerationRequest = {
   model: string;
   max_tokens: number;
+  temperature: number;
+};
+
+export type GenerationSettingsRequest = {
+  model: "deepseek-v4-flash" | "deepseek-v4-pro";
+  max_tokens: number;
+  temperature: number;
+};
+
+export type GenerationSettingsResponse = {
+  ok: boolean;
+  project_ref: string;
+  config: {
+    model: string;
+    max_tokens: number;
+    temperature: number;
+  };
+  message: string;
 };
 
 export type OutlineCharactersGenerationResponse = {

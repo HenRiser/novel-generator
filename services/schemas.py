@@ -130,6 +130,15 @@ class ProjectSaveResult:
 
 
 @dataclass(frozen=True)
+class ProjectGenerationSettingsResult:
+    ok: bool
+    project_ref: str = ""
+    config: dict[str, Any] = field(default_factory=dict)
+    path: Path | None = None
+    message: str = ""
+
+
+@dataclass(frozen=True)
 class ProjectCreateResult:
     ok: bool
     project_ref: str = ""

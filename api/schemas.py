@@ -49,6 +49,19 @@ class CreateProjectResponse(BaseModel):
     message: str = ""
 
 
+class UpdateGenerationSettingsRequest(BaseModel):
+    model: str | None = None
+    max_tokens: Any = None
+    temperature: Any = None
+
+
+class UpdateGenerationSettingsResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    config: dict[str, Any]
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str
@@ -68,9 +81,11 @@ class ChapterContentResponse(BaseModel):
 class GenerateOutlineCharactersRequest(BaseModel):
     model: str | None = None
     max_tokens: int | None = Field(default=None, ge=512, le=32768)
+    temperature: float | None = Field(default=None, ge=0, le=2)
 
 
 class GenerateChapterRequest(BaseModel):
     model: str | None = None
     max_tokens: int | None = Field(default=None, ge=512, le=32768)
+    temperature: float | None = Field(default=None, ge=0, le=2)
     writing_mode: str | None = None

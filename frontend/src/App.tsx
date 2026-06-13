@@ -14,6 +14,7 @@ import {
   getHealth,
   getProject,
   getProjects,
+  updateGenerationSettings,
   ApiRequestError,
   safePublicMessage,
 } from "./api";
@@ -30,6 +31,7 @@ import type {
   ChapterStreamDoneEvent,
   CreateProjectRequest,
   GenerationRequest,
+  GenerationSettingsRequest,
   GenerationStatus,
   OutlineCharactersGenerationResponse,
   ProjectOnboardingState,
@@ -40,7 +42,10 @@ import type {
 const DEFAULT_GENERATION_REQUEST: GenerationRequest = {
   model: "deepseek-v4-pro",
   max_tokens: 4000,
+  temperature: 0.7,
 };
+
+const GENERATION_MODEL_OPTIONS = ["deepseek-v4-flash", "deepseek-v4-pro"] as const;
 
 const DEFAULT_CREATE_PROJECT_FORM: CreateProjectRequest = {
   title: "",
@@ -67,6 +72,38 @@ function asText(value: unknown, fallback = "未填写"): string {
 
 function configValue(config: Record<string, unknown> | undefined, key: string): unknown {
   return config ? config[key] : undefined;
+}
+
+function configNumberValue(
+  config: Record<string, unknown> | undefined,
+  key: string,
+  fallback: number,
+): number {
+  const value = configValue(config, key);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function generationRequestFromConfig(config: Record<string, unknown> | undefined): GenerationRequest {
+  const modelValue = configValue(config, "model");
+  const model =
+    typeof modelValue === "string" &&
+    (GENERATION_MODEL_OPTIONS as readonly string[]).includes(modelValue)
+      ? modelValue
+      : DEFAULT_GENERATION_REQUEST.model;
+  return {
+    model,
+    max_tokens: Math.trunc(configNumberValue(config, "max_tokens", DEFAULT_GENERATION_REQUEST.max_tokens)),
+    temperature: configNumberValue(config, "temperature", DEFAULT_GENERATION_REQUEST.temperature),
+  };
 }
 
 function settingOptionValue(config: Record<string, unknown> | undefined, key: string): unknown {
@@ -558,6 +595,9 @@ export function App() {
     () => onboardingStateForProject(selectedProjectRef, chapters, assetReadyProjectRefs),
     [assetReadyProjectRefs, chapters, selectedProjectRef],
   );
+  const projectConfig = projectDetail?.config;
+  const generationRequest = useMemo(() => generationRequestFromConfig(projectConfig), [projectConfig]);
+
   const refreshGenerationStatus = useCallback(async () => {
     setGenerationStatusLoading(true);
     setGenerationStatusError("");
@@ -880,7 +920,7 @@ export function App() {
 
     setOutlineGenerating(true);
     try {
-      const result = await generateOutlineCharacters(selectedProjectRef, DEFAULT_GENERATION_REQUEST);
+      const result = await generateOutlineCharacters(selectedProjectRef, generationRequest);
       setGenerationMessage(outlineSuccessMessage(result));
       setAssetReadyProjectRefs((current) =>
         current.includes(selectedProjectRef) ? current : [...current, selectedProjectRef],
@@ -892,7 +932,7 @@ export function App() {
     } finally {
       setOutlineGenerating(false);
     }
-  }, [ensureGenerationIdle, refreshGenerationStatus, selectedProjectRef]);
+  }, [ensureGenerationIdle, generationRequest, refreshGenerationStatus, selectedProjectRef]);
 
   const handleGenerateChapterStream = useCallback(async (chapterNumberOverride?: number) => {
     if (!selectedProjectRef) {
@@ -919,7 +959,7 @@ export function App() {
 
     setChapterStreaming(true);
     try {
-      const result = await generateChapterStream(selectedProjectRef, chapterNumber, DEFAULT_GENERATION_REQUEST, {
+      const result = await generateChapterStream(selectedProjectRef, chapterNumber, generationRequest, {
         onDelta: (text) => {
           setStreamingContent((current) => `${current}${text}`);
           setStreamingPreviewStatus("streaming");
@@ -955,6 +995,7 @@ export function App() {
   }, [
     chapterNumberInput,
     ensureGenerationIdle,
+    generationRequest,
     loadChapterAfterGeneration,
     refreshGenerationStatus,
     refreshProjectAndChapters,
@@ -986,7 +1027,7 @@ export function App() {
 
     setChapterGenerating(true);
     try {
-      const result = await generateChapter(selectedProjectRef, chapterNumber, DEFAULT_GENERATION_REQUEST);
+      const result = await generateChapter(selectedProjectRef, chapterNumber, generationRequest);
       setGenerationMessage(chapterSuccessMessage(result));
       await refreshProjectAndChapters(selectedProjectRef);
       const loaded = await loadChapterAfterGeneration(selectedProjectRef, result.chapter_number || chapterNumber);
@@ -1003,13 +1044,26 @@ export function App() {
   }, [
     chapterNumberInput,
     ensureGenerationIdle,
+    generationRequest,
     loadChapterAfterGeneration,
     refreshGenerationStatus,
     refreshProjectAndChapters,
     selectedProjectRef,
   ]);
 
-  const projectConfig = projectDetail?.config;
+  const handleUpdateGenerationSettings = useCallback(
+    async (settings: GenerationSettingsRequest) => {
+      if (!selectedProjectRef) {
+        throw new Error("请先选择项目。");
+      }
+      const result = await updateGenerationSettings(selectedProjectRef, settings);
+      const detail = await getProject(selectedProjectRef);
+      setProjectDetail(detail);
+      await loadProjects();
+      return result;
+    },
+    [loadProjects, selectedProjectRef],
+  );
 
   const renderProjectListPanel = () => (
     <section className="panel project-list">
@@ -1236,8 +1290,8 @@ export function App() {
         <div className="hint-box">
           <p>默认使用流式生成；同步生成仅作为流式异常时的备用 / 调试入口。</p>
           <p>
-            建议下一章：第 {suggestedChapterNumber} 章；模型：{DEFAULT_GENERATION_REQUEST.model}；
-            max_tokens：{DEFAULT_GENERATION_REQUEST.max_tokens}
+            建议下一章：第 {suggestedChapterNumber} 章；模型：{generationRequest.model}；
+            max_tokens：{generationRequest.max_tokens}；temperature：{generationRequest.temperature}
           </p>
           <p>如果生成内容明显中断，可提高 max_tokens 或重新生成该章节。</p>
         </div>
@@ -1392,6 +1446,8 @@ export function App() {
           projectDetail={projectDetail}
           projectLoading={projectLoading}
           projectError={projectError}
+          apiStatus={apiStatus}
+          onSaveGenerationSettings={handleUpdateGenerationSettings}
         />
       );
     }
