@@ -1,6 +1,6 @@
 # React Reader / Generation Foundation
 
-This frontend is the React reader and generation surface for `novel-generator`. The React UI now uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, and can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
+This frontend is the React reader and generation surface for `novel-generator`. The React UI now uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph, and can manually create post-generation Story Delta / Knowledge Draft analysis. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
 
 ## Workspace navigation
 
@@ -20,6 +20,8 @@ Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        
 The library page has moved beyond the initial foundation: it supports safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector.
 
 The creation page now includes Context Pack Builder foundation support. It previews a structured Narrative Context Pack selected from the Narrative Graph by local rules, lets the user control `min_importance`, node and edge limits, unresolved foreshadowing, and neighbor inclusion, and keeps context-assisted generation disabled by default. It does not inject the full graph by default.
+
+The creation page also includes Story Delta + Next Chapter Proposal foundation support. This uses plan B: after chapter prose has already been saved, the user can manually trigger a second analysis pass. Story Delta describes what happened in the current chapter, Next Chapter Proposal describes suggested planning for the next chapter, and Knowledge Draft stores pending-review candidate changes. These drafts are not automatically written to character cards or `narrative_graph.json`.
 
 This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, AI automatic graph extraction, AI automatic graph updates, complete API Key management, or a replacement for the Streamlit legacy frontend.
 
@@ -135,6 +137,10 @@ Implemented:
 - User controls for `min_importance`, `max_nodes`, `max_edges`, unresolved foreshadowing inclusion, and neighbor inclusion
 - Optional context-assisted chapter generation, disabled by default
 - Structured preview with selected nodes, selected edges, stats, warnings, and expandable prompt text
+- Story Delta + Next Chapter Proposal foundation in the creation page
+- Manual post-generation analysis after chapter prose is saved
+- Knowledge Draft candidate changes with `pending_review` status and `requires_review=true`
+- Dry-run analysis mode for local testing without calling DeepSeek
 - Project settings with read-only Genesis fields
 - Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
 - Chapter list
@@ -165,6 +171,9 @@ Not implemented in this stage:
 - Vector or AI-based Context Pack selection
 - Automatic Narrative Graph updates from generated chapters
 - Foreshadowing conflict detection
+- Single-pass chapter prose plus metadata trailer output
+- Automatic character-card or Narrative Graph merge from Story Delta
+- Complete Review & Merge workflow for Knowledge Drafts
 - AI automatic graph extraction or AI automatic tagging
 - Full project management
 - Project deletion / rename / archive
@@ -187,13 +196,15 @@ Streamlit remains available for the legacy full workflow:
 .\start.bat
 ```
 
-Use React for basic project creation, reading projects, outline/character generation, Context Pack preview, optional context-assisted single-chapter generation, streaming preview, and TXT export:
+Use React for basic project creation, reading projects, outline/character generation, Context Pack preview, optional context-assisted single-chapter generation, Story Delta draft analysis, streaming preview, and TXT export:
 
 ```bat
 .\start-react.bat
 ```
 
 Context Pack preview in React calls `POST /api/projects/{project_ref}/context-pack/preview`. The preview reads the current Narrative Graph, returns a structured pack plus prompt text, and does not call the model or write graph/chapter files.
+
+Story Delta analysis in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/story-delta/analyze`. It is manually triggered after a chapter exists. Dry-run mode does not call DeepSeek. Non-dry-run mode performs a second model call dedicated to analysis. Successful analysis writes pending-review draft files under `workspace/books/{book_id}/memory/` and does not modify the official chapter file, character cards, outline, or `narrative_graph.json`.
 
 Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button. When the user enables context-assisted generation, React sends the previewed Narrative Context Pack text as optional generation context; when disabled or absent, the request path stays unchanged.
 

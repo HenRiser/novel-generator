@@ -15,6 +15,8 @@ import type {
   GenerationRequest,
   GenerationStatus,
   HealthResponse,
+  KnowledgeDraftListResponse,
+  KnowledgeDraftResponse,
   NarrativeGraphEdgeRequest,
   NarrativeGraphEdgeResponse,
   NarrativeGraphNodeRequest,
@@ -27,6 +29,9 @@ import type {
   OutlineCharactersGenerationResponse,
   ProjectDetail,
   ProjectSummary,
+  StoryDeltaAnalyzeRequest,
+  StoryDeltaAnalyzeResponse,
+  StoryDeltaListResponse,
 } from "./types";
 
 export const API_BASE_URL =
@@ -382,6 +387,31 @@ export function previewContextPack(
   return postJson<ContextPackPreviewResponse>(
     `/api/projects/${projectPath(projectRef)}/context-pack/preview`,
     request,
+  );
+}
+
+export function analyzeStoryDelta(
+  projectRef: string,
+  chapterNumber: number,
+  request: StoryDeltaAnalyzeRequest,
+): Promise<StoryDeltaAnalyzeResponse> {
+  return postJson<StoryDeltaAnalyzeResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/story-delta/analyze`,
+    request,
+  );
+}
+
+export function listStoryDeltas(projectRef: string): Promise<StoryDeltaListResponse> {
+  return apiFetch<StoryDeltaListResponse>(`/api/projects/${projectPath(projectRef)}/story-deltas`);
+}
+
+export function listKnowledgeDrafts(projectRef: string): Promise<KnowledgeDraftListResponse> {
+  return apiFetch<KnowledgeDraftListResponse>(`/api/projects/${projectPath(projectRef)}/knowledge-drafts`);
+}
+
+export function getKnowledgeDraft(projectRef: string, draftId: string): Promise<KnowledgeDraftResponse> {
+  return apiFetch<KnowledgeDraftResponse>(
+    `/api/projects/${projectPath(projectRef)}/knowledge-drafts/${encodeURIComponent(draftId)}`,
   );
 }
 

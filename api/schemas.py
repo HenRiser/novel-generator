@@ -141,6 +141,46 @@ class ContextPackPreviewResponse(BaseModel):
     message: str = ""
 
 
+class StoryDeltaAnalyzeRequest(BaseModel):
+    include_next_chapter_proposal: bool | None = True
+    include_knowledge_draft: bool | None = True
+    dry_run: bool | None = False
+    mock_response: Any = None
+    context_pack_summary: str | None = None
+
+
+class StoryDeltaAnalyzeResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapter_number: int
+    story_delta: dict[str, Any]
+    next_chapter_proposal: dict[str, Any]
+    knowledge_draft: dict[str, Any]
+    warnings: list[str] = []
+    message: str = ""
+
+
+class StoryDeltaListResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    items: list[dict[str, Any]]
+    message: str = ""
+
+
+class KnowledgeDraftListResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    drafts: list[dict[str, Any]]
+    message: str = ""
+
+
+class KnowledgeDraftResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    draft: dict[str, Any]
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

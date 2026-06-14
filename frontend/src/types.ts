@@ -297,6 +297,90 @@ export type ContextPackPreviewResponse = {
   message: string;
 };
 
+export type StoryDelta = {
+  new_characters: Array<Record<string, unknown>>;
+  character_updates: Array<Record<string, unknown>>;
+  new_scenes: Array<Record<string, unknown>>;
+  new_items: Array<Record<string, unknown>>;
+  new_events: Array<Record<string, unknown>>;
+  foreshadowing_updates: Array<Record<string, unknown>>;
+  relationship_updates: Array<Record<string, unknown>>;
+  world_fact_updates: Array<Record<string, unknown>>;
+};
+
+export type NextChapterProposal = {
+  target_chapter_number: number;
+  suggested_goal: string;
+  suggested_scenes: Array<Record<string, unknown>>;
+  suggested_conflicts: Array<Record<string, unknown>>;
+  suggested_foreshadowing_moves: Array<Record<string, unknown>>;
+  suggested_new_nodes: Array<Record<string, unknown>>;
+  suggested_new_edges: Array<Record<string, unknown>>;
+  suggested_plot_directions: Array<Record<string, unknown>>;
+  risks: Array<unknown>;
+};
+
+export type CandidateChange = {
+  id: string;
+  operation: string;
+  target: string;
+  source: "story_delta" | "next_chapter_proposal" | string;
+  confidence?: number;
+  requires_review: boolean;
+  evidence?: string;
+  rationale?: string;
+  payload: Record<string, unknown>;
+};
+
+export type KnowledgeDraft = {
+  id: string;
+  chapter_number: number;
+  source_delta_id: string;
+  status: "pending_review" | "accepted" | "rejected" | "superseded" | string;
+  candidate_changes: CandidateChange[];
+  created_at: string;
+};
+
+export type StoryDeltaAnalyzeRequest = {
+  include_next_chapter_proposal: boolean;
+  include_knowledge_draft: boolean;
+  dry_run: boolean;
+  mock_response?: unknown;
+  context_pack_summary?: string;
+};
+
+export type StoryDeltaAnalyzeResponse = {
+  ok: boolean;
+  project_ref: string;
+  chapter_number: number;
+  story_delta: StoryDelta;
+  next_chapter_proposal: NextChapterProposal;
+  knowledge_draft: KnowledgeDraft;
+  warnings: string[];
+  message: string;
+};
+
+export type StoryDeltaListResponse = {
+  ok: boolean;
+  project_ref: string;
+  items: Array<Record<string, unknown>>;
+  message: string;
+};
+
+export type KnowledgeDraftListResponse = {
+  ok: boolean;
+  project_ref: string;
+  drafts: KnowledgeDraft[];
+  message: string;
+};
+
+export type KnowledgeDraftResponse = {
+  ok: boolean;
+  project_ref: string;
+  draft: KnowledgeDraft;
+  message: string;
+};
+
 export type OutlineCharactersGenerationResponse = {
   ok: boolean;
   outline_file: string;

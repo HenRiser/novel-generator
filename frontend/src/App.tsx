@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   API_BASE_URL,
+  analyzeStoryDelta,
   createProject,
   exportChapterUrl,
   exportFullBookUrl,
@@ -40,6 +41,7 @@ import type {
   ProjectOnboardingState,
   ProjectDetail,
   ProjectSummary,
+  StoryDeltaAnalyzeResponse,
 } from "./types";
 
 const DEFAULT_GENERATION_REQUEST: GenerationRequest = {
@@ -295,6 +297,23 @@ function streamSaveSummary(result: ChapterStreamDoneEvent | null): string {
   ]
     .filter(Boolean)
     .join("；");
+}
+
+function jsonPreview(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}, null, 2);
+  } catch {
+    return String(value ?? "");
+  }
+}
+
+function storyDeltaItemCount(result: StoryDeltaAnalyzeResponse | null): number {
+  if (!result) {
+    return 0;
+  }
+  return Object.values(result.story_delta || {}).reduce((total, value) => {
+    return total + (Array.isArray(value) ? value.length : 0);
+  }, 0);
 }
 
 function onboardingStateForProject(
@@ -592,6 +611,14 @@ export function App() {
   const [contextPackError, setContextPackError] = useState("");
   const [contextPackPromptExpanded, setContextPackPromptExpanded] = useState(false);
   const [useContextPackForGeneration, setUseContextPackForGeneration] = useState(false);
+  const [storyDeltaChapterInput, setStoryDeltaChapterInput] = useState("1");
+  const [storyDeltaIncludeNext, setStoryDeltaIncludeNext] = useState(true);
+  const [storyDeltaIncludeDraft, setStoryDeltaIncludeDraft] = useState(true);
+  const [storyDeltaDryRun, setStoryDeltaDryRun] = useState(true);
+  const [storyDeltaLoading, setStoryDeltaLoading] = useState(false);
+  const [storyDeltaError, setStoryDeltaError] = useState("");
+  const [storyDeltaMessage, setStoryDeltaMessage] = useState("");
+  const [storyDeltaResult, setStoryDeltaResult] = useState<StoryDeltaAnalyzeResponse | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -622,6 +649,9 @@ export function App() {
     setContextPackError("");
     setContextPackPromptExpanded(false);
     setUseContextPackForGeneration(false);
+    setStoryDeltaResult(null);
+    setStoryDeltaError("");
+    setStoryDeltaMessage("");
   }, [selectedProjectRef]);
 
   useEffect(() => {
@@ -630,6 +660,13 @@ export function App() {
       setContextPackForm((current) => ({ ...current, chapter_number: parsed }));
     }
   }, [chapterNumberInput]);
+
+  useEffect(() => {
+    const number = selectedChapterNumber ?? Number.parseInt(chapterNumberInput, 10);
+    if (Number.isInteger(number) && number > 0) {
+      setStoryDeltaChapterInput(String(number));
+    }
+  }, [chapterNumberInput, selectedChapterNumber]);
 
   const refreshGenerationStatus = useCallback(async () => {
     setGenerationStatusLoading(true);
@@ -1025,6 +1062,58 @@ export function App() {
       setContextPackLoading(false);
     }
   }, [apiStatus, buildContextPackPayload, selectedProjectRef]);
+
+  const handleAnalyzeStoryDelta = useCallback(async () => {
+    if (!selectedProjectRef) {
+      setStoryDeltaError("Please select a workspace project before analyzing chapter changes.");
+      return;
+    }
+    if (apiStatus !== "online") {
+      setStoryDeltaError("API Offline. Start FastAPI before analyzing Story Delta.");
+      return;
+    }
+    const chapterNumber = Number.parseInt(storyDeltaChapterInput, 10);
+    if (!Number.isInteger(chapterNumber) || chapterNumber < 1) {
+      setStoryDeltaError("chapter_number must be a positive integer.");
+      return;
+    }
+    if (!chapters.some((chapter) => chapter.chapter_number === chapterNumber)) {
+      setStoryDeltaError(`Chapter ${chapterNumber} does not exist in the current project.`);
+      return;
+    }
+
+    setStoryDeltaLoading(true);
+    setStoryDeltaError("");
+    setStoryDeltaMessage("");
+    try {
+      const result = await analyzeStoryDelta(selectedProjectRef, chapterNumber, {
+        include_next_chapter_proposal: storyDeltaIncludeNext,
+        include_knowledge_draft: storyDeltaIncludeDraft,
+        dry_run: storyDeltaDryRun,
+        context_pack_summary: contextPackPreview?.prompt_text || "",
+      });
+      setStoryDeltaResult(result);
+      setStoryDeltaMessage(
+        storyDeltaDryRun
+          ? "Dry-run analysis saved as pending_review draft. No DeepSeek call was made."
+          : "Story Delta analysis saved as pending_review draft.",
+      );
+    } catch (error) {
+      setStoryDeltaResult(null);
+      setStoryDeltaError(publicErrorMessage(error, "Story Delta analysis failed."));
+    } finally {
+      setStoryDeltaLoading(false);
+    }
+  }, [
+    apiStatus,
+    chapters,
+    contextPackPreview,
+    selectedProjectRef,
+    storyDeltaChapterInput,
+    storyDeltaDryRun,
+    storyDeltaIncludeDraft,
+    storyDeltaIncludeNext,
+  ]);
 
   const generationRequestWithOptionalContext = useCallback((): GenerationRequest => {
     const promptText = contextPackPreview?.prompt_text?.trim();
@@ -1535,6 +1624,175 @@ export function App() {
     );
   };
 
+  const renderStoryDeltaPanel = () => {
+    const deltaEntries = storyDeltaResult
+      ? Object.entries(storyDeltaResult.story_delta || {}).filter(([, value]) => Array.isArray(value))
+      : [];
+    const proposal = storyDeltaResult?.next_chapter_proposal ?? null;
+    const changes = storyDeltaResult?.knowledge_draft?.candidate_changes ?? [];
+    const totalDeltaItems = storyDeltaItemCount(storyDeltaResult);
+
+    return (
+      <section className="panel story-delta-panel">
+        <div className="panel-header">
+          <div>
+            <span className="section-kicker">Story Delta</span>
+            <h2>章节设定分析</h2>
+          </div>
+          <span className="status-badge">
+            {storyDeltaLoading ? "Analyzing" : storyDeltaResult ? "Draft saved" : "Manual"}
+          </span>
+        </div>
+
+        <p className="review-notice">
+          方案 B：正文保存后再手动触发第二次分析。分析结果只进入 pending_review 草稿层，尚未写入正式人物卡或 Narrative Graph。
+        </p>
+
+        <div className="story-delta-controls">
+          <label className="field-stack">
+            <span>chapter_number</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={storyDeltaChapterInput}
+              onChange={(event) => setStoryDeltaChapterInput(event.target.value)}
+              disabled={!selectedProjectRef || storyDeltaLoading}
+            />
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={storyDeltaIncludeNext}
+              onChange={(event) => setStoryDeltaIncludeNext(event.target.checked)}
+              disabled={!selectedProjectRef || storyDeltaLoading}
+            />
+            <span>包含下一章预设置建议</span>
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={storyDeltaIncludeDraft}
+              onChange={(event) => setStoryDeltaIncludeDraft(event.target.checked)}
+              disabled={!selectedProjectRef || storyDeltaLoading}
+            />
+            <span>生成 Knowledge Draft</span>
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={storyDeltaDryRun}
+              onChange={(event) => setStoryDeltaDryRun(event.target.checked)}
+              disabled={!selectedProjectRef || storyDeltaLoading}
+            />
+            <span>dry-run（不调用 DeepSeek）</span>
+          </label>
+        </div>
+
+        <div className="context-pack-actions">
+          <button
+            className="button secondary-button"
+            type="button"
+            onClick={() => void handleAnalyzeStoryDelta()}
+            disabled={!selectedProjectRef || apiStatus !== "online" || storyDeltaLoading}
+          >
+            {storyDeltaLoading ? "正在分析本章设定变化..." : "分析本章设定变化"}
+          </button>
+        </div>
+
+        {!selectedProjectRef && <p className="empty-state">请先在创作页创建或选择一个 workspace 项目。</p>}
+        {apiStatus !== "online" && <p className="state-text error-text">API Offline. 无法分析 Story Delta。</p>}
+        {storyDeltaMessage && <p className="state-text success-text">{storyDeltaMessage}</p>}
+        {storyDeltaError && <p className="state-text error-text">{storyDeltaError}</p>}
+
+        {storyDeltaResult && (
+          <div className="story-delta-result">
+            <div className="story-delta-stats">
+              <div>
+                <span>chapter</span>
+                <strong>{storyDeltaResult.chapter_number}</strong>
+              </div>
+              <div>
+                <span>story delta items</span>
+                <strong>{totalDeltaItems}</strong>
+              </div>
+              <div>
+                <span>candidate changes</span>
+                <strong>{changes.length}</strong>
+              </div>
+              <div>
+                <span>draft status</span>
+                <strong>{storyDeltaResult.knowledge_draft?.status || "-"}</strong>
+              </div>
+            </div>
+
+            {storyDeltaResult.warnings.length > 0 && (
+              <div className="context-pack-warnings">
+                {storyDeltaResult.warnings.map((warning) => (
+                  <p key={warning} className="state-text warning-text">{warning}</p>
+                ))}
+              </div>
+            )}
+
+            <div className="story-delta-grid">
+              <section className="story-delta-section">
+                <h3>Story Delta</h3>
+                <p className="section-note">本章已经发生的事实变化。</p>
+                {deltaEntries.map(([key, value]) => {
+                  const items = Array.isArray(value) ? value : [];
+                  return (
+                    <article className="story-delta-group" key={key}>
+                      <strong>{key}</strong>
+                      <span>{items.length} item(s)</span>
+                      {items.slice(0, 3).map((item, index) => (
+                        <pre className="json-snippet" key={`${key}-${index}`}>{jsonPreview(item)}</pre>
+                      ))}
+                    </article>
+                  );
+                })}
+              </section>
+
+              <section className="story-delta-section">
+                <h3>Next Chapter Proposal</h3>
+                <p className="section-note">下一章建议规划，不是已发生事实。</p>
+                {proposal && (
+                  <>
+                    <div className="proposal-goal">
+                      <span>target chapter</span>
+                      <strong>{proposal.target_chapter_number || "-"}</strong>
+                    </div>
+                    <pre className="json-snippet">{jsonPreview(proposal)}</pre>
+                  </>
+                )}
+              </section>
+            </div>
+
+            <section className="story-delta-section">
+              <h3>Knowledge Draft candidate_changes</h3>
+              <p className="section-note">候选变更必须人工审核；requires_review 应始终为 true。</p>
+              {changes.length === 0 && <p className="empty-state">当前没有 candidate_changes。</p>}
+              <div className="candidate-change-list">
+                {changes.map((change) => (
+                  <article className="candidate-change-card" key={change.id}>
+                    <div>
+                      <strong>{change.operation}</strong>
+                      <span>{change.source} → {change.target}</span>
+                    </div>
+                    <span className="status-badge">{change.requires_review ? "requires_review" : "review missing"}</span>
+                    {(change.evidence || change.rationale) && (
+                      <p>{change.evidence || change.rationale}</p>
+                    )}
+                    <pre className="json-snippet">{jsonPreview(change.payload)}</pre>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderGenerationPanel = () => (
     <aside className="tool-stack" aria-label="生成与状态">
       <section className="panel generation-panel">
@@ -1643,6 +1901,8 @@ export function App() {
       </section>
 
       {renderContextPackPanel()}
+
+      {renderStoryDeltaPanel()}
 
       {apiStatus === "online" && (
         <section className={`panel generation-status-card ${generationStatusClass(generationStatus)}`} aria-live="polite">

@@ -1,0 +1,853 @@
+from __future__ import annotations
+
+import json
+import re
+import secrets
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from deepseek_client import DeepSeekClientError, generate_text
+from file_manager import read_latest_characters, read_latest_outline, resolve_project_context
+from project_context import WORKSPACE_STORAGE_KIND
+
+from .narrative_graph_service import load_narrative_graph
+from .project_service import load_project_detail
+from .reader_service import read_chapter_for_display
+
+
+DOCUMENT_VERSION = 1
+MEMORY_DIR_NAME = "memory"
+STORY_DELTAS_NAME = "story_deltas.json"
+KNOWLEDGE_DRAFTS_NAME = "knowledge_drafts.json"
+DEFAULT_STORY_DELTA = {
+    "new_characters": [],
+    "character_updates": [],
+    "new_scenes": [],
+    "new_items": [],
+    "new_events": [],
+    "foreshadowing_updates": [],
+    "relationship_updates": [],
+    "world_fact_updates": [],
+}
+DEFAULT_NEXT_CHAPTER_PROPOSAL = {
+    "target_chapter_number": 0,
+    "suggested_goal": "",
+    "suggested_scenes": [],
+    "suggested_conflicts": [],
+    "suggested_foreshadowing_moves": [],
+    "suggested_new_nodes": [],
+    "suggested_new_edges": [],
+    "suggested_plot_directions": [],
+    "risks": [],
+}
+ALLOWED_OPERATIONS = {
+    "create_character_card",
+    "update_character_card",
+    "create_node",
+    "update_node",
+    "create_edge",
+    "update_edge",
+    "create_plot_direction",
+    "create_world_fact",
+    "create_foreshadowing",
+    "update_foreshadowing",
+    "merge_suggestion",
+}
+ALLOWED_STATUSES = {"pending_review", "accepted", "rejected", "superseded"}
+
+
+@dataclass(frozen=True)
+class StoryDeltaResult:
+    ok: bool
+    project_ref: str = ""
+    chapter_number: int = 0
+    story_delta: dict[str, Any] = field(default_factory=dict)
+    next_chapter_proposal: dict[str, Any] = field(default_factory=dict)
+    knowledge_draft: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    message: str = ""
+    story_delta_item: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class StoryDeltaListResult:
+    ok: bool
+    project_ref: str = ""
+    items: list[dict[str, Any]] = field(default_factory=list)
+    drafts: list[dict[str, Any]] = field(default_factory=list)
+    draft: dict[str, Any] = field(default_factory=dict)
+    message: str = ""
+
+
+def _timestamp() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _clean_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _safe_id(prefix: str) -> str:
+    stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+    return f"{prefix}_{stamp}_{secrets.token_hex(3)}"
+
+
+def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
+    ref = _clean_text(project_ref)
+    if not ref:
+        return None, "Unknown project_ref."
+    try:
+        ctx = resolve_project_context(ref)
+    except (FileNotFoundError, ValueError) as exc:
+        return None, str(exc) or "Unknown project_ref."
+    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
+        return None, "Story Delta is only supported for workspace book projects."
+    return ctx, ""
+
+
+def _memory_dir(ctx: Any) -> Path:
+    return ctx.project_dir / MEMORY_DIR_NAME
+
+
+def _story_deltas_path(ctx: Any) -> Path:
+    return _memory_dir(ctx) / STORY_DELTAS_NAME
+
+
+def _knowledge_drafts_path(ctx: Any) -> Path:
+    return _memory_dir(ctx) / KNOWLEDGE_DRAFTS_NAME
+
+
+def _read_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path.name} is not valid JSON.") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"{path.name} must be a JSON object.")
+    return data
+
+
+def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _empty_story_deltas(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
+    now = _timestamp()
+    return {
+        "version": DOCUMENT_VERSION,
+        "metadata": {
+            "project_ref": project_ref,
+            "created_at": created_at or now,
+            "updated_at": now,
+        },
+        "items": [],
+    }
+
+
+def _empty_knowledge_drafts(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
+    now = _timestamp()
+    return {
+        "version": DOCUMENT_VERSION,
+        "metadata": {
+            "project_ref": project_ref,
+            "created_at": created_at or now,
+            "updated_at": now,
+        },
+        "drafts": [],
+    }
+
+
+def _normalize_story_deltas_document(data: dict[str, Any] | None, project_ref: str) -> dict[str, Any]:
+    if data is None:
+        return _empty_story_deltas(project_ref)
+    document = dict(data)
+    document["version"] = DOCUMENT_VERSION
+    metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
+    metadata["project_ref"] = project_ref
+    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("updated_at", metadata["created_at"])
+    document["metadata"] = metadata
+    items = document.get("items")
+    document["items"] = list(items) if isinstance(items, list) else []
+    return document
+
+
+def _normalize_knowledge_drafts_document(data: dict[str, Any] | None, project_ref: str) -> dict[str, Any]:
+    if data is None:
+        return _empty_knowledge_drafts(project_ref)
+    document = dict(data)
+    document["version"] = DOCUMENT_VERSION
+    metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
+    metadata["project_ref"] = project_ref
+    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("updated_at", metadata["created_at"])
+    document["metadata"] = metadata
+    drafts = document.get("drafts")
+    document["drafts"] = list(drafts) if isinstance(drafts, list) else []
+    return document
+
+
+def _update_metadata(document: dict[str, Any]) -> None:
+    now = _timestamp()
+    metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
+    metadata.setdefault("created_at", now)
+    metadata["updated_at"] = now
+    document["metadata"] = metadata
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _validate_chapter_number(value: Any) -> tuple[int, str]:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return 0, "chapter_number must be a positive integer."
+    if number < 1:
+        return number, "chapter_number must be a positive integer."
+    return number, ""
+
+
+def _truncate(text: str, limit: int) -> str:
+    safe = _clean_text(text)
+    if len(safe) <= limit:
+        return safe
+    return f"{safe[:limit].rstrip()}\n...[truncated]"
+
+
+def _latest_summary_path(ctx: Any, chapter_number: int) -> Path | None:
+    if not ctx.summaries_dir.exists():
+        return None
+    pattern = f"chapter_{chapter_number:03d}_summary*.md"
+    files = [path for path in ctx.summaries_dir.glob(pattern) if path.is_file()]
+    if not files:
+        return None
+    return max(files, key=lambda item: item.stat().st_mtime)
+
+
+def _load_summary(ctx: Any, chapter_number: int) -> tuple[str, str]:
+    path = _latest_summary_path(ctx, chapter_number)
+    if path is None:
+        return "", ""
+    try:
+        return path.read_text(encoding="utf-8"), path.name
+    except OSError:
+        return "", path.name
+
+
+def _graph_summary(project_ref: str) -> str:
+    result = load_narrative_graph(project_ref)
+    if not result.ok:
+        return f"Narrative Graph unavailable: {result.message}"
+    graph = _dict(result.graph.get("graph"))
+    nodes = [node for node in _list(graph.get("nodes")) if isinstance(node, dict)]
+    edges = [edge for edge in _list(graph.get("edges")) if isinstance(edge, dict)]
+    lines = [f"nodes={len(nodes)}, edges={len(edges)}"]
+    for node in nodes[:20]:
+        lines.append(
+            "- node: "
+            f"{_clean_text(node.get('id'))} | {_clean_text(node.get('type'))} | "
+            f"{_clean_text(node.get('label'))} | importance {_clean_text(node.get('importance'))} | "
+            f"status {_clean_text(node.get('status'))} | summary {_truncate(_clean_text(node.get('summary')), 180)}"
+        )
+    for edge in edges[:20]:
+        lines.append(
+            "- edge: "
+            f"{_clean_text(edge.get('source'))} --{_clean_text(edge.get('label')) or _clean_text(edge.get('type'))}--> "
+            f"{_clean_text(edge.get('target'))} | summary {_truncate(_clean_text(edge.get('summary')), 160)}"
+        )
+    return "\n".join(lines)
+
+
+def _extract_config_text(project_config: dict[str, Any]) -> str:
+    options = _dict(project_config.get("setting_generation_options"))
+    fields = {
+        "title": project_config.get("title"),
+        "genre": project_config.get("genre"),
+        "style": project_config.get("style"),
+        "writing_mode": options.get("writing_mode"),
+        "expected_chapters": options.get("expected_chapters"),
+        "seed_prompt": project_config.get("seed_prompt") or project_config.get("story_seed"),
+    }
+    return "\n".join(f"{key}: {_clean_text(value)}" for key, value in fields.items() if _clean_text(value))
+
+
+def build_story_delta_prompt(
+    project_ref: str,
+    chapter_number: int,
+    project_config: dict[str, Any],
+    chapter_content: str,
+    chapter_summary: str = "",
+    context_pack_summary: str = "",
+) -> list[dict[str, str]]:
+    outline, _ = read_latest_outline(project_ref)
+    characters, _ = read_latest_characters(project_ref)
+    target_chapter_number = int(chapter_number) + 1
+    system_prompt = (
+        "You are a story continuity analyst. You are not continuing the prose. "
+        "Analyze an already generated chapter and return only valid JSON. "
+        "Do not output Markdown, explanations, or code fences. "
+        "Do not treat next-chapter plans as facts that already happened. "
+        "All candidate changes must require user review."
+    )
+    user_prompt = f"""
+Analyze chapter {chapter_number} and return a single JSON object with this shape:
+{{
+  "story_delta": {{
+    "new_characters": [],
+    "character_updates": [],
+    "new_scenes": [],
+    "new_items": [],
+    "new_events": [],
+    "foreshadowing_updates": [],
+    "relationship_updates": [],
+    "world_fact_updates": []
+  }},
+  "next_chapter_proposal": {{
+    "target_chapter_number": {target_chapter_number},
+    "suggested_goal": "",
+    "suggested_scenes": [],
+    "suggested_conflicts": [],
+    "suggested_foreshadowing_moves": [],
+    "suggested_new_nodes": [],
+    "suggested_new_edges": [],
+    "suggested_plot_directions": [],
+    "risks": []
+  }},
+  "candidate_changes": [
+    {{
+      "operation": "create_node",
+      "target": "narrative_graph",
+      "source": "story_delta",
+      "confidence": 0.5,
+      "requires_review": true,
+      "evidence": "quote or concise evidence from chapter text",
+      "payload": {{}}
+    }}
+  ],
+  "warnings": []
+}}
+
+Rules:
+- story_delta describes facts that actually happened in chapter {chapter_number}.
+- next_chapter_proposal describes proposed planning for chapter {target_chapter_number}; it is not confirmed canon.
+- Put uncertain facts in warnings, not in story_delta.
+- New characters must include evidence.
+- Foreshadowing status changes must use introduced, reinforced, partially_revealed, revealed, or unresolved.
+- Candidate operations may only be create_character_card, update_character_card, create_node, update_node, create_edge, update_edge, create_plot_direction, create_world_fact, create_foreshadowing, update_foreshadowing, or merge_suggestion.
+- Do not propose delete operations.
+- Every candidate change must include requires_review=true and evidence or rationale.
+- Candidate payloads for next chapter proposals should use suggested_status="planned".
+- Candidate payloads for facts observed in this chapter should use suggested_status="confirmed".
+
+Project config:
+{_truncate(_extract_config_text(project_config), 3000)}
+
+Existing outline summary:
+{_truncate(outline or "", 3000)}
+
+Existing character cards summary:
+{_truncate(characters or "", 3000)}
+
+Narrative Graph summary:
+{_truncate(_graph_summary(project_ref), 5000)}
+
+Context Pack summary:
+{_truncate(context_pack_summary, 3000) or "No Context Pack summary provided."}
+
+Chapter summary:
+{_truncate(chapter_summary, 2000) or "No chapter summary found."}
+
+Chapter text:
+{_truncate(chapter_content, 14000)}
+""".strip()
+    return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+
+
+def _dry_run_response(chapter_number: int, chapter_content: str, include_next: bool) -> dict[str, Any]:
+    first_line = next((line.strip("# ").strip() for line in chapter_content.splitlines() if line.strip()), "")
+    evidence = _truncate(first_line or f"Chapter {chapter_number} exists and can be analyzed.", 240)
+    next_chapter = int(chapter_number) + 1
+    return {
+        "story_delta": {
+            **DEFAULT_STORY_DELTA,
+            "new_events": [
+                {
+                    "label": f"Chapter {chapter_number} analysis placeholder",
+                    "summary": "Dry-run placeholder generated without calling the model.",
+                    "evidence": evidence,
+                    "suggested_status": "confirmed",
+                }
+            ],
+        },
+        "next_chapter_proposal": {
+            **DEFAULT_NEXT_CHAPTER_PROPOSAL,
+            "target_chapter_number": next_chapter,
+            "suggested_goal": f"Review chapter {chapter_number} outcomes before drafting chapter {next_chapter}.",
+            "risks": ["Dry-run result is a local placeholder, not model analysis."],
+        }
+        if include_next
+        else {**DEFAULT_NEXT_CHAPTER_PROPOSAL, "target_chapter_number": next_chapter},
+        "candidate_changes": [
+            {
+                "operation": "create_plot_direction",
+                "target": "narrative_graph",
+                "source": "next_chapter_proposal",
+                "confidence": 0.1,
+                "requires_review": True,
+                "rationale": "Dry-run placeholder confirms the draft pipeline without calling DeepSeek.",
+                "payload": {
+                    "label": f"Dry-run next chapter direction after chapter {chapter_number}",
+                    "summary": f"Prepare a reviewed plan for chapter {next_chapter}.",
+                    "suggested_status": "planned",
+                },
+            }
+        ],
+        "warnings": ["Dry-run mode used. No DeepSeek call was made."],
+    }
+
+
+def _extract_json_body(text: str) -> str:
+    cleaned = _clean_text(text)
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        cleaned = cleaned[start : end + 1]
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    cleaned = re.sub(r"\bTrue\b", "true", cleaned)
+    cleaned = re.sub(r"\bFalse\b", "false", cleaned)
+    cleaned = re.sub(r"\bNone\b", "null", cleaned)
+    return cleaned
+
+
+def parse_story_delta_response(raw_text: str) -> tuple[dict[str, Any] | None, str]:
+    text = _extract_json_body(raw_text)
+    if not text:
+        return None, "Model response was empty."
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return None, f"Story Delta JSON parse failed: {exc.msg}."
+    if not isinstance(data, dict):
+        return None, "Story Delta response must be a JSON object."
+    return data, ""
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [_clean_text(item) for item in value if _clean_text(item)]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def normalize_story_delta(data: dict[str, Any], chapter_number: int, include_next: bool) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], list[str]]:
+    warnings = _string_list(data.get("warnings"))
+    raw_delta = _dict(data.get("story_delta"))
+    story_delta = {key: _list(raw_delta.get(key)) for key in DEFAULT_STORY_DELTA}
+
+    for item in story_delta["new_characters"]:
+        if isinstance(item, dict) and not (_clean_text(item.get("evidence")) or _clean_text(item.get("rationale"))):
+            warnings.append("A new character entry was missing evidence and requires extra review.")
+            item["rationale"] = "Model omitted evidence; reviewer must confirm before merge."
+
+    raw_proposal = _dict(data.get("next_chapter_proposal"))
+    next_proposal: dict[str, Any] = {}
+    for key, default in DEFAULT_NEXT_CHAPTER_PROPOSAL.items():
+        value = raw_proposal.get(key, default)
+        next_proposal[key] = _list(value) if isinstance(default, list) else value
+    try:
+        target = int(next_proposal.get("target_chapter_number") or int(chapter_number) + 1)
+    except (TypeError, ValueError):
+        target = int(chapter_number) + 1
+    next_proposal["target_chapter_number"] = target
+    if not include_next:
+        next_proposal = {**DEFAULT_NEXT_CHAPTER_PROPOSAL, "target_chapter_number": target}
+
+    raw_changes = data.get("candidate_changes")
+    candidate_changes = [item for item in _list(raw_changes) if isinstance(item, dict)]
+    return story_delta, next_proposal, candidate_changes, warnings
+
+
+def _confidence(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed < 0 or parsed > 1:
+        return None
+    return parsed
+
+
+def _candidate_change(
+    operation: str,
+    target: str,
+    source: str,
+    payload: dict[str, Any],
+    evidence: str = "",
+    rationale: str = "",
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    change: dict[str, Any] = {
+        "id": _safe_id("change"),
+        "operation": operation,
+        "target": target,
+        "source": source if source in {"story_delta", "next_chapter_proposal"} else "story_delta",
+        "requires_review": True,
+        "payload": dict(payload),
+    }
+    if confidence is not None:
+        change["confidence"] = confidence
+    if evidence:
+        change["evidence"] = evidence
+    else:
+        change["rationale"] = rationale or "Candidate requires manual review before merge."
+    return change
+
+
+def _normalize_candidate_change(change: dict[str, Any], warnings: list[str]) -> dict[str, Any] | None:
+    operation = _clean_text(change.get("operation"))
+    if operation not in ALLOWED_OPERATIONS:
+        warnings.append(f"Skipped unsupported candidate operation: {operation or '[empty]'}")
+        return None
+    payload = _dict(change.get("payload"))
+    source = _clean_text(change.get("source")) or "story_delta"
+    if source not in {"story_delta", "next_chapter_proposal"}:
+        source = "story_delta"
+    evidence = _clean_text(change.get("evidence"))
+    rationale = _clean_text(change.get("rationale"))
+    if not evidence and not rationale:
+        warnings.append(f"Candidate change {operation} lacked evidence/rationale and was marked for extra review.")
+        rationale = "Model omitted evidence; reviewer must confirm before merge."
+    normalized = _candidate_change(
+        operation=operation,
+        target=_clean_text(change.get("target")) or "narrative_graph",
+        source=source,
+        payload=payload,
+        evidence=evidence,
+        rationale=rationale,
+        confidence=_confidence(change.get("confidence")),
+    )
+    normalized["requires_review"] = True
+    return normalized
+
+
+def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[str, Any]) -> list[dict[str, Any]]:
+    changes: list[dict[str, Any]] = []
+    for item in _list(story_delta.get("new_characters")):
+        if isinstance(item, dict):
+            label = _clean_text(item.get("label") or item.get("name"))
+            changes.append(
+                _candidate_change(
+                    "create_character_card",
+                    "characters",
+                    "story_delta",
+                    {**item, "suggested_status": "confirmed"},
+                    evidence=_clean_text(item.get("evidence")),
+                    rationale=f"New character candidate: {label}",
+                )
+            )
+    for item in _list(story_delta.get("character_updates")):
+        if isinstance(item, dict):
+            changes.append(
+                _candidate_change(
+                    "update_character_card",
+                    "characters",
+                    "story_delta",
+                    {**item, "suggested_status": "confirmed"},
+                    evidence=_clean_text(item.get("evidence")),
+                    rationale="Character update candidate from chapter facts.",
+                )
+            )
+    node_sources = [
+        ("new_scenes", "scene"),
+        ("new_items", "item"),
+        ("new_events", "event"),
+        ("world_fact_updates", "world_fact"),
+        ("foreshadowing_updates", "foreshadowing"),
+    ]
+    for key, node_type in node_sources:
+        for item in _list(story_delta.get(key)):
+            if isinstance(item, dict):
+                operation = "update_foreshadowing" if key == "foreshadowing_updates" else "create_node"
+                if key == "world_fact_updates":
+                    operation = "create_world_fact"
+                changes.append(
+                    _candidate_change(
+                        operation,
+                        "narrative_graph",
+                        "story_delta",
+                        {**item, "type": item.get("type") or node_type, "suggested_status": "confirmed"},
+                        evidence=_clean_text(item.get("evidence")),
+                        rationale=f"{node_type} candidate from chapter facts.",
+                    )
+                )
+    for item in _list(story_delta.get("relationship_updates")):
+        if isinstance(item, dict):
+            changes.append(
+                _candidate_change(
+                    "create_edge",
+                    "narrative_graph",
+                    "story_delta",
+                    {**item, "suggested_status": "confirmed"},
+                    evidence=_clean_text(item.get("evidence")),
+                    rationale="Relationship candidate from chapter facts.",
+                )
+            )
+    for item in _list(next_proposal.get("suggested_new_nodes")):
+        if isinstance(item, dict):
+            changes.append(
+                _candidate_change(
+                    "create_node",
+                    "narrative_graph",
+                    "next_chapter_proposal",
+                    {**item, "suggested_status": "planned"},
+                    rationale=_clean_text(item.get("rationale")) or "Suggested node for next chapter planning.",
+                )
+            )
+    for item in _list(next_proposal.get("suggested_new_edges")):
+        if isinstance(item, dict):
+            changes.append(
+                _candidate_change(
+                    "create_edge",
+                    "narrative_graph",
+                    "next_chapter_proposal",
+                    {**item, "suggested_status": "planned"},
+                    rationale=_clean_text(item.get("rationale")) or "Suggested edge for next chapter planning.",
+                )
+            )
+    for item in _list(next_proposal.get("suggested_plot_directions")):
+        if isinstance(item, dict):
+            changes.append(
+                _candidate_change(
+                    "create_plot_direction",
+                    "narrative_graph",
+                    "next_chapter_proposal",
+                    {**item, "suggested_status": "planned"},
+                    rationale=_clean_text(item.get("rationale")) or "Suggested plot direction for next chapter planning.",
+                )
+            )
+    return changes
+
+
+def build_knowledge_draft(
+    chapter_number: int,
+    source_delta_id: str,
+    story_delta: dict[str, Any],
+    next_proposal: dict[str, Any],
+    candidate_changes: list[dict[str, Any]],
+    warnings: list[str],
+) -> dict[str, Any]:
+    normalized_changes: list[dict[str, Any]] = []
+    for change in candidate_changes:
+        normalized = _normalize_candidate_change(change, warnings)
+        if normalized is not None:
+            normalized_changes.append(normalized)
+    if not normalized_changes:
+        normalized_changes.extend(_derive_changes_from_delta(story_delta, next_proposal))
+    return {
+        "id": _safe_id(f"draft_chapter_{int(chapter_number):03d}"),
+        "chapter_number": int(chapter_number),
+        "source_delta_id": source_delta_id,
+        "status": "pending_review",
+        "candidate_changes": normalized_changes,
+        "created_at": _timestamp(),
+    }
+
+
+def save_story_delta(project_ref: str, item: dict[str, Any]) -> StoryDeltaListResult:
+    ctx, message = _workspace_context(project_ref)
+    if ctx is None:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=message)
+    try:
+        document = _normalize_story_deltas_document(_read_json(_story_deltas_path(ctx)), project_ref)
+        document["items"].append(dict(item))
+        _update_metadata(document)
+        _write_json_atomic(_story_deltas_path(ctx), document)
+    except (OSError, ValueError) as exc:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=f"Story Delta save failed: {exc}")
+    return StoryDeltaListResult(True, project_ref=project_ref, items=document["items"])
+
+
+def save_knowledge_draft(project_ref: str, draft: dict[str, Any]) -> StoryDeltaListResult:
+    ctx, message = _workspace_context(project_ref)
+    if ctx is None:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=message)
+    try:
+        document = _normalize_knowledge_drafts_document(_read_json(_knowledge_drafts_path(ctx)), project_ref)
+        document["drafts"].append(dict(draft))
+        _update_metadata(document)
+        _write_json_atomic(_knowledge_drafts_path(ctx), document)
+    except (OSError, ValueError) as exc:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=f"Knowledge Draft save failed: {exc}")
+    return StoryDeltaListResult(True, project_ref=project_ref, drafts=document["drafts"])
+
+
+def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[str, Any]) -> StoryDeltaResult:
+    number, error = _validate_chapter_number(chapter_number)
+    if error:
+        return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=error)
+    ctx, message = _workspace_context(project_ref)
+    if ctx is None:
+        return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=message)
+
+    include_next = _as_bool(request.get("include_next_chapter_proposal"), True)
+    include_draft = _as_bool(request.get("include_knowledge_draft"), True)
+    dry_run = _as_bool(request.get("dry_run"), False)
+    mock_response = request.get("mock_response")
+    context_pack_summary = _clean_text(request.get("context_pack_summary"))
+
+    detail = load_project_detail(project_ref)
+    if not detail.ok:
+        return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=detail.message or "Project config was not found.")
+    project_config = dict(detail.config if isinstance(detail.config, dict) else {})
+
+    chapter = read_chapter_for_display(project_ref, number)
+    if not chapter.ok:
+        return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=chapter.message or f"Chapter {number} was not found.")
+    chapter_summary, summary_file = _load_summary(ctx, number)
+
+    if mock_response not in (None, ""):
+        raw_payload = mock_response if isinstance(mock_response, dict) else None
+        if raw_payload is None:
+            raw_payload, parse_error = parse_story_delta_response(str(mock_response))
+            if parse_error:
+                return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=parse_error)
+    elif dry_run:
+        raw_payload = _dry_run_response(number, chapter.content, include_next)
+    else:
+        messages = build_story_delta_prompt(
+            project_ref=project_ref,
+            chapter_number=number,
+            project_config=project_config,
+            chapter_content=chapter.content,
+            chapter_summary=chapter_summary,
+            context_pack_summary=context_pack_summary,
+        )
+        model = _clean_text(project_config.get("model")) or None
+        max_tokens = project_config.get("max_tokens")
+        try:
+            analysis_text = generate_text(
+                messages=messages,
+                model=model,
+                temperature=0.2,
+                max_tokens=max(1500, min(int(max_tokens or 2500), 4000)),
+            )
+        except DeepSeekClientError as exc:
+            return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=str(exc))
+        except Exception as exc:
+            return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=f"Story Delta analysis failed: {exc}")
+        raw_payload, parse_error = parse_story_delta_response(analysis_text)
+        if parse_error:
+            return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=parse_error)
+
+    story_delta, next_proposal, candidate_changes, warnings = normalize_story_delta(raw_payload or {}, number, include_next)
+    delta_id = _safe_id(f"delta_chapter_{number:03d}")
+    created_at = _timestamp()
+    story_delta_item = {
+        "id": delta_id,
+        "chapter_number": number,
+        "source": {
+            "source_type": "chapter",
+            "source_ref": f"chapter_{number:03d}",
+            "chapter_file": Path(chapter.filename).name,
+            "summary_file": summary_file,
+        },
+        "status": "pending_review",
+        "story_delta": story_delta,
+        "next_chapter_proposal": next_proposal,
+        "warnings": warnings,
+        "created_at": created_at,
+    }
+    save_delta_result = save_story_delta(project_ref, story_delta_item)
+    if not save_delta_result.ok:
+        return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=save_delta_result.message)
+
+    knowledge_draft: dict[str, Any] = {}
+    if include_draft:
+        knowledge_draft = build_knowledge_draft(
+            chapter_number=number,
+            source_delta_id=delta_id,
+            story_delta=story_delta,
+            next_proposal=next_proposal,
+            candidate_changes=candidate_changes,
+            warnings=warnings,
+        )
+        draft_result = save_knowledge_draft(project_ref, knowledge_draft)
+        if not draft_result.ok:
+            return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=draft_result.message)
+
+    return StoryDeltaResult(
+        True,
+        project_ref=project_ref,
+        chapter_number=number,
+        story_delta=story_delta,
+        next_chapter_proposal=next_proposal,
+        knowledge_draft=knowledge_draft,
+        warnings=warnings,
+        message="Story Delta analysis saved.",
+        story_delta_item=story_delta_item,
+    )
+
+
+def list_story_deltas(project_ref: str) -> StoryDeltaListResult:
+    ctx, message = _workspace_context(project_ref)
+    if ctx is None:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=message)
+    try:
+        document = _normalize_story_deltas_document(_read_json(_story_deltas_path(ctx)), project_ref)
+    except (OSError, ValueError) as exc:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=f"Story Delta read failed: {exc}")
+    return StoryDeltaListResult(True, project_ref=project_ref, items=document["items"])
+
+
+def list_knowledge_drafts(project_ref: str) -> StoryDeltaListResult:
+    ctx, message = _workspace_context(project_ref)
+    if ctx is None:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=message)
+    try:
+        document = _normalize_knowledge_drafts_document(_read_json(_knowledge_drafts_path(ctx)), project_ref)
+    except (OSError, ValueError) as exc:
+        return StoryDeltaListResult(False, project_ref=project_ref, message=f"Knowledge Draft read failed: {exc}")
+    return StoryDeltaListResult(True, project_ref=project_ref, drafts=document["drafts"])
+
+
+def get_knowledge_draft(project_ref: str, draft_id: str) -> StoryDeltaListResult:
+    result = list_knowledge_drafts(project_ref)
+    if not result.ok:
+        return result
+    wanted = _clean_text(draft_id)
+    for draft in result.drafts:
+        if isinstance(draft, dict) and _clean_text(draft.get("id")) == wanted:
+            return StoryDeltaListResult(True, project_ref=result.project_ref, draft=draft)
+    return StoryDeltaListResult(False, project_ref=result.project_ref, message="Knowledge Draft not found.")

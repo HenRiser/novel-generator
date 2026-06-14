@@ -1648,6 +1648,81 @@ code {
   word-break: break-word;
 }
 
+.story-delta-panel,
+.story-delta-result,
+.story-delta-section,
+.candidate-change-list {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.review-notice,
+.section-note {
+  color: var(--color-text-muted);
+  line-height: 1.65;
+  margin: 0;
+}
+
+.story-delta-controls,
+.story-delta-stats,
+.story-delta-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.story-delta-stats div,
+.story-delta-group,
+.candidate-change-card,
+.proposal-goal {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.story-delta-stats span,
+.story-delta-group span,
+.candidate-change-card span,
+.proposal-goal span {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.story-delta-section h3 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.json-snippet {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  padding: var(--space-3);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.candidate-change-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.candidate-change-card p,
+.candidate-change-card pre {
+  grid-column: 1 / -1;
+}
+
 .generation-status-card {
   display: grid;
   gap: var(--space-4);
@@ -1822,6 +1897,9 @@ code {
   .form-grid,
   .settings-grid,
   .status-grid,
+  .story-delta-controls,
+  .story-delta-stats,
+  .story-delta-grid,
   .home-card-grid,
   .library-grid,
   .library-stats-grid,
