@@ -5,8 +5,6 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from api.schemas import (
-    KnowledgeDraftListResponse,
-    KnowledgeDraftResponse,
     StoryDeltaAnalyzeRequest,
     StoryDeltaAnalyzeResponse,
     StoryDeltaListResponse,
@@ -14,8 +12,6 @@ from api.schemas import (
 from config import PROJECT_ROOT
 from services.story_delta_service import (
     analyze_chapter_delta,
-    get_knowledge_draft,
-    list_knowledge_drafts,
     list_story_deltas,
 )
 
@@ -93,30 +89,4 @@ def get_story_deltas(project_ref: str) -> StoryDeltaListResponse:
         project_ref=result.project_ref,
         items=_sanitize_payload(result.items),
         message="Story Delta list loaded.",
-    )
-
-
-@router.get("/knowledge-drafts", response_model=KnowledgeDraftListResponse)
-def get_knowledge_drafts(project_ref: str) -> KnowledgeDraftListResponse:
-    result = list_knowledge_drafts(project_ref)
-    if not result.ok:
-        _error(_status_for_message(result.message), "knowledge_draft_unavailable", result.message)
-    return KnowledgeDraftListResponse(
-        ok=True,
-        project_ref=result.project_ref,
-        drafts=_sanitize_payload(result.drafts),
-        message="Knowledge Draft list loaded.",
-    )
-
-
-@router.get("/knowledge-drafts/{draft_id}", response_model=KnowledgeDraftResponse)
-def get_knowledge_draft_by_id(project_ref: str, draft_id: str) -> KnowledgeDraftResponse:
-    result = get_knowledge_draft(project_ref, draft_id)
-    if not result.ok:
-        _error(_status_for_message(result.message), "knowledge_draft_unavailable", result.message)
-    return KnowledgeDraftResponse(
-        ok=True,
-        project_ref=result.project_ref,
-        draft=_sanitize_payload(result.draft),
-        message="Knowledge Draft loaded.",
     )

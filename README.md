@@ -14,7 +14,7 @@
 - 章节生成后自动生成 100 字以内摘要，保存到当前项目的 `summaries/`。
 - 自动维护当前项目的 `chapter_index.md`。
 - 支持指定章节流式生成，读取最近章节正文、历史摘要、大纲和人物卡作为上下文。
-- 支持 Narrative Graph、Context Pack、Story Delta 和 Knowledge Draft 的 React + FastAPI 工作流。
+- 支持 Narrative Graph、Context Pack、Story Delta、Knowledge Draft Review & Merge 的 React + FastAPI 工作流。
 - 支持保存和加载当前项目的 `project_config.json`；新项目默认位于 `workspace/books/{book_id}/`。
 - 支持 React 项目配置页中的 Genesis 只读展示和 Generation Settings 安全编辑。
 - API Key 从环境变量或本地 `.env` 读取，不会写入代码、日志或输出文件。
@@ -254,9 +254,9 @@ Streamlit 前端已废弃。`app.py` 暂时保留为历史参考，`start.bat` �
 
 Streamlit 残留功能清点：
 
-- 已由 React + FastAPI 覆盖：项目创建、项目列表、项目详情、大纲与人物卡生成、指定章节生成、流式预览、同步备用生成、generation status、章节阅读、TXT 导出、Narrative Graph、Context Pack、Story Delta、项目 Generation Settings。
+- 已由 React + FastAPI 覆盖：项目创建、项目列表、项目详情、大纲与人物卡生成、指定章节生成、流式预览、同步备用生成、generation status、章节阅读、TXT 导出、Narrative Graph、Context Pack、Story Delta、Knowledge Draft Review & Merge、项目 Generation Settings。
 - 本阶段有意不迁移：Streamlit Prompt 预览、打开本地输出目录、完整 `.env` API Key 写入 UI、设定扩写 UI、编辑生成结果后另存版本、旧阅读中心细节控件。
-- 后续可考虑迁移：独立“一键继续下一章”按钮、批量章节生成、系统级 API Key / 模型连接测试、Knowledge Draft Review & Merge。
+- 后续可考虑迁移：独立“一键继续下一章”按钮、批量章节生成、系统级 API Key / 模型连接测试。
 
 ## API / 模型配置
 
@@ -317,6 +317,8 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - 同步备用生成：保留为流式异常时的备用 / 调试入口。
 - Context Pack：可预览并选择是否辅助本次生成，默认关闭。
 - Story Delta：章节存在后可手动触发第二次分析，生成待审核 Knowledge Draft。
+- Knowledge Draft Review & Merge：资料库页支持单条 candidate_change 接受 / 拒绝；第一版只允许 `create_node` / `create_edge` 写入正式 `narrative_graph.json`，拒绝不会写入 graph。
+- 暂不支持合并的 operation 会展示但不可接受，包括人物卡写入、`update_node` / `update_edge`、批量接受、自动冲突检测和自动 duplicate resolution。
 
 批量章节生成和独立“一键继续下一章”按钮暂未迁移。
 
@@ -325,6 +327,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - 新项目默认写入 `workspace/books/{book_id}/`。
 - 旧 `outputs/{小说标题}/` 项目继续兼容读取与写入，不会自动迁移、删除或改名。
 - UI 已采用“章节创作”流程，大纲与人物卡属于小说设定资产。
+- 资料库页已支持 Knowledge Draft 单条审核；模型只提出候选变化，用户接受后才会写入正式 Narrative Graph。
 - 写作模式表示叙事节奏/风格；短篇、中篇、长篇由期望章节数自动推导。
 - 侧边栏默认保持简洁，环境状态、路径和调试信息位于“高级状态 / 调试信息”折叠区。
 

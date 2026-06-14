@@ -1,4 +1,5 @@
 import type {
+  AcceptKnowledgeDraftChangeRequest,
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
@@ -16,6 +17,7 @@ import type {
   GenerationStatus,
   HealthResponse,
   KnowledgeDraftListResponse,
+  KnowledgeDraftChangeReviewResponse,
   KnowledgeDraftResponse,
   NarrativeGraphEdgeRequest,
   NarrativeGraphEdgeResponse,
@@ -29,6 +31,7 @@ import type {
   OutlineCharactersGenerationResponse,
   ProjectDetail,
   ProjectSummary,
+  RejectKnowledgeDraftChangeRequest,
   StoryDeltaAnalyzeRequest,
   StoryDeltaAnalyzeResponse,
   StoryDeltaListResponse,
@@ -412,6 +415,30 @@ export function listKnowledgeDrafts(projectRef: string): Promise<KnowledgeDraftL
 export function getKnowledgeDraft(projectRef: string, draftId: string): Promise<KnowledgeDraftResponse> {
   return apiFetch<KnowledgeDraftResponse>(
     `/api/projects/${projectPath(projectRef)}/knowledge-drafts/${encodeURIComponent(draftId)}`,
+  );
+}
+
+export function acceptKnowledgeDraftChange(
+  projectRef: string,
+  draftId: string,
+  changeId: string,
+  request: AcceptKnowledgeDraftChangeRequest = {},
+): Promise<KnowledgeDraftChangeReviewResponse> {
+  return postJson<KnowledgeDraftChangeReviewResponse>(
+    `/api/projects/${projectPath(projectRef)}/knowledge-drafts/${encodeURIComponent(draftId)}/changes/${encodeURIComponent(changeId)}/accept`,
+    request,
+  );
+}
+
+export function rejectKnowledgeDraftChange(
+  projectRef: string,
+  draftId: string,
+  changeId: string,
+  request: RejectKnowledgeDraftChangeRequest = {},
+): Promise<KnowledgeDraftChangeReviewResponse> {
+  return postJson<KnowledgeDraftChangeReviewResponse>(
+    `/api/projects/${projectPath(projectRef)}/knowledge-drafts/${encodeURIComponent(draftId)}/changes/${encodeURIComponent(changeId)}/reject`,
+    request,
   );
 }
 

@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
+The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing/detail plus single-change review accept/reject, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, batch draft merge, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -104,7 +104,7 @@ The React frontend is available at:
 http://127.0.0.1:5173
 ```
 
-The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file. The creation page can preview a Narrative Context Pack selected from the current Narrative Graph and can optionally attach that previewed context to chapter generation; the option is disabled by default. After a chapter exists, the creation page can manually run a second Story Delta analysis pass and save pending-review Knowledge Draft candidates.
+The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file. The creation page can preview a Narrative Context Pack selected from the current Narrative Graph and can optionally attach that previewed context to chapter generation; the option is disabled by default. After a chapter exists, the creation page can manually run a second Story Delta analysis pass and save pending-review Knowledge Draft candidates. The library page can review those candidates one at a time; accepting supported `create_node` / `create_edge` changes writes to `narrative_graph.json`, while rejecting a change does not write the graph.
 
 React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
 
@@ -112,7 +112,7 @@ React opens to the Braipen home page by default. Clicking the logo mark or `Brai
 Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
 ```
 
-The creation page is for project creation, onboarding, outline/character generation, Context Pack preview, optional context-assisted streaming chapter generation, manual Story Delta / Next Chapter Proposal analysis, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
+The creation page is for project creation, onboarding, outline/character generation, Context Pack preview, optional context-assisted streaming chapter generation, manual Story Delta / Next Chapter Proposal analysis, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation plus Knowledge Draft review: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, an enhanced Entity Inspector, and single-change accept/reject for supported draft candidates. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
 
 Current React support:
 
@@ -142,6 +142,11 @@ Current React support:
 - Story Delta + Next Chapter Proposal foundation in the creation page
 - manual post-generation second analysis pass after chapter prose is saved
 - pending-review Knowledge Draft candidate changes with `requires_review=true`
+- Knowledge Draft Review & Merge foundation in the library page
+- single candidate-change accept / reject
+- accepted `create_node` / `create_edge` changes write to the formal `narrative_graph.json`
+- rejected changes do not write the Narrative Graph
+- unsupported operations are displayed but cannot be accepted
 - dry-run analysis mode for local testing without calling DeepSeek
 - read-only Genesis settings display in the project settings page
 - editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
@@ -159,7 +164,7 @@ Residual Streamlit-only capabilities have been triaged:
 
 - covered by React + FastAPI: project creation, project list/detail, outline and character generation, specified chapter generation, streaming preview, synchronous fallback generation, generation status, chapter reading, TXT export, Narrative Graph, Context Pack, Story Delta, and per-project Generation Settings.
 - intentionally not migrated in this stage: Streamlit prompt preview, opening local output directories from the UI, full `.env` API Key write UI, setting expansion UI, edited-result save UI, and legacy Streamlit reader controls.
-- later React candidates: one-click next-chapter command as a dedicated button, batch chapter generation, system-level API Key/model connection testing, and structured Review & Merge for Knowledge Drafts.
+- later React candidates: one-click next-chapter command as a dedicated button, batch chapter generation, system-level API Key/model connection testing, and broader draft merge tooling.
 
 Current React limits:
 
@@ -174,8 +179,8 @@ Current React limits:
 - no automatic Narrative Graph updates from generated chapters
 - no foreshadowing conflict detection
 - no single-pass chapter prose plus metadata trailer output
-- no automatic character-card or Narrative Graph merge from Story Delta
-- no complete Review & Merge workflow for Knowledge Drafts
+- no automatic character-card merge from Story Delta
+- no `update_node` / `update_edge`, character-card writes, batch accept/reject, duplicate resolution, conflict detection, or AI auto-review for Knowledge Drafts
 - no AI auto-extraction or AI auto-tagging for graph entities
 - no project deletion / rename / archive
 - no batch streaming generation

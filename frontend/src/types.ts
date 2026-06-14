@@ -325,11 +325,20 @@ export type CandidateChange = {
   operation: string;
   target: string;
   source: "story_delta" | "next_chapter_proposal" | string;
+  status?: "pending_review" | "accepted" | "rejected" | "failed" | "superseded" | string;
   confidence?: number;
   requires_review: boolean;
   evidence?: string;
   rationale?: string;
   payload: Record<string, unknown>;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+  review_note?: string;
+  result?: {
+    created_node_id?: string | null;
+    created_edge_id?: string | null;
+    error?: string | null;
+  };
 };
 
 export type KnowledgeDraft = {
@@ -378,6 +387,27 @@ export type KnowledgeDraftResponse = {
   ok: boolean;
   project_ref: string;
   draft: KnowledgeDraft;
+  message: string;
+};
+
+export type AcceptKnowledgeDraftChangeRequest = {
+  review_note?: string;
+  payload_override?: Record<string, unknown> | null;
+};
+
+export type RejectKnowledgeDraftChangeRequest = {
+  review_note?: string;
+};
+
+export type KnowledgeDraftChangeReviewResponse = {
+  ok: boolean;
+  project_ref: string;
+  draft: KnowledgeDraft;
+  change: CandidateChange;
+  graph?: NarrativeGraphDocument;
+  views?: NarrativeGraphViewsDocument;
+  node?: NarrativeGraphNode | null;
+  edge?: NarrativeGraphEdge | null;
   message: string;
 };
 

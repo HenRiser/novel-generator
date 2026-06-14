@@ -55,7 +55,7 @@ ALLOWED_OPERATIONS = {
     "update_foreshadowing",
     "merge_suggestion",
 }
-ALLOWED_STATUSES = {"pending_review", "accepted", "rejected", "superseded"}
+ALLOWED_STATUSES = {"pending_review", "accepted", "rejected", "failed", "superseded"}
 
 
 @dataclass(frozen=True)

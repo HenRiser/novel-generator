@@ -181,6 +181,27 @@ class KnowledgeDraftResponse(BaseModel):
     message: str = ""
 
 
+class KnowledgeDraftChangeAcceptRequest(BaseModel):
+    review_note: str | None = None
+    payload_override: Any = None
+
+
+class KnowledgeDraftChangeRejectRequest(BaseModel):
+    review_note: str | None = None
+
+
+class KnowledgeDraftChangeReviewResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    draft: dict[str, Any]
+    change: dict[str, Any]
+    graph: dict[str, Any] = {}
+    views: dict[str, Any] = {}
+    node: dict[str, Any] | None = None
+    edge: dict[str, Any] | None = None
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

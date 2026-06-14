@@ -519,6 +519,99 @@ def save_graph_views(project_ref: str, views: dict[str, Any]) -> NarrativeGraphR
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=document)
 
 
+def load_graph_documents_for_review(project_ref: str) -> NarrativeGraphResult:
+    try:
+        graph, views = _load_documents(project_ref)
+    except (OSError, ValueError) as exc:
+        return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
+    return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views)
+
+
+def save_graph_documents_for_review(
+    project_ref: str,
+    graph: dict[str, Any],
+    views: dict[str, Any] | None = None,
+) -> NarrativeGraphResult:
+    ctx, message = _workspace_context(project_ref)
+    if ctx is None:
+        return NarrativeGraphResult(False, project_ref=project_ref, message=message)
+    try:
+        document = _normalize_graph_document(graph, project_ref)
+        views_document = (
+            _normalize_views_document(views, project_ref)
+            if views is not None
+            else _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        )
+        _save_documents(ctx, document, views_document)
+    except (OSError, ValueError) as exc:
+        return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
+    return NarrativeGraphResult(True, project_ref=project_ref, graph=document, views=views_document)
+
+
+def graph_node_ids(graph: dict[str, Any]) -> set[str]:
+    return _node_ids(graph)
+
+
+def graph_edge_ids(graph: dict[str, Any]) -> set[str]:
+    return _edge_ids(graph)
+
+
+def build_graph_node_for_create(
+    graph: dict[str, Any],
+    node_payload: dict[str, Any],
+    node_id: str,
+    source: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
+    clean_id = _clean_text(node_id)
+    if not clean_id:
+        return None, "Node id cannot be empty."
+    if clean_id in _node_ids(graph):
+        return None, "Node id already exists."
+
+    base_node = {
+        "id": clean_id,
+        "source": dict(source) if isinstance(source, dict) else {
+            "created_by": "user",
+            "introduced_in": None,
+            "last_updated_in": None,
+        },
+    }
+    node, error = _validate_node_update(graph, node_payload, base_node)
+    if node is None:
+        return None, error
+    node["id"] = clean_id
+    node["source"] = base_node["source"]
+    return node, ""
+
+
+def build_graph_edge_for_create(
+    graph: dict[str, Any],
+    edge_payload: dict[str, Any],
+    edge_id: str,
+    source_info: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any] | None, str]:
+    clean_id = _clean_text(edge_id)
+    if not clean_id:
+        return None, "Edge id cannot be empty."
+    if clean_id in _edge_ids(graph):
+        return None, "Edge id already exists."
+
+    base_edge = {
+        "id": clean_id,
+        "source_info": dict(source_info) if isinstance(source_info, dict) else {
+            "created_by": "user",
+            "introduced_in": None,
+            "last_updated_in": None,
+        },
+    }
+    edge, error = _validate_edge_update(graph, edge_payload, base_edge)
+    if edge is None:
+        return None, error
+    edge["id"] = clean_id
+    edge["source_info"] = base_edge["source_info"]
+    return edge, ""
+
+
 def add_graph_tag(project_ref: str, tag_payload: dict[str, Any]) -> NarrativeGraphResult:
     ctx, message = _workspace_context(project_ref)
     if ctx is None:

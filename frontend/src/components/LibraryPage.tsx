@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { KnowledgeDraftReviewPanel } from "./library/KnowledgeDraftReviewPanel";
 import {
   createNarrativeGraphEdge,
   createNarrativeGraphNode,
@@ -73,7 +74,7 @@ type SelectedEntity =
   | { entityType: "edge"; id: string }
   | null;
 
-type ActiveLibraryPanel = "browse" | "node" | "edge" | "tags";
+type ActiveLibraryPanel = "browse" | "node" | "edge" | "tags" | "drafts";
 
 type SearchResult = {
   entityType: "node" | "edge";
@@ -932,6 +933,13 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
               >
                 标签管理
               </button>
+              <button
+                className={`library-tab ${activePanel === "drafts" ? "selected" : ""}`}
+                type="button"
+                onClick={() => setActivePanel("drafts")}
+              >
+                草稿审核 / Knowledge Drafts
+              </button>
             </nav>
 
             {activePanel === "browse" && (
@@ -1380,6 +1388,14 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
                   </button>
                 </div>
               </form>
+            )}
+
+            {activePanel === "drafts" && selectedProject && (
+              <KnowledgeDraftReviewPanel
+                apiStatus={apiStatus}
+                selectedProject={selectedProject}
+                onGraphUpdated={setGraph}
+              />
             )}
 
             {activePanel === "tags" && (
