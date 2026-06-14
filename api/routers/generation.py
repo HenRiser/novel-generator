@@ -268,6 +268,7 @@ def generate_project_chapter(
             temperature=_request_temperature(payload.temperature),
             max_tokens=_request_max_tokens(payload.max_tokens),
             use_previous_context=True,
+            narrative_context_text=payload.narrative_context_text,
         )
         if not result.ok:
             message = public_message(result.message)
@@ -322,6 +323,7 @@ def generate_project_chapter_stream(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 use_previous_context=True,
+                narrative_context_text=payload.narrative_context_text,
             ):
                 public_event = _public_stream_event(event)
                 if public_event["type"] == "delta":

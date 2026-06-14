@@ -1,6 +1,6 @@
 # React Reader / Generation Foundation
 
-This frontend is the React reader and generation surface for `novel-generator`. The React UI now uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, and keeps the synchronous generation endpoint as a fallback path. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
+This frontend is the React reader and generation surface for `novel-generator`. The React UI now uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, and can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
 
 ## Workspace navigation
 
@@ -19,7 +19,9 @@ Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        
 
 The library page has moved beyond the initial foundation: it supports safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector.
 
-This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, prompt integration, complete API Key management, or a replacement for the Streamlit legacy frontend.
+The creation page now includes Context Pack Builder foundation support. It previews a structured Narrative Context Pack selected from the Narrative Graph by local rules, lets the user control `min_importance`, node and edge limits, unresolved foreshadowing, and neighbor inclusion, and keeps context-assisted generation disabled by default. It does not inject the full graph by default.
+
+This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, AI automatic graph extraction, AI automatic graph updates, complete API Key management, or a replacement for the Streamlit legacy frontend.
 
 ## Frontend entry points
 
@@ -127,6 +129,12 @@ Implemented:
 - Enhanced Entity Inspector for selected nodes and edges
 - Clear boundaries between controlled `tags`, free-form `aliases`, and free-form `notes`
 - `importance` on a 1-10 scale and `layer` values of `core`, `major`, `detail`, or `background`
+- Context Pack Builder foundation in the creation page
+- Narrative Context Pack preview from the current Narrative Graph
+- Local rule-based selection by chapter goal, importance, tags, unresolved foreshadowing, and one-hop graph neighbors
+- User controls for `min_importance`, `max_nodes`, `max_edges`, unresolved foreshadowing inclusion, and neighbor inclusion
+- Optional context-assisted chapter generation, disabled by default
+- Structured preview with selected nodes, selected edges, stats, warnings, and expandable prompt text
 - Project settings with read-only Genesis fields
 - Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
 - Chapter list
@@ -153,8 +161,10 @@ Not implemented in this stage:
 - Vector search or embeddings
 - External search APIs
 - AI semantic search
-- Context Pack Builder
-- Narrative Graph injection into chapter generation prompts
+- Default full-graph injection into chapter generation prompts
+- Vector or AI-based Context Pack selection
+- Automatic Narrative Graph updates from generated chapters
+- Foreshadowing conflict detection
 - AI automatic graph extraction or AI automatic tagging
 - Full project management
 - Project deletion / rename / archive
@@ -177,13 +187,15 @@ Streamlit remains available for the legacy full workflow:
 .\start.bat
 ```
 
-Use React for basic project creation, reading projects, outline/character generation, single-chapter generation, streaming preview, and TXT export:
+Use React for basic project creation, reading projects, outline/character generation, Context Pack preview, optional context-assisted single-chapter generation, streaming preview, and TXT export:
 
 ```bat
 .\start-react.bat
 ```
 
-Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button.
+Context Pack preview in React calls `POST /api/projects/{project_ref}/context-pack/preview`. The preview reads the current Narrative Graph, returns a structured pack plus prompt text, and does not call the model or write graph/chapter files.
+
+Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button. When the user enables context-assisted generation, React sends the previewed Narrative Context Pack text as optional generation context; when disabled or absent, the request path stays unchanged.
 
 Streaming preview behavior:
 

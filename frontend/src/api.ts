@@ -6,6 +6,8 @@ import type {
   ChapterStreamErrorEvent,
   ChapterStreamEvent,
   ChapterStreamHandlers,
+  ContextPackPreviewRequest,
+  ContextPackPreviewResponse,
   CreateProjectRequest,
   CreateProjectResponse,
   GenerationSettingsRequest,
@@ -370,6 +372,16 @@ export function deleteNarrativeGraphEdge(
 ): Promise<NarrativeGraphEdgeResponse> {
   return deleteJson<NarrativeGraphEdgeResponse>(
     `/api/projects/${projectPath(projectRef)}/narrative-graph/edges/${encodeURIComponent(edgeId)}`,
+  );
+}
+
+export function previewContextPack(
+  projectRef: string,
+  request: ContextPackPreviewRequest,
+): Promise<ContextPackPreviewResponse> {
+  return postJson<ContextPackPreviewResponse>(
+    `/api/projects/${projectPath(projectRef)}/context-pack/preview`,
+    request,
   );
 }
 

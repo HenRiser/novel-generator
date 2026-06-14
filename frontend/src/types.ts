@@ -68,6 +68,7 @@ export type GenerationRequest = {
   model: string;
   max_tokens: number;
   temperature: number;
+  narrative_context_text?: string;
 };
 
 export type GenerationSettingsRequest = {
@@ -224,6 +225,76 @@ export type NarrativeGraphEdgeResponse = NarrativeGraphResponse & {
 
 export type NarrativeGraphNodeDeleteOptions = {
   deleteEdges?: boolean;
+};
+
+export type ContextPackNode = NarrativeGraphNode & {
+  score: number;
+  reasons: string[];
+};
+
+export type ContextPackEdge = NarrativeGraphEdge & {
+  source_label: string;
+  target_label: string;
+  score: number;
+  reasons: string[];
+};
+
+export type ContextPackSections = {
+  core_facts: ContextPackNode[];
+  characters: ContextPackNode[];
+  scenes: ContextPackNode[];
+  items: ContextPackNode[];
+  foreshadowing: ContextPackNode[];
+  plot_directions: ContextPackNode[];
+  world_facts: ContextPackNode[];
+  events: ContextPackNode[];
+  organizations: ContextPackNode[];
+  relationships: ContextPackEdge[];
+};
+
+export type ContextPackStats = {
+  nodes_considered: number;
+  nodes_selected: number;
+  edges_considered: number;
+  edges_selected: number;
+  truncated_nodes: number;
+  truncated_edges: number;
+};
+
+export type ContextPack = {
+  project_ref: string;
+  chapter_number: number;
+  chapter_goal: string;
+  options: {
+    min_importance: number;
+    max_nodes: number;
+    max_edges: number;
+    include_unresolved_foreshadowing: boolean;
+    include_neighbors: boolean;
+  };
+  selected_nodes: ContextPackNode[];
+  selected_edges: ContextPackEdge[];
+  sections: ContextPackSections;
+  stats: ContextPackStats;
+  warnings: string[];
+};
+
+export type ContextPackPreviewRequest = {
+  chapter_number: number;
+  chapter_goal: string;
+  min_importance: number;
+  max_nodes: number;
+  max_edges: number;
+  include_unresolved_foreshadowing: boolean;
+  include_neighbors: boolean;
+};
+
+export type ContextPackPreviewResponse = {
+  ok: boolean;
+  project_ref: string;
+  context_pack: ContextPack;
+  prompt_text: string;
+  message: string;
 };
 
 export type OutlineCharactersGenerationResponse = {

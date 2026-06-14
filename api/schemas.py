@@ -123,6 +123,24 @@ class NarrativeGraphEdgeResponse(NarrativeGraphResponse):
     edge: dict[str, Any]
 
 
+class ContextPackPreviewRequest(BaseModel):
+    chapter_number: Any = None
+    chapter_goal: str | None = None
+    min_importance: Any = None
+    max_nodes: Any = None
+    max_edges: Any = None
+    include_unresolved_foreshadowing: bool | None = None
+    include_neighbors: bool | None = None
+
+
+class ContextPackPreviewResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    context_pack: dict[str, Any]
+    prompt_text: str = ""
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str
@@ -150,3 +168,4 @@ class GenerateChapterRequest(BaseModel):
     max_tokens: int | None = Field(default=None, ge=512, le=32768)
     temperature: float | None = Field(default=None, ge=0, le=2)
     writing_mode: str | None = None
+    narrative_context_text: str | None = Field(default=None, max_length=20000)

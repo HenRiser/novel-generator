@@ -14,6 +14,7 @@ import {
   getHealth,
   getProject,
   getProjects,
+  previewContextPack,
   updateGenerationSettings,
   ApiRequestError,
   safePublicMessage,
@@ -29,6 +30,8 @@ import type {
   ChapterGenerationResponse,
   ChapterSummary,
   ChapterStreamDoneEvent,
+  ContextPackPreviewRequest,
+  ContextPackPreviewResponse,
   CreateProjectRequest,
   GenerationRequest,
   GenerationSettingsRequest,
@@ -55,6 +58,16 @@ const DEFAULT_CREATE_PROJECT_FORM: CreateProjectRequest = {
   model: "deepseek-v4-flash",
   maxTokens: 4000,
   temperature: 0.7,
+};
+
+const DEFAULT_CONTEXT_PACK_FORM: ContextPackPreviewRequest = {
+  chapter_number: 1,
+  chapter_goal: "",
+  min_importance: 5,
+  max_nodes: 20,
+  max_edges: 30,
+  include_unresolved_foreshadowing: true,
+  include_neighbors: true,
 };
 
 type StreamingPreviewStatus = "idle" | "streaming" | "saved" | "failed_unsaved";
@@ -573,6 +586,12 @@ export function App() {
   const [createProjectError, setCreateProjectError] = useState("");
   const [createProjectMessage, setCreateProjectMessage] = useState("");
   const [assetReadyProjectRefs, setAssetReadyProjectRefs] = useState<string[]>([]);
+  const [contextPackForm, setContextPackForm] = useState<ContextPackPreviewRequest>(DEFAULT_CONTEXT_PACK_FORM);
+  const [contextPackPreview, setContextPackPreview] = useState<ContextPackPreviewResponse | null>(null);
+  const [contextPackLoading, setContextPackLoading] = useState(false);
+  const [contextPackError, setContextPackError] = useState("");
+  const [contextPackPromptExpanded, setContextPackPromptExpanded] = useState(false);
+  const [useContextPackForGeneration, setUseContextPackForGeneration] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -597,6 +616,20 @@ export function App() {
   );
   const projectConfig = projectDetail?.config;
   const generationRequest = useMemo(() => generationRequestFromConfig(projectConfig), [projectConfig]);
+
+  useEffect(() => {
+    setContextPackPreview(null);
+    setContextPackError("");
+    setContextPackPromptExpanded(false);
+    setUseContextPackForGeneration(false);
+  }, [selectedProjectRef]);
+
+  useEffect(() => {
+    const parsed = Number.parseInt(chapterNumberInput, 10);
+    if (Number.isInteger(parsed) && parsed > 0) {
+      setContextPackForm((current) => ({ ...current, chapter_number: parsed }));
+    }
+  }, [chapterNumberInput]);
 
   const refreshGenerationStatus = useCallback(async () => {
     setGenerationStatusLoading(true);
@@ -934,6 +967,76 @@ export function App() {
     }
   }, [ensureGenerationIdle, generationRequest, refreshGenerationStatus, selectedProjectRef]);
 
+  const buildContextPackPayload = useCallback((): ContextPackPreviewRequest | null => {
+    const chapterNumber = Number.parseInt(String(contextPackForm.chapter_number), 10);
+    const minImportance = Number.parseInt(String(contextPackForm.min_importance), 10);
+    const maxNodes = Number.parseInt(String(contextPackForm.max_nodes), 10);
+    const maxEdges = Number.parseInt(String(contextPackForm.max_edges), 10);
+    if (!Number.isInteger(chapterNumber) || chapterNumber < 1) {
+      setContextPackError("chapter_number must be a positive integer.");
+      return null;
+    }
+    if (!Number.isInteger(minImportance) || minImportance < 1 || minImportance > 10) {
+      setContextPackError("min_importance must be between 1 and 10.");
+      return null;
+    }
+    if (!Number.isInteger(maxNodes) || maxNodes < 1 || maxNodes > 100) {
+      setContextPackError("max_nodes must be between 1 and 100.");
+      return null;
+    }
+    if (!Number.isInteger(maxEdges) || maxEdges < 0 || maxEdges > 200) {
+      setContextPackError("max_edges must be between 0 and 200.");
+      return null;
+    }
+    return {
+      chapter_number: chapterNumber,
+      chapter_goal: contextPackForm.chapter_goal,
+      min_importance: minImportance,
+      max_nodes: maxNodes,
+      max_edges: maxEdges,
+      include_unresolved_foreshadowing: contextPackForm.include_unresolved_foreshadowing,
+      include_neighbors: contextPackForm.include_neighbors,
+    };
+  }, [contextPackForm]);
+
+  const handlePreviewContextPack = useCallback(async () => {
+    if (!selectedProjectRef) {
+      setContextPackError("Please select a workspace project before building a context pack.");
+      return;
+    }
+    if (apiStatus !== "online") {
+      setContextPackError("API Offline. Start FastAPI before previewing the context pack.");
+      return;
+    }
+    const payload = buildContextPackPayload();
+    if (!payload) {
+      return;
+    }
+    setContextPackLoading(true);
+    setContextPackError("");
+    try {
+      const result = await previewContextPack(selectedProjectRef, payload);
+      setContextPackPreview(result);
+      setContextPackPromptExpanded(false);
+    } catch (error) {
+      setContextPackPreview(null);
+      setContextPackError(publicErrorMessage(error, "Context pack preview failed."));
+    } finally {
+      setContextPackLoading(false);
+    }
+  }, [apiStatus, buildContextPackPayload, selectedProjectRef]);
+
+  const generationRequestWithOptionalContext = useCallback((): GenerationRequest => {
+    const promptText = contextPackPreview?.prompt_text?.trim();
+    if (useContextPackForGeneration && promptText) {
+      return {
+        ...generationRequest,
+        narrative_context_text: promptText,
+      };
+    }
+    return generationRequest;
+  }, [contextPackPreview, generationRequest, useContextPackForGeneration]);
+
   const handleGenerateChapterStream = useCallback(async (chapterNumberOverride?: number) => {
     if (!selectedProjectRef) {
       setGenerationError("请选择项目后再生成章节。");
@@ -959,7 +1062,7 @@ export function App() {
 
     setChapterStreaming(true);
     try {
-      const result = await generateChapterStream(selectedProjectRef, chapterNumber, generationRequest, {
+      const result = await generateChapterStream(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext(), {
         onDelta: (text) => {
           setStreamingContent((current) => `${current}${text}`);
           setStreamingPreviewStatus("streaming");
@@ -995,7 +1098,7 @@ export function App() {
   }, [
     chapterNumberInput,
     ensureGenerationIdle,
-    generationRequest,
+    generationRequestWithOptionalContext,
     loadChapterAfterGeneration,
     refreshGenerationStatus,
     refreshProjectAndChapters,
@@ -1027,7 +1130,7 @@ export function App() {
 
     setChapterGenerating(true);
     try {
-      const result = await generateChapter(selectedProjectRef, chapterNumber, generationRequest);
+      const result = await generateChapter(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext());
       setGenerationMessage(chapterSuccessMessage(result));
       await refreshProjectAndChapters(selectedProjectRef);
       const loaded = await loadChapterAfterGeneration(selectedProjectRef, result.chapter_number || chapterNumber);
@@ -1044,7 +1147,7 @@ export function App() {
   }, [
     chapterNumberInput,
     ensureGenerationIdle,
-    generationRequest,
+    generationRequestWithOptionalContext,
     loadChapterAfterGeneration,
     refreshGenerationStatus,
     refreshProjectAndChapters,
@@ -1232,6 +1335,206 @@ export function App() {
     </section>
   );
 
+  const renderContextPackPanel = () => {
+    const pack = contextPackPreview?.context_pack ?? null;
+    const promptText = contextPackPreview?.prompt_text?.trim() ?? "";
+    const contextWillBeUsed = Boolean(useContextPackForGeneration && promptText);
+    return (
+      <section className="panel context-pack-panel">
+        <div className="panel-header">
+          <div>
+            <span className="section-kicker">Narrative Context</span>
+            <h2>叙事上下文包</h2>
+          </div>
+          <span className={`status-badge ${contextWillBeUsed ? "status-badge-online" : ""}`}>
+            {contextWillBeUsed ? "Enabled" : "Preview only"}
+          </span>
+        </div>
+
+        <div className="context-pack-form">
+          <label className="field-stack field-stack-wide">
+            <span>chapter_goal</span>
+            <textarea
+              value={contextPackForm.chapter_goal}
+              onChange={(event) =>
+                setContextPackForm((current) => ({ ...current, chapter_goal: event.target.value }))
+              }
+              placeholder="例如：主角进入废弃剧场后台，寻找灰剧团留下的线索。"
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+          </label>
+          <label className="field-stack">
+            <span>chapter_number</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value={contextPackForm.chapter_number}
+              onChange={(event) =>
+                setContextPackForm((current) => ({ ...current, chapter_number: Number(event.target.value) || 1 }))
+              }
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+          </label>
+          <label className="field-stack">
+            <span>min_importance</span>
+            <input
+              type="number"
+              min="1"
+              max="10"
+              step="1"
+              value={contextPackForm.min_importance}
+              onChange={(event) =>
+                setContextPackForm((current) => ({ ...current, min_importance: Number(event.target.value) || 1 }))
+              }
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+          </label>
+          <label className="field-stack">
+            <span>max_nodes</span>
+            <input
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={contextPackForm.max_nodes}
+              onChange={(event) =>
+                setContextPackForm((current) => ({ ...current, max_nodes: Number(event.target.value) || 1 }))
+              }
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+          </label>
+          <label className="field-stack">
+            <span>max_edges</span>
+            <input
+              type="number"
+              min="0"
+              max="200"
+              step="1"
+              value={contextPackForm.max_edges}
+              onChange={(event) =>
+                setContextPackForm((current) => ({ ...current, max_edges: Number(event.target.value) || 0 }))
+              }
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={contextPackForm.include_unresolved_foreshadowing}
+              onChange={(event) =>
+                setContextPackForm((current) => ({
+                  ...current,
+                  include_unresolved_foreshadowing: event.target.checked,
+                }))
+              }
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+            <span>include unresolved foreshadowing</span>
+          </label>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={contextPackForm.include_neighbors}
+              onChange={(event) =>
+                setContextPackForm((current) => ({ ...current, include_neighbors: event.target.checked }))
+              }
+              disabled={!selectedProjectRef || contextPackLoading}
+            />
+            <span>include graph neighbors</span>
+          </label>
+        </div>
+
+        <div className="context-pack-actions">
+          <button
+            className="button secondary-button"
+            type="button"
+            onClick={() => void handlePreviewContextPack()}
+            disabled={!selectedProjectRef || apiStatus !== "online" || contextPackLoading}
+          >
+            {contextPackLoading ? "正在生成预览..." : "生成上下文包预览"}
+          </button>
+          <label className="checkbox-row context-pack-toggle">
+            <input
+              type="checkbox"
+              checked={useContextPackForGeneration}
+              onChange={(event) => setUseContextPackForGeneration(event.target.checked)}
+              disabled={!promptText}
+            />
+            <span>使用叙事上下文包辅助生成</span>
+          </label>
+        </div>
+
+        {!selectedProjectRef && <p className="empty-state">请先在创作页创建或选择一个 workspace 项目。</p>}
+        {apiStatus !== "online" && <p className="state-text error-text">API Offline. 无法预览 context pack。</p>}
+        {contextPackError && <p className="state-text error-text">{contextPackError}</p>}
+        {pack && (
+          <div className="context-pack-preview">
+            <div className="context-pack-stats">
+              <div>
+                <span>nodes</span>
+                <strong>{pack.stats.nodes_selected}/{pack.stats.nodes_considered}</strong>
+              </div>
+              <div>
+                <span>edges</span>
+                <strong>{pack.stats.edges_selected}/{pack.stats.edges_considered}</strong>
+              </div>
+              <div>
+                <span>truncated nodes</span>
+                <strong>{pack.stats.truncated_nodes}</strong>
+              </div>
+              <div>
+                <span>truncated edges</span>
+                <strong>{pack.stats.truncated_edges}</strong>
+              </div>
+            </div>
+            {pack.warnings.length > 0 && (
+              <div className="context-pack-warnings">
+                {pack.warnings.map((warning) => (
+                  <p key={warning} className="state-text warning-text">{warning}</p>
+                ))}
+              </div>
+            )}
+            <div className="context-pack-preview-grid">
+              <section>
+                <h3>Selected nodes</h3>
+                {pack.selected_nodes.length === 0 && <p className="empty-state">当前没有选中 node。</p>}
+                {pack.selected_nodes.slice(0, 8).map((node) => (
+                  <article className="context-pack-item" key={node.id}>
+                    <strong>{node.label || node.id}</strong>
+                    <span>{node.type} · importance {node.importance} · score {node.score}</span>
+                    {node.reasons.length > 0 && <small>{node.reasons.join(" / ")}</small>}
+                  </article>
+                ))}
+              </section>
+              <section>
+                <h3>Selected edges</h3>
+                {pack.selected_edges.length === 0 && <p className="empty-state">当前没有选中 edge。</p>}
+                {pack.selected_edges.slice(0, 8).map((edge) => (
+                  <article className="context-pack-item" key={edge.id}>
+                    <strong>{edge.label || edge.type}</strong>
+                    <span>{edge.source_label} → {edge.target_label}</span>
+                    {edge.reasons.length > 0 && <small>{edge.reasons.join(" / ")}</small>}
+                  </article>
+                ))}
+              </section>
+            </div>
+            <button
+              className="button subtle-button compact-button"
+              type="button"
+              onClick={() => setContextPackPromptExpanded((current) => !current)}
+            >
+              {contextPackPromptExpanded ? "收起 prompt_text" : "展开 prompt_text"}
+            </button>
+            {contextPackPromptExpanded && (
+              <pre className="context-pack-prompt">{promptText || "当前 context pack 为空，未生成 prompt_text。"}</pre>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderGenerationPanel = () => (
     <aside className="tool-stack" aria-label="生成与状态">
       <section className="panel generation-panel">
@@ -1338,6 +1641,8 @@ export function App() {
           </section>
         )}
       </section>
+
+      {renderContextPackPanel()}
 
       {apiStatus === "online" && (
         <section className={`panel generation-status-card ${generationStatusClass(generationStatus)}`} aria-live="polite">

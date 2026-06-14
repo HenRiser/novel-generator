@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
+The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, draft recovery, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -104,7 +104,7 @@ The React frontend is available at:
 http://127.0.0.1:5173
 ```
 
-The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file.
+The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file. The creation page can preview a Narrative Context Pack selected from the current Narrative Graph and can optionally attach that previewed context to chapter generation; the option is disabled by default.
 
 React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
 
@@ -112,7 +112,7 @@ React opens to the Braipen home page by default. Clicking the logo mark or `Brai
 Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
 ```
 
-The creation page is for project creation, onboarding, outline/character generation, streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
+The creation page is for project creation, onboarding, outline/character generation, Context Pack preview, optional context-assisted streaming chapter generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, and an enhanced Entity Inspector. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
 
 Current React support:
 
@@ -133,6 +133,12 @@ Current React support:
 - enhanced Entity Inspector for selected nodes and edges
 - controlled `tags`, free-form `aliases`, and free-form `notes`
 - `importance` on a 1-10 scale and `layer` values of `core`, `major`, `detail`, or `background`
+- Context Pack Builder foundation in the creation page
+- Narrative Context Pack preview from the current Narrative Graph
+- local rule-based selection by chapter goal, importance, tags, unresolved foreshadowing, and one-hop graph neighbors
+- user controls for `min_importance`, `max_nodes`, `max_edges`, unresolved foreshadowing inclusion, and neighbor inclusion
+- optional context-assisted chapter generation, disabled by default
+- structured preview with selected nodes, selected edges, stats, warnings, and expandable prompt text
 - read-only Genesis settings display in the project settings page
 - editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
 - current-chapter TXT export and full-book TXT export
@@ -159,8 +165,10 @@ Current React limits:
 - no 2D/3D graph visualization
 - no React Flow graph editor
 - no vector search, embeddings, external search API, or AI semantic search
-- no Context Pack Builder
-- no Narrative Graph injection into chapter generation prompts
+- no default full-graph injection into chapter generation prompts
+- no vector or AI-based Context Pack selection
+- no automatic Narrative Graph updates from generated chapters
+- no foreshadowing conflict detection
 - no AI auto-extraction or AI auto-tagging for graph entities
 - no project deletion / rename / archive
 - no full Streamlit settings migration

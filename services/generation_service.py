@@ -63,6 +63,7 @@ def build_generation_messages(
     project_config: dict[str, Any],
     chapter_number: int,
     use_previous_context: bool,
+    narrative_context_text: str | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     notices: list[str] = []
 
@@ -106,7 +107,21 @@ def build_generation_messages(
         previous_chapter=previous_chapter,
         summaries=summaries,
     )
+    context_text = str(narrative_context_text or "").strip()
+    if context_text:
+        messages = _append_user_context(messages, context_text)
+        notices.append("Loaded Narrative Context Pack.")
     return messages, notices
+
+
+def _append_user_context(messages: list[dict[str, str]], context_text: str) -> list[dict[str, str]]:
+    updated = [dict(message) for message in messages]
+    for index in range(len(updated) - 1, -1, -1):
+        if updated[index].get("role") == "user":
+            updated[index]["content"] = f"{updated[index].get('content', '').rstrip()}\n\n{context_text}"
+            return updated
+    updated.append({"role": "user", "content": context_text})
+    return updated
 
 
 def generate_outline_and_characters(
@@ -316,6 +331,7 @@ def generate_single_chapter(
     temperature: float,
     max_tokens: int,
     use_previous_context: bool,
+    narrative_context_text: str | None = None,
 ) -> ChapterGenerationResult:
     valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
     if not valid:
@@ -330,6 +346,7 @@ def generate_single_chapter(
             project_config=project_config,
             chapter_number=number,
             use_previous_context=use_previous_context,
+            narrative_context_text=narrative_context_text,
         )
         chapter_content = generate_text(
             messages=messages,
@@ -353,6 +370,7 @@ def stream_generate_single_chapter(
     temperature: float,
     max_tokens: int,
     use_previous_context: bool,
+    narrative_context_text: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
     if not valid:
@@ -369,6 +387,7 @@ def stream_generate_single_chapter(
             project_config=project_config,
             chapter_number=number,
             use_previous_context=use_previous_context,
+            narrative_context_text=narrative_context_text,
         )
         for delta in stream_generate_text(
             messages=messages,

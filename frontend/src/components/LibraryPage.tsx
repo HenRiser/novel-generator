@@ -859,8 +859,8 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
         <span className="section-kicker">Library</span>
         <h1 id="library-title">创作资料库</h1>
         <p>
-          Narrative Graph 用于维护人物、场景、物品、伏笔、世界观事实和剧情走向。本阶段支持手动维护、修正和本地规则检索，
-          仍不接入章节生成 prompt，也不提供 2D/3D 图谱。
+          Narrative Graph 用于维护人物、场景、物品、伏笔、世界观事实和剧情走向。本阶段支持手动维护、修正和本地规则检索。
+          章节生成只会在创作页通过可预览、可关闭的 Context Pack 使用这些资料；资料库页不直接生成章节，也不提供 2D/3D 图谱。
         </p>
         <p className="state-text">
           当前项目：{selectedProject ? selectedProject.title || selectedProject.project_ref : "尚未选择项目"}
