@@ -467,8 +467,8 @@ function ProjectCreatePanel({
             </label>
           </div>
           <p className="form-note">
-            React 会创建 workspace 项目；创建项目不会调用模型。Streamlit 旧入口仍保留：
-            <code>start.bat</code>；React 入口：<code>start-react.bat</code>。
+            React 会创建 workspace 项目；创建项目不会调用模型。Braipen 的正式入口是
+            <code>start-react.bat</code>；<code>start.bat</code> 仅作为废弃兼容跳转。
           </p>
           {error && <p className="state-text error-text">{error}</p>}
           {message && <p className="state-text success-text">{message}</p>}

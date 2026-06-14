@@ -1,6 +1,6 @@
 # React Reader / Generation Foundation
 
-This frontend is the React reader and generation surface for `novel-generator`. The React UI now uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI read endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph, and can manually create post-generation Story Delta / Knowledge Draft analysis. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
+This frontend is the only official Braipen frontend for `novel-generator`. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph, and can manually create post-generation Story Delta / Knowledge Draft analysis. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
 
 ## Workspace navigation
 
@@ -23,16 +23,16 @@ The creation page now includes Context Pack Builder foundation support. It previ
 
 The creation page also includes Story Delta + Next Chapter Proposal foundation support. This uses plan B: after chapter prose has already been saved, the user can manually trigger a second analysis pass. Story Delta describes what happened in the current chapter, Next Chapter Proposal describes suggested planning for the next chapter, and Knowledge Draft stores pending-review candidate changes. These drafts are not automatically written to character cards or `narrative_graph.json`.
 
-This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, AI automatic graph extraction, AI automatic graph updates, complete API Key management, or a replacement for the Streamlit legacy frontend.
+This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, AI automatic graph extraction, AI automatic graph updates, or complete API Key management.
 
 ## Frontend entry points
 
-There are two local frontend surfaces:
+There is one official local frontend surface:
 
-- `start.bat` starts the Streamlit legacy frontend at `http://localhost:8501`.
 - `start-react.bat` starts FastAPI plus the React frontend at `http://127.0.0.1:5173`.
+- `start.bat` is a deprecated compatibility shim that prints a retirement notice and redirects to `start-react.bat`.
 
-React requires the FastAPI backend. Streamlit does not require starting FastAPI separately.
+React requires the FastAPI backend. Streamlit is retired and is no longer maintained or tested as a frontend.
 
 ## Start React with the script
 
@@ -87,28 +87,6 @@ You can override the API address with:
 ```text
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
-
-## Start Streamlit legacy frontend
-
-From the project root:
-
-```bat
-.\.venv\Scripts\python.exe -m streamlit run app.py
-```
-
-or:
-
-```bat
-.\start.bat
-```
-
-Open:
-
-```text
-http://localhost:8501
-```
-
-`start.bat` is reserved for the Streamlit legacy frontend. It is separate from `start-react.bat`.
 
 ## Current scope
 
@@ -183,20 +161,14 @@ Not implemented in this stage:
 - Batch streaming generation
 - Full project save APIs beyond safe Generation Settings updates
 - Full model or API Key settings
-- Streamlit streaming UI
+- maintained Streamlit frontend
 - Cancellation API
 - Draft recovery for partial streaming output
 - WebSocket or SSE
 
 The "New novel project" button in React now supports the basic creation loop. It creates a workspace project, writes the initial `book.json`, `project_config.json`, and seed setting data, refreshes the project list, and selects the new project. Creating the project does not call the model, does not generate outline/character files, and does not generate chapters. After creation, use the React guidance panel to generate / update outline and character files, then generate the first chapter.
 
-Streamlit remains available for the legacy full workflow:
-
-```bat
-.\start.bat
-```
-
-Use React for basic project creation, reading projects, outline/character generation, Context Pack preview, optional context-assisted single-chapter generation, Story Delta draft analysis, streaming preview, and TXT export:
+Use React for project creation, reading projects, outline/character generation, Context Pack preview, optional context-assisted single-chapter generation, Story Delta draft analysis, streaming preview, and TXT export:
 
 ```bat
 .\start-react.bat
@@ -217,4 +189,12 @@ Streaming preview behavior:
 - Failed partial preview text is not written to the official chapter file.
 - If generated content appears cut off, increase `max_tokens` or regenerate that chapter.
 
-Streamlit currently continues to use the synchronous generation workflow.
+## Streamlit retirement notes
+
+Streamlit is retired. `app.py` is kept only as a deprecated historical reference, and `start.bat` redirects to the official React + FastAPI startup. Future features and regression tests should target React + FastAPI only.
+
+Residual Streamlit-only capabilities are intentionally not migrated in this stage unless listed below as future React candidates:
+
+- covered by React + FastAPI: project creation, project list/detail, outline/character generation, specified chapter generation, streaming preview, synchronous fallback generation, generation status, reading, TXT export, Narrative Graph, Context Pack, Story Delta, and per-project Generation Settings.
+- intentionally not migrated: Streamlit prompt preview, opening local output directories from the UI, full `.env` API Key write UI, setting expansion UI, edited-result save UI, and legacy Streamlit reader controls.
+- future React candidates: a dedicated one-click next-chapter button, batch chapter generation, system-level API Key/model connection testing, and Knowledge Draft Review & Merge.

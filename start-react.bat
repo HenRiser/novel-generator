@@ -9,8 +9,8 @@ echo.
 echo FastAPI: http://127.0.0.1:8000
 echo React:   http://127.0.0.1:5173
 echo.
-echo start.bat       starts the Streamlit legacy frontend.
-echo start-react.bat starts the FastAPI + React frontend.
+echo start-react.bat starts the official FastAPI + React frontend.
+echo start.bat is a deprecated compatibility shim that redirects here.
 echo.
 
 if not exist ".venv\Scripts\python.exe" (

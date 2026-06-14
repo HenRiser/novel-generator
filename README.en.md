@@ -2,21 +2,21 @@
 
 [中文](README.md) | [English](README.en.md)
 
-A lightweight local-first AI novel writing tool built with Streamlit and the OpenAI-compatible DeepSeek API. The project is designed for personal writing workflows and long-term local iteration: no database, no user system, and no SaaS assumptions.
+A lightweight local-first AI novel writing tool built around the official Braipen frontend: React + FastAPI with the OpenAI-compatible DeepSeek API. The project is designed for personal writing workflows and long-term local iteration: no database, no user system, and no SaaS assumptions. The old Streamlit UI is retired and no longer maintained.
 
 ## Features
 
 - Enter a novel title, genre, writing style, characters, worldview, core conflict, and extra requirements.
 - Generate or update the novel outline as a setting asset.
 - Generate or update character cards as setting assets.
-- Write a specified chapter, continue with the next chapter, or generate a small chapter range.
+- Write a specified chapter with streaming output by default, with synchronous generation kept as a fallback path.
 - Avoid silent overwrites by saving duplicate chapter numbers as versioned files such as `chapter_001_v2.md`.
 - Generate short chapter summaries and maintain `chapter_index.md`.
 - Read previous chapters, summaries, outline, and character cards as context.
 - Expand raw story ideas into structured settings.
 - Preview prompts before calling the API.
 - Save and load `project_config.json`.
-- Configure API Key, Base URL, default model, and custom model names from the UI.
+- Configure per-project generation settings from React, with system-level API Key management kept as a future React + FastAPI task.
 
 ## Quick Start
 
@@ -38,24 +38,24 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEFAULT_MODEL=deepseek-v4-flash
 ```
 
-Start the Streamlit legacy frontend:
+Start the official Braipen frontend:
 
 ```bat
 cd /d D:\vibecoding\novel-generator
-.venv\Scripts\python.exe -m streamlit run app.py
+start-react.bat
 ```
 
 Then open:
 
 ```text
-http://localhost:8501
+http://127.0.0.1:5173
 ```
 
-Windows users can also run `setup.bat` and `start.bat`. `start.bat` is reserved for the Streamlit legacy frontend.
+Windows users can still run `setup.bat` for environment setup. `start-react.bat` is the recommended startup command. `start.bat` is now a deprecated compatibility shim that prints a retirement notice and redirects to `start-react.bat`.
 
-## React Frontend
+## Official React Frontend
 
-The React frontend is separate from Streamlit. It requires the FastAPI backend. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. Its current visual direction is a reading-first writing workspace: warm paper surfaces, low-saturation status colors, comfortable long-form text width, and a manuscript-like streaming preview rather than an AI demo or dashboard-heavy interface.
+React + FastAPI is the only official frontend architecture. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. Its current visual direction is a reading-first writing workspace: warm paper surfaces, low-saturation status colors, comfortable long-form text width, and a manuscript-like streaming preview rather than an AI demo or dashboard-heavy interface.
 
 One-command startup on Windows:
 
@@ -71,7 +71,7 @@ FastAPI: http://127.0.0.1:8000
 React:   http://127.0.0.1:5173
 ```
 
-If `frontend\node_modules` is missing, the React terminal window runs `npm install` before starting Vite. `start-react.bat` does not start Streamlit, and `start.bat` does not start React.
+If `frontend\node_modules` is missing, the React terminal window runs `npm install` before starting Vite. `start-react.bat` starts FastAPI + React only and does not start Streamlit.
 
 Manual startup uses two terminals.
 
@@ -149,17 +149,17 @@ Current React support:
 
 The React "New novel project" button creates a `workspace/books/{book_id}/` project, saves the initial configuration and writing seed, refreshes the project list, and selects the new project. Creating a project does not call the model automatically. After creation, React guides the user to generate or update outline and character files, then generate the first chapter.
 
-Streamlit legacy frontend remains available for the older full workflow:
+## Streamlit Retirement
 
-```bat
-start.bat
-```
+Streamlit is retired as a frontend and is no longer a regression target. `app.py` is kept only as a deprecated historical reference while the project is still consolidating code. New product work, UI work, and test plans should target React + FastAPI only.
 
-Use the React frontend for basic project creation, reading, generation, streaming preview, and export:
+`start.bat` no longer starts Streamlit; it prints a deprecation notice and redirects to `start-react.bat`.
 
-```bat
-start-react.bat
-```
+Residual Streamlit-only capabilities have been triaged:
+
+- covered by React + FastAPI: project creation, project list/detail, outline and character generation, specified chapter generation, streaming preview, synchronous fallback generation, generation status, chapter reading, TXT export, Narrative Graph, Context Pack, Story Delta, and per-project Generation Settings.
+- intentionally not migrated in this stage: Streamlit prompt preview, opening local output directories from the UI, full `.env` API Key write UI, setting expansion UI, edited-result save UI, and legacy Streamlit reader controls.
+- later React candidates: one-click next-chapter command as a dedicated button, batch chapter generation, system-level API Key/model connection testing, and structured Review & Merge for Knowledge Drafts.
 
 Current React limits:
 
@@ -178,12 +178,11 @@ Current React limits:
 - no complete Review & Merge workflow for Knowledge Drafts
 - no AI auto-extraction or AI auto-tagging for graph entities
 - no project deletion / rename / archive
-- no full Streamlit settings migration
 - no batch streaming generation
 - no cancellation API
 - no draft recovery for failed partial output
 - no full model or API Key settings migration beyond per-project `model`, `max_tokens`, and `temperature`
-- no Streamlit streaming UI
+- no maintained Streamlit frontend
 
 For frontend-specific notes, see `frontend/README.md`.
 
@@ -195,14 +194,7 @@ The default model is `deepseek-v4-flash`. The built-in model choices are:
 - `deepseek-v4-pro`
 - `custom`
 
-First-time users can use the Quick Start wizard. Daily changes can be made from the sidebar through **API / Model Settings**, which includes:
-
-- API Key input
-- Base URL
-- default model selection
-- custom model name
-- connection test entry
-- save button
+React currently exposes safe per-project Generation Settings for `model`, `max_tokens`, and `temperature`. System-level API Key and model connection testing remain future React + FastAPI settings work.
 
 API Keys are stored only in the local `.env` file or environment variables. They are not written to `project_config.json`.
 
@@ -218,7 +210,7 @@ novel-generator
 |   |-- package.json
 |   |-- index.html
 |   `-- src/
-|-- app.py
+|-- app.py  # deprecated Streamlit frontend, retained for historical reference
 |-- config.py
 |-- config_manager.py
 |-- deepseek_client.py
@@ -264,14 +256,15 @@ Legacy `outputs/{title}/` projects remain compatible. The app does not automatic
 
 ## Chapter Creation Flow
 
-The main writing area uses a focused **Chapter Creation** workflow:
+The official React creation page uses a focused single-chapter workflow:
 
-- **Continue next chapter**: scans the current project and generates the largest chapter number + 1.
 - **Specified chapter**: uses the chapter number entered by the user.
-- **Batch chapters**: generates a start-to-end chapter range.
-- **Prompt preview**: previews chapter-writing messages only.
+- **Suggested next chapter**: React displays the recommended next chapter number; the user can generate that chapter through the same single-chapter controls.
+- **Streaming first**: streaming generation is the default path, with synchronous generation kept as a fallback/debug path.
+- **Context Pack optional**: Narrative Context Pack preview can be attached to generation only when the user enables it.
+- **Story Delta manual**: post-generation analysis is manually triggered after a chapter exists.
 
-Outline and character cards are treated as setting assets and live near the novel setting controls.
+Batch chapter generation is intentionally not migrated in this consolidation stage.
 
 ## Writing Mode And Story Scale
 

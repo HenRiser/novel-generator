@@ -105,9 +105,10 @@ export function SystemSettingsPage({
               </dd>
             </div>
             <div>
-              <dt>Streamlit legacy</dt>
+              <dt>Deprecated shim</dt>
               <dd>
                 <code>start.bat</code>
+                <span> 会提示并转向 React + FastAPI。</span>
               </dd>
             </div>
           </dl>

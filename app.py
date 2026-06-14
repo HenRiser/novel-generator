@@ -1,3 +1,7 @@
+# DEPRECATED FRONTEND:
+# Streamlit has been retired as a maintained UI. React + FastAPI is the only
+# official Braipen frontend. Keep this file for historical reference only; do
+# not add new product features here.
 from __future__ import annotations
 
 import os

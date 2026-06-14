@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README.en.md)
 
-一个本地运行的轻量 AI 小说生成器，使用 Streamlit 提供 Web 页面，通过 OpenAI Python SDK 调用 DeepSeek API。项目面向个人写作和长期迭代：结构清晰、没有数据库、没有用户系统，方便继续扩展 Prompt、章节创作流程和文件管理能力。
+一个本地运行的轻量 AI 小说生成器。当前正式前端是 Braipen：React + FastAPI，通过 OpenAI 兼容的 DeepSeek API 完成长篇创作工作流。项目面向个人写作和长期迭代：结构清晰、没有数据库、没有用户系统。Streamlit 前端已废弃，不再维护，也不再作为回归测试目标。
 
 ## 功能列表
 
@@ -13,19 +13,17 @@
 - 自动避免覆盖已有文件，例如生成 `chapter_001_v2.md`。
 - 章节生成后自动生成 100 字以内摘要，保存到当前项目的 `summaries/`。
 - 自动维护当前项目的 `chapter_index.md`。
-- 支持续写上一章，读取最近一章正文、历史摘要、大纲和人物卡作为上下文。
-- 支持设定输入与智能扩写，可将一句话灵感、白话梗概或完整企划整理为主角、配角、世界观和核心冲突。
-- 支持 Prompt 预览，不调用 API，方便调试。
+- 支持指定章节流式生成，读取最近章节正文、历史摘要、大纲和人物卡作为上下文。
+- 支持 Narrative Graph、Context Pack、Story Delta 和 Knowledge Draft 的 React + FastAPI 工作流。
 - 支持保存和加载当前项目的 `project_config.json`；新项目默认位于 `workspace/books/{book_id}/`。
-- 支持 Quick Start Wizard，在 UI 中配置 DeepSeek API Key、默认模型并测试连接。
-- 支持日常 API / 模型设置入口，可修改 API Key、Base URL、默认模型和自定义模型名。
-- API Key 从环境变量或本地 `.env` 读取；Quick Start 可将 Key 保存到本地 `.env`，不会写入代码、日志或输出文件。
+- 支持 React 项目配置页中的 Genesis 只读展示和 Generation Settings 安全编辑。
+- API Key 从环境变量或本地 `.env` 读取，不会写入代码、日志或输出文件。
 
 ## 项目结构
 
 ```text
 novel-generator
-├── app.py
+├── app.py  # 已废弃的 Streamlit 前端，仅保留历史参考
 ├── config.py
 ├── config_manager.py
 ├── deepseek_client.py
@@ -88,16 +86,16 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEFAULT_MODEL=deepseek-v4-flash
 ```
 
-启动应用：
+启动正式 Braipen 前端：
 
 ```bat
-streamlit run app.py
+start-react.bat
 ```
 
 打开浏览器中的本地地址，通常是：
 
 ```text
-http://localhost:8501
+http://127.0.0.1:5173
 ```
 
 ## 一键初始化与启动
@@ -120,50 +118,45 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEFAULT_MODEL=deepseek-v4-flash
 ```
 
-启动应用：
+启动正式 Braipen 前端：
 
 ```bat
-start.bat
+start-react.bat
 ```
 
-`start.bat` 会激活虚拟环境、启动 Streamlit，并自动打开：
+`start-react.bat` 会启动 FastAPI 和 React，并自动打开：
 
 ```text
-http://localhost:8501
+http://127.0.0.1:5173
 ```
+
+`start.bat` 仅作为废弃兼容脚本保留：它会打印 Streamlit 退役提示，并转向 `start-react.bat`。
 
 如果启动失败：
 
 - 确认已经运行 `setup.bat`。
 - 确认 Python 已加入 PATH。
 - 确认 `.env` 中已填写 `DEEPSEEK_API_KEY`。
-- 如果 8501 端口被占用，可以手动运行：
+- 如果需要手动启动，可分别启动 FastAPI 和 React：
 
 ```bat
-streamlit run app.py --server.port 8502
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-仍然可以使用手动启动方式：
-
 ```bat
-cd /d D:\vibecoding\novel-generator
-.venv\Scripts\activate
-streamlit run app.py
+cd /d D:\vibecoding\novel-generator\frontend
+npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 ## Quick Start
 
-首次启动后，如果没有检测到有效的 DeepSeek API Key，页面会自动显示 Quick Start Wizard。
+Streamlit Quick Start 已废弃。当前正式配置路径是 React + FastAPI：
 
-Quick Start 支持：
+当前支持：
 
-1. 在 UI 中输入 DeepSeek API Key。
-2. 选择 `deepseek-v4-flash`、`deepseek-v4-pro` 或 `custom` 模型。
-3. 点击“测试连接”验证 API Key 和模型是否可用。
-4. 测试成功后保存配置。
-5. 将 API Key 保存到本地 `.env`。
-6. 将 Base URL 写入 `.env` 中的 `DEEPSEEK_BASE_URL`。
-7. 将默认模型写入 `.env` 中的 `DEFAULT_MODEL`。
+1. 在 `.env` 中配置 `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` 和 `DEFAULT_MODEL`。
+2. 使用 React 项目配置页安全编辑当前项目的 `model`、`max_tokens` 和 `temperature`。
+3. 系统级 API Key 写入、模型连接测试和完整 `.env` 管理将作为后续 React + FastAPI 设置能力处理。
 
 `.env` 只应保存在本地，不应提交到 Git。
 
@@ -171,11 +164,11 @@ Quick Start 支持：
 
 本项目定位为本地单用户工具，不包含用户系统和公网多用户部署配置。
 
-- API Key 可通过 Quick Start 保存到本地 `.env`，也可由环境变量提供。
+- API Key 通过本地 `.env` 或环境变量提供。
 - `.env` 已被 `.gitignore` 排除，不应提交到仓库。
 - 页面不会显示已有 API Key 明文。
 - API Key 不会写入 `project_config.json`。
-- 如果需要更换 API Key、Base URL 或默认模型，可以使用侧边栏的“API / 模型设置”，也可以重新打开 Quick Start。
+- 如果需要更换 API Key、Base URL 或默认模型，当前请直接编辑本地 `.env`；React 的完整系统设置入口会在后续阶段补齐。
 
 ## 导出与阅读
 
@@ -255,33 +248,26 @@ Quick Start 支持：
 workspace/books/{book_id}/setting_expansion_latest.json
 ```
 
-## 设定扩写配置
+## Streamlit 退役说明
 
-设定扩写支持快速配置和高级配置。快速配置包括小说类型、写作风格、写作模式和期望章节数。
+Streamlit 前端已废弃。`app.py` 暂时保留为历史参考，`start.bat` 只打印退役提示并转向 `start-react.bat`。后续新功能、UI 变更和回归测试只面向 React + FastAPI。
 
-高级配置默认折叠，包括剧情密度、叙事节奏、世界观复杂度、角色规模、大纲粒度和额外创作要求。期望章节数会影响大纲规模、角色数量、世界观复杂度和叙事节奏，普通用户只使用快速配置即可。
+Streamlit 残留功能清点：
+
+- 已由 React + FastAPI 覆盖：项目创建、项目列表、项目详情、大纲与人物卡生成、指定章节生成、流式预览、同步备用生成、generation status、章节阅读、TXT 导出、Narrative Graph、Context Pack、Story Delta、项目 Generation Settings。
+- 本阶段有意不迁移：Streamlit Prompt 预览、打开本地输出目录、完整 `.env` API Key 写入 UI、设定扩写 UI、编辑生成结果后另存版本、旧阅读中心细节控件。
+- 后续可考虑迁移：独立“一键继续下一章”按钮、批量章节生成、系统级 API Key / 模型连接测试、Knowledge Draft Review & Merge。
 
 ## API / 模型配置
 
-项目支持在侧边栏选择 DeepSeek 模型。默认模型为 `deepseek-v4-flash`，Base URL 默认为 `https://api.deepseek.com`。
-
-首次使用可以通过 Quick Start 配置 API Key 和默认模型；日常修改可以使用侧边栏的“API / 模型设置”入口。该入口包含 API Key 输入、Base URL、默认模型选择、自定义模型名、连接测试入口和保存配置按钮。
+项目默认模型为 `deepseek-v4-flash`，Base URL 默认为 `https://api.deepseek.com`。当前正式前端在“项目配置”页支持编辑当前项目的 `model`、`max_tokens` 和 `temperature`。
 
 内置可选模型为：
 
 - `deepseek-v4-flash`
 - `deepseek-v4-pro`
 
-侧边栏默认开启“使用统一模型”，开启后所有任务共用同一个模型。关闭统一模型模式后，可以分别设置：
-
-- 设定扩写模型
-- 大纲生成模型
-- 人物卡生成模型
-- 章节正文生成模型
-- 章节标题生成模型
-- 章节摘要生成模型
-
-每个模型选择项都支持 `custom`。自定义模型名会直接传给 DeepSeek API；如果模型名无效，API 会返回错误，页面会显示错误信息。当前任务模型设置会保存进当前小说项目的 `project_config.json`，默认模型和 Base URL 会保存进本地 `.env`。
+React 当前只允许安全选择内置模型，不允许任意输入模型名。系统级 API Key、Base URL、连接测试和完整模型管理仍是后续 React + FastAPI 设置页任务。
 
 ## 输出目录结构
 
@@ -303,7 +289,7 @@ workspace/
             └── chapter_001_summary.md
 ```
 
-旧版 `outputs/小说标题/` 项目仍会出现在项目列表中，并继续按原目录读写；系统不会自动迁移、删除或改名旧项目。不同小说的数据互相隔离。一键继续下一章只会读取当前小说项目的 `chapters/`、`summaries/`、`novel_outline.md` 和 `characters.md`。新项目标题为空时使用“未命名小说”作为显示标题。
+旧版 `outputs/小说标题/` 项目仍会出现在项目列表中，并继续按原目录读写；系统不会自动迁移、删除或改名旧项目。不同小说的数据互相隔离。新项目标题为空时使用“未命名小说”作为显示标题。
 
 ## 项目路径管理
 
@@ -323,15 +309,16 @@ workspace/
 
 ## 章节创作
 
-页面中的正文生成入口集中在“章节创作”区域：
+React 创作页中的正文生成入口集中在单章生成工作流：
 
-- 一键继续下一章：根据当前项目已有最新章节，生成最大章节号 + 1。
 - 指定章节：使用用户输入的章节编号生成正文。
-- 批量章节：按起始章节到结束章节顺序生成。
-- 一次最多生成 5 章，超过限制时不会调用 API。
-- 第一版会阻止跳章，范围起点必须是当前最新章节的下一章；如果当前项目没有章节，则只能从第 1 章开始。
-- 每章都会顺序读取当前小说项目的上一章正文、历史摘要、大纲和人物卡，并自动生成章节标题、摘要、更新 `chapter_index.md`。
-- 如果中途某章正文生成失败，批量生成会停止，已成功保存的章节会保留。
+- 推荐下一章：页面显示建议下一章编号，用户可通过同一单章控件生成。
+- 默认流式生成：实时预览正文，完成后保存章节、摘要并更新 `chapter_index.md`。
+- 同步备用生成：保留为流式异常时的备用 / 调试入口。
+- Context Pack：可预览并选择是否辅助本次生成，默认关闭。
+- Story Delta：章节存在后可手动触发第二次分析，生成待审核 Knowledge Draft。
+
+批量章节生成和独立“一键继续下一章”按钮暂未迁移。
 
 ## 当前开发状态
 
