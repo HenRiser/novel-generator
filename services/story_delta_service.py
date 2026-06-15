@@ -22,8 +22,10 @@ from .reader_service import read_chapter_for_display
 
 DOCUMENT_VERSION = 1
 MEMORY_DIR_NAME = "memory"
+LOGS_DIR_NAME = "logs"
 STORY_DELTAS_NAME = "story_deltas.json"
 KNOWLEDGE_DRAFTS_NAME = "knowledge_drafts.json"
+STORY_DELTA_FAILURES_DIR_NAME = "story_delta_failures"
 DEFAULT_STORY_DELTA = {
     "new_characters": [],
     "character_updates": [],
@@ -72,6 +74,14 @@ class StoryDeltaResult:
     warnings: list[str] = field(default_factory=list)
     message: str = ""
     story_delta_item: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class StoryDeltaParseResult:
+    data: dict[str, Any] | None = None
+    error: str = ""
+    json_text: str = ""
 
 
 @dataclass(frozen=True)
@@ -122,6 +132,14 @@ def _knowledge_drafts_path(ctx: Any) -> Path:
     return _memory_dir(ctx) / KNOWLEDGE_DRAFTS_NAME
 
 
+def _story_delta_failures_dir(ctx: Any) -> Path:
+    return ctx.project_dir / LOGS_DIR_NAME / STORY_DELTA_FAILURES_DIR_NAME
+
+
+def _story_delta_failure_ref(failure_id: str) -> str:
+    return f"{LOGS_DIR_NAME}/{STORY_DELTA_FAILURES_DIR_NAME}/{failure_id}.json"
+
+
 def _read_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -139,6 +157,46 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
     temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     temp_path.replace(path)
+
+
+def _redact_sensitive_text(text: Any) -> str:
+    value = str(text or "")
+    value = re.sub(
+        r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;)}\]]+",
+        r"\1[redacted]",
+        value,
+    )
+    value = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._\-]+", r"\1[redacted]", value)
+    value = re.sub(r"(?i)(api[-_ ]?key\s*[:=]\s*)[^\s,;)}\]]+", r"\1[redacted]", value)
+    return value
+
+
+def _save_story_delta_failure(
+    ctx: Any,
+    project_ref: str,
+    chapter_number: int,
+    stage: str,
+    parse_error: str,
+    raw_output: str,
+    model: str | None,
+) -> tuple[str, str]:
+    failure_id = _safe_id("story_delta_failure")
+    artifact = {
+        "version": DOCUMENT_VERSION,
+        "id": failure_id,
+        "project_ref": project_ref,
+        "chapter_number": chapter_number,
+        "stage": _clean_text(stage),
+        "parse_error": _clean_text(parse_error),
+        "raw_output": _redact_sensitive_text(raw_output),
+        "model": _clean_text(model) or None,
+        "created_at": _timestamp(),
+    }
+    try:
+        _write_json_atomic(_story_delta_failures_dir(ctx) / f"{failure_id}.json", artifact)
+    except (OSError, ValueError) as exc:
+        return "", f"Story Delta failure artifact save failed: {exc}"
+    return _story_delta_failure_ref(failure_id), ""
 
 
 def _empty_story_deltas(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
@@ -229,9 +287,9 @@ def _as_bool(value: Any, default: bool) -> bool:
 
 def _story_delta_max_tokens(project_config: dict[str, Any]) -> int:
     try:
-        return max(1500, min(int(project_config.get("max_tokens") or 2500), 4000))
+        return max(4000, min(int(project_config.get("max_tokens") or 8000), 12000))
     except (TypeError, ValueError):
-        return 2500
+        return 8000
 
 
 def _validate_chapter_number(value: Any) -> tuple[int, str]:
@@ -321,8 +379,10 @@ def build_story_delta_prompt(
     target_chapter_number = int(chapter_number) + 1
     system_prompt = (
         "You are a story continuity analyst. You are not continuing the prose. "
-        "Analyze an already generated chapter and return only valid JSON. "
-        "Do not output Markdown, explanations, or code fences. "
+        "Analyze an already generated chapter and return exactly one valid JSON object. "
+        "Do not output Markdown, code fences, comments, explanations, or any text outside JSON. "
+        "Use strict JSON syntax: double-quote every string, escape internal double quotes, "
+        "put commas between all array items and object fields, and never use trailing commas. "
         "Do not treat next-chapter plans as facts that already happened. "
         "All candidate changes must require user review."
     )
@@ -365,6 +425,11 @@ Analyze chapter {chapter_number} and return a single JSON object with this shape
 }}
 
 Rules:
+- Output exactly one JSON object and nothing else.
+- Do not wrap the JSON in Markdown or a code fence.
+- Do not add comments, trailing commas, Python literals, or prose outside the JSON object.
+- Every string must use double quotes, and double quotes inside strings must be escaped.
+- Every array item and object field must be separated by a comma.
 - story_delta describes facts that actually happened in chapter {chapter_number}.
 - next_chapter_proposal describes proposed planning for chapter {target_chapter_number}; it is not confirmed canon.
 - Put uncertain facts in warnings, not in story_delta.
@@ -373,6 +438,8 @@ Rules:
 - Candidate operations may only be create_character_card, update_character_card, create_node, update_node, create_edge, update_edge, create_plot_direction, create_world_fact, create_foreshadowing, update_foreshadowing, or merge_suggestion.
 - Do not propose delete operations.
 - Every candidate change must include requires_review=true and evidence or rationale.
+- Keep candidate_changes focused and concise; prefer 3-10 high-value changes rather than many low-value records.
+- Keep payload text concise. Do not copy long chapter passages into payload.
 - Candidate payloads for next chapter proposals should use suggested_status="planned".
 - Candidate payloads for facts observed in this chapter should use suggested_status="confirmed".
 
@@ -443,32 +510,187 @@ def _dry_run_response(chapter_number: int, chapter_content: str, include_next: b
     }
 
 
-def _extract_json_body(text: str) -> str:
+def _strip_markdown_code_fence(text: str) -> str:
     cleaned = _clean_text(text)
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-    if start >= 0 and end > start:
-        cleaned = cleaned[start : end + 1]
-    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
-    cleaned = re.sub(r"\bTrue\b", "true", cleaned)
-    cleaned = re.sub(r"\bFalse\b", "false", cleaned)
-    cleaned = re.sub(r"\bNone\b", "null", cleaned)
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        return fenced.group(1).strip()
     return cleaned
 
 
-def parse_story_delta_response(raw_text: str) -> tuple[dict[str, Any] | None, str]:
-    text = _extract_json_body(raw_text)
+def _extract_json_object(text: str) -> str:
+    cleaned = _strip_markdown_code_fence(text)
+    start = cleaned.find("{")
+    if start < 0:
+        return ""
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for index in range(start, len(cleaned)):
+        char = cleaned[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return cleaned[start : index + 1].strip()
+
+    end = cleaned.rfind("}")
+    if end > start:
+        return cleaned[start : end + 1].strip()
+    return cleaned[start:].strip()
+
+
+def _repair_common_json_issues(text: str) -> str:
+    repaired = _extract_json_object(text)
+    repaired = repaired.lstrip("\ufeff")
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+    repaired = re.sub(r"\bTrue\b", "true", repaired)
+    repaired = re.sub(r"\bFalse\b", "false", repaired)
+    repaired = re.sub(r"\bNone\b", "null", repaired)
+    return repaired
+
+
+def _parse_story_delta_json(raw_text: str) -> StoryDeltaParseResult:
+    text = _repair_common_json_issues(raw_text)
     if not text:
-        return None, "Model response was empty."
+        return StoryDeltaParseResult(error="Model response did not contain a JSON object.")
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        return None, f"Story Delta JSON parse failed: {exc.msg}."
+        return StoryDeltaParseResult(
+            error=f"Story Delta JSON parse failed: {exc.msg} at line {exc.lineno}, column {exc.colno}.",
+            json_text=text,
+        )
     if not isinstance(data, dict):
-        return None, "Story Delta response must be a JSON object."
-    return data, ""
+        return StoryDeltaParseResult(error="Story Delta response must be a JSON object.", json_text=text)
+    return StoryDeltaParseResult(data=data, json_text=text)
+
+
+def parse_story_delta_response(raw_text: str) -> tuple[dict[str, Any] | None, str]:
+    result = _parse_story_delta_json(raw_text)
+    return result.data, result.error
+
+
+def build_story_delta_json_repair_prompt(raw_output: str, parse_error: str) -> list[dict[str, str]]:
+    system_prompt = (
+        "You repair malformed JSON only. Do not analyze the story again. "
+        "Return exactly one valid JSON object and no Markdown, code fences, comments, or explanations."
+    )
+    user_prompt = f"""
+Repair the following Story Delta model output into strict valid JSON.
+
+Rules:
+- Do not add new story facts.
+- Do not remove existing story facts.
+- Only fix JSON syntax, field structure, missing commas, invalid quotes, invalid literals, or Markdown wrapping.
+- Output one JSON object with top-level keys: story_delta, next_chapter_proposal, candidate_changes, warnings.
+- Use double quotes for all strings.
+- Escape internal double quotes inside strings.
+- Use commas between all array items and object fields.
+- Do not use trailing commas.
+- Do not output any text outside the JSON object.
+- If the malformed output was truncated, preserve complete data that is present, close the JSON safely, and add a warning noting truncation.
+- The first character of your response must be {{ and the last character must be }}.
+
+Parser error:
+{_truncate(parse_error, 500)}
+
+Malformed output:
+{_truncate(raw_output, 24000)}
+""".strip()
+    return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+
+
+def _parse_or_repair_story_delta_response(
+    ctx: Any,
+    project_ref: str,
+    chapter_number: int,
+    raw_output: str,
+    model: str | None,
+    max_tokens: int,
+) -> tuple[dict[str, Any] | None, dict[str, Any], str]:
+    initial = _parse_story_delta_json(raw_output)
+    metadata: dict[str, Any] = {
+        "parse_status": "success" if initial.data is not None else "failed",
+        "repair_used": False,
+        "failure_ref": None,
+        "repair_failure_ref": None,
+    }
+    if initial.data is not None:
+        return initial.data, metadata, ""
+
+    failure_ref, failure_save_error = _save_story_delta_failure(
+        ctx=ctx,
+        project_ref=project_ref,
+        chapter_number=chapter_number,
+        stage="initial_parse",
+        parse_error=initial.error,
+        raw_output=raw_output,
+        model=model,
+    )
+    if failure_ref:
+        metadata["failure_ref"] = failure_ref
+    if failure_save_error:
+        metadata["failure_artifact_error"] = failure_save_error
+
+    repair_messages = build_story_delta_json_repair_prompt(raw_output, initial.error)
+    try:
+        repair_output = generate_text(
+            messages=repair_messages,
+            model=model,
+            temperature=0,
+            max_tokens=max_tokens,
+        )
+    except DeepSeekClientError as exc:
+        error_parts = [f"Story Delta JSON parse failed and repair request failed: {exc}"]
+        if failure_ref:
+            error_parts.append(f"failure_ref={failure_ref}")
+        return None, metadata, " ".join(error_parts)
+    except Exception as exc:
+        error_parts = [f"Story Delta JSON parse failed and repair failed: {exc}"]
+        if failure_ref:
+            error_parts.append(f"failure_ref={failure_ref}")
+        return None, metadata, " ".join(error_parts)
+
+    repaired = _parse_story_delta_json(repair_output)
+    if repaired.data is not None:
+        metadata["parse_status"] = "success"
+        metadata["repair_used"] = True
+        return repaired.data, metadata, ""
+
+    repair_failure_ref, repair_failure_save_error = _save_story_delta_failure(
+        ctx=ctx,
+        project_ref=project_ref,
+        chapter_number=chapter_number,
+        stage="repair_parse",
+        parse_error=repaired.error,
+        raw_output=repair_output,
+        model=model,
+    )
+    if repair_failure_ref:
+        metadata["repair_failure_ref"] = repair_failure_ref
+    if repair_failure_save_error:
+        metadata["repair_failure_artifact_error"] = repair_failure_save_error
+
+    error_parts = [f"{initial.error} Repair also failed: {repaired.error}"]
+    if failure_ref:
+        error_parts.append(f"failure_ref={failure_ref}")
+    if repair_failure_ref:
+        error_parts.append(f"repair_failure_ref={repair_failure_ref}")
+    return None, metadata, " ".join(error_parts)
 
 
 def _string_list(value: Any) -> list[str]:
@@ -750,6 +972,12 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
     resolved_max_tokens = _story_delta_max_tokens(project_config)
     analysis_messages: list[dict[str, str]] | None = None
     analysis_status = "success"
+    parse_metadata: dict[str, Any] = {
+        "parse_status": "success",
+        "repair_used": False,
+        "failure_ref": None,
+        "repair_failure_ref": None,
+    }
 
     if mock_response not in (None, ""):
         analysis_status = "mocked"
@@ -782,9 +1010,22 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
             return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=str(exc))
         except Exception as exc:
             return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=f"Story Delta analysis failed: {exc}")
-        raw_payload, parse_error = parse_story_delta_response(analysis_text)
+        raw_payload, parse_metadata, parse_error = _parse_or_repair_story_delta_response(
+            ctx=ctx,
+            project_ref=project_ref,
+            chapter_number=number,
+            raw_output=analysis_text,
+            model=model,
+            max_tokens=resolved_max_tokens,
+        )
         if parse_error:
-            return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=parse_error)
+            return StoryDeltaResult(
+                False,
+                project_ref=project_ref,
+                chapter_number=number,
+                message=parse_error,
+                metadata=parse_metadata,
+            )
 
     story_delta, next_proposal, candidate_changes, warnings = normalize_story_delta(raw_payload or {}, number, include_next)
     delta_id = _safe_id(f"delta_chapter_{number:03d}")
@@ -802,6 +1043,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
         "story_delta": story_delta,
         "next_chapter_proposal": next_proposal,
         "warnings": warnings,
+        "metadata": parse_metadata,
         "created_at": created_at,
     }
     save_delta_result = save_story_delta(project_ref, story_delta_item)
@@ -844,6 +1086,8 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
                 "context_pack_summary_present": bool(context_pack_summary),
                 "include_next_chapter_proposal": include_next,
                 "include_knowledge_draft": include_draft,
+                "parse_status": parse_metadata.get("parse_status"),
+                "repair_used": bool(parse_metadata.get("repair_used")),
             },
         },
         result={
@@ -854,6 +1098,10 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
             "metadata": {
                 "story_delta_id": delta_id,
                 "knowledge_draft_id": knowledge_draft.get("id") if isinstance(knowledge_draft, dict) else None,
+                "parse_status": parse_metadata.get("parse_status"),
+                "repair_used": bool(parse_metadata.get("repair_used")),
+                "failure_ref": parse_metadata.get("failure_ref"),
+                "repair_failure_ref": parse_metadata.get("repair_failure_ref"),
             },
         },
     )
@@ -868,6 +1116,9 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
             "knowledge_draft_id": knowledge_draft.get("id") if isinstance(knowledge_draft, dict) else None,
             "include_knowledge_draft": include_draft,
             "ai_run_id": ai_run_id,
+            "parse_status": parse_metadata.get("parse_status"),
+            "repair_used": bool(parse_metadata.get("repair_used")),
+            "failure_ref": parse_metadata.get("failure_ref"),
         },
         changed_targets=changed_targets,
     )
@@ -882,6 +1133,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
         warnings=warnings,
         message="Story Delta analysis saved.",
         story_delta_item=story_delta_item,
+        metadata=parse_metadata,
     )
 
 

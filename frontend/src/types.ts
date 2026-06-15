@@ -448,6 +448,7 @@ export type StoryDeltaAnalyzeResponse = {
   knowledge_draft: KnowledgeDraft;
   warnings: string[];
   message: string;
+  metadata: Record<string, unknown>;
 };
 
 export type StoryDeltaListResponse = {

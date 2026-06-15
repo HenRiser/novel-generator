@@ -76,6 +76,7 @@ def analyze_story_delta(
         knowledge_draft=_sanitize_payload(result.knowledge_draft),
         warnings=_sanitize_payload(result.warnings),
         message=result.message,
+        metadata=_sanitize_payload(result.metadata),
     )
 
 

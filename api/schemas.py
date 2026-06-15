@@ -158,6 +158,7 @@ class StoryDeltaAnalyzeResponse(BaseModel):
     knowledge_draft: dict[str, Any]
     warnings: list[str] = []
     message: str = ""
+    metadata: dict[str, Any] = {}
 
 
 class StoryDeltaListResponse(BaseModel):
