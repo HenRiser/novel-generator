@@ -23,7 +23,9 @@ from prompt_templates import (
 )
 
 from .chapter_service import extract_chapter_title
+from .ai_run_service import create_ai_run_record_best_effort
 from .event_log_service import append_event_best_effort
+from .prompt_profile_service import build_prompt_profile
 from .schemas import ChapterGenerationResult, OutlineCharacterGenerationResult
 
 
@@ -125,6 +127,32 @@ def _append_user_context(messages: list[dict[str, str]], context_text: str) -> l
     return updated
 
 
+def _chapter_ai_run_metadata(
+    messages: list[dict[str, str]],
+    temperature: Any,
+    max_tokens: Any,
+    use_previous_context: bool,
+    narrative_context_text: str | None,
+) -> dict[str, Any]:
+    return {
+        "messages": [dict(message) for message in messages],
+        "temperature": temperature,
+        "max_tokens": int(max_tokens),
+        "context": {
+            "context_pack_id": None,
+            "included_node_ids": [],
+            "included_edge_ids": [],
+            "outline_refs": [],
+            "summary_refs": [],
+            "chapter_refs": [],
+            "metadata": {
+                "use_previous_context": bool(use_previous_context),
+                "narrative_context_attached": bool(str(narrative_context_text or "").strip()),
+            },
+        },
+    }
+
+
 def generate_outline_and_characters(
     project_ref: str,
     project_config: dict[str, Any],
@@ -210,6 +238,7 @@ def _finalize_generated_chapter(
     chapter_content: str,
     task_models: dict[str, str],
     notices: list[str] | None = None,
+    ai_run_metadata: dict[str, Any] | None = None,
 ) -> ChapterGenerationResult:
     notices = list(notices or [])
     chapter_model = _model(task_models, "chapter")
@@ -275,6 +304,31 @@ def _finalize_generated_chapter(
             summary_model=summary_model,
         )
 
+    ai_run_id = None
+    if isinstance(ai_run_metadata, dict):
+        ai_run_result = create_ai_run_record_best_effort(
+            project_ref=project_ref,
+            run_type="chapter_generation",
+            chapter_number=chapter_number,
+            model=chapter_model,
+            temperature=ai_run_metadata.get("temperature"),
+            max_tokens=ai_run_metadata.get("max_tokens"),
+            prompt_profile=build_prompt_profile("chapter_generation", ai_run_metadata.get("messages")),
+            context=ai_run_metadata.get("context"),
+            result={
+                "status": "success",
+                "output_ref": f"chapters/{Path(chapter_path).name}",
+                "finish_reason": None,
+                "error": None,
+                "metadata": {
+                    "summary_file": Path(summary_path).name if summary_path else None,
+                    "index_file": Path(index_path).name,
+                },
+            },
+        )
+        if ai_run_result.ok:
+            ai_run_id = ai_run_result.run_id
+
     changed_targets = [f"chapters/{Path(chapter_path).name}", Path(index_path).name]
     if summary_path:
         changed_targets.insert(1, f"summaries/{Path(summary_path).name}")
@@ -288,6 +342,7 @@ def _finalize_generated_chapter(
             "summary_file": Path(summary_path).name if summary_path else None,
             "index_file": Path(index_path).name,
             "summary_error": summary_error,
+            "ai_run_id": ai_run_id,
         },
         changed_targets=changed_targets,
     )
@@ -372,12 +427,19 @@ def generate_single_chapter(
             temperature=temperature,
             max_tokens=int(max_tokens),
         )
+        ai_run_metadata = _chapter_ai_run_metadata(
+            messages,
+            temperature,
+            max_tokens,
+            use_previous_context,
+            narrative_context_text,
+        )
     except DeepSeekClientError as exc:
         return _chapter_failure(number, str(exc), task_models)
     except Exception as exc:
         return _chapter_failure(number, f"Chapter generation failed: {exc}", task_models)
 
-    return _finalize_generated_chapter(ref, number, chapter_content, task_models, notices)
+    return _finalize_generated_chapter(ref, number, chapter_content, task_models, notices, ai_run_metadata)
 
 
 def stream_generate_single_chapter(
@@ -431,7 +493,14 @@ def stream_generate_single_chapter(
         )
         return
 
-    result = _finalize_generated_chapter(ref, number, chapter_content, task_models, notices)
+    ai_run_metadata = _chapter_ai_run_metadata(
+        messages,
+        temperature,
+        max_tokens,
+        use_previous_context,
+        narrative_context_text,
+    )
+    result = _finalize_generated_chapter(ref, number, chapter_content, task_models, notices, ai_run_metadata)
     if not result.ok:
         yield _stream_error_event(result.message, number, partial_length=len(chapter_content))
         return

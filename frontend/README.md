@@ -125,6 +125,9 @@ Implemented:
 - Event Log foundation for chapter generation, Story Delta, Knowledge Draft review, and Narrative Graph CRUD events
 - Safety Snapshot foundation before Knowledge Draft accept and Narrative Graph update/delete operations
 - Read-only audit APIs: `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`
+- AI Run Provenance foundation for `chapter_generation` and `story_delta_analysis`
+- Read-only AI run APIs: `GET /api/projects/{project_ref}/ai-runs` and `GET /api/projects/{project_ref}/ai-runs/{run_id}`
+- Prompt profile records with `template_version`, `prompt_hash`, limited `prompt_preview`, model/config, context refs, and result refs
 - Dry-run analysis mode for local testing without calling DeepSeek
 - Project settings with read-only Genesis fields
 - Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
@@ -159,7 +162,8 @@ Not implemented in this stage:
 - Single-pass chapter prose plus metadata trailer output
 - Automatic character-card merge from Story Delta
 - `update_node` / `update_edge`, character-card writes, batch accept/reject, duplicate resolution, conflict detection, or AI auto-review for Knowledge Drafts
-- AI Run Provenance, Prompt Profile, Timeline Review, Workflow Guard, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge
+- Prompt Editor or user-defined prompt UI
+- Saved complete prompt text in AI run records
 - Rollback / restore UI, snapshot diff view, automatic snapshot cleanup, or full Git-style branch system
 - AI automatic graph extraction or AI automatic tagging
 - Full project management
@@ -189,7 +193,9 @@ Story Delta analysis in React calls `POST /api/projects/{project_ref}/chapters/{
 
 Knowledge Draft review in React uses `GET /api/projects/{project_ref}/knowledge-drafts`, `GET /api/projects/{project_ref}/knowledge-drafts/{draft_id}`, `POST /api/projects/{project_ref}/knowledge-drafts/{draft_id}/changes/{change_id}/accept`, and `POST /api/projects/{project_ref}/knowledge-drafts/{draft_id}/changes/{change_id}/reject`. Accepting is intentionally limited to `create_node` and `create_edge`; rejecting is available for unsupported operations too. This is a review foundation, not AI auto-review, batch merge, character-card merge, duplicate resolution, or conflict detection.
 
-Audit review APIs expose `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`. They are read-only. Event Log and Safety Snapshot are foundations only: they record audit events and create pre-write JSON backups for selected high-risk operations, but they do not provide rollback, restore UI, diff view, automatic cleanup, AI Run Provenance, Prompt Profile, Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge.
+Audit review APIs expose `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`. They are read-only. Event Log and Safety Snapshot are foundations only: they record audit events and create pre-write JSON backups for selected high-risk operations, but they do not provide rollback, restore UI, diff view, automatic cleanup, Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge.
+
+AI Run Provenance APIs expose `GET /api/projects/{project_ref}/ai-runs` and `GET /api/projects/{project_ref}/ai-runs/{run_id}`. The first version records only chapter generation and Story Delta analysis runs. It stores model/config values, prompt profile ids, template versions, prompt hashes, limited prompt previews, context refs, and output refs. It does not save complete prompt text, API keys, `.env` content, local absolute paths, Prompt Editor data, Timeline data, Health Dashboard data, Future Outline Revision data, Consistency Policy results, or Advanced Review & Merge state.
 
 Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button. When the user enables context-assisted generation, React sends the previewed Narrative Context Pack text as optional generation context; when disabled or absent, the request path stays unchanged.
 

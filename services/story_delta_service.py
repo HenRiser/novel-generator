@@ -12,8 +12,10 @@ from deepseek_client import DeepSeekClientError, generate_text
 from file_manager import read_latest_characters, read_latest_outline, resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
 
+from .ai_run_service import create_ai_run_record_best_effort
 from .event_log_service import append_event_best_effort
 from .narrative_graph_service import load_narrative_graph
+from .prompt_profile_service import build_prompt_profile
 from .project_service import load_project_detail
 from .reader_service import read_chapter_for_display
 
@@ -223,6 +225,13 @@ def _as_bool(value: Any, default: bool) -> bool:
         if lowered in {"0", "false", "no", "off"}:
             return False
     return bool(value)
+
+
+def _story_delta_max_tokens(project_config: dict[str, Any]) -> int:
+    try:
+        return max(1500, min(int(project_config.get("max_tokens") or 2500), 4000))
+    except (TypeError, ValueError):
+        return 2500
 
 
 def _validate_chapter_number(value: Any) -> tuple[int, str]:
@@ -737,14 +746,20 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
     if not chapter.ok:
         return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=chapter.message or f"Chapter {number} was not found.")
     chapter_summary, summary_file = _load_summary(ctx, number)
+    model = _clean_text(project_config.get("model")) or None
+    resolved_max_tokens = _story_delta_max_tokens(project_config)
+    analysis_messages: list[dict[str, str]] | None = None
+    analysis_status = "success"
 
     if mock_response not in (None, ""):
+        analysis_status = "mocked"
         raw_payload = mock_response if isinstance(mock_response, dict) else None
         if raw_payload is None:
             raw_payload, parse_error = parse_story_delta_response(str(mock_response))
             if parse_error:
                 return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=parse_error)
     elif dry_run:
+        analysis_status = "dry_run"
         raw_payload = _dry_run_response(number, chapter.content, include_next)
     else:
         messages = build_story_delta_prompt(
@@ -755,14 +770,13 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
             chapter_summary=chapter_summary,
             context_pack_summary=context_pack_summary,
         )
-        model = _clean_text(project_config.get("model")) or None
-        max_tokens = project_config.get("max_tokens")
+        analysis_messages = messages
         try:
             analysis_text = generate_text(
                 messages=messages,
                 model=model,
                 temperature=0.2,
-                max_tokens=max(1500, min(int(max_tokens or 2500), 4000)),
+                max_tokens=resolved_max_tokens,
             )
         except DeepSeekClientError as exc:
             return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=str(exc))
@@ -811,6 +825,39 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
     changed_targets = ["memory/story_deltas.json"]
     if include_draft:
         changed_targets.append("memory/knowledge_drafts.json")
+    ai_run_result = create_ai_run_record_best_effort(
+        project_ref=project_ref,
+        run_type="story_delta_analysis",
+        chapter_number=number,
+        model=model,
+        temperature=0.2,
+        max_tokens=resolved_max_tokens,
+        prompt_profile=build_prompt_profile("story_delta_analysis", analysis_messages),
+        context={
+            "context_pack_id": None,
+            "included_node_ids": [],
+            "included_edge_ids": [],
+            "outline_refs": [],
+            "summary_refs": [summary_file] if summary_file else [],
+            "chapter_refs": [Path(chapter.filename).name],
+            "metadata": {
+                "context_pack_summary_present": bool(context_pack_summary),
+                "include_next_chapter_proposal": include_next,
+                "include_knowledge_draft": include_draft,
+            },
+        },
+        result={
+            "status": analysis_status,
+            "output_ref": "memory/story_deltas.json",
+            "finish_reason": None,
+            "error": None,
+            "metadata": {
+                "story_delta_id": delta_id,
+                "knowledge_draft_id": knowledge_draft.get("id") if isinstance(knowledge_draft, dict) else None,
+            },
+        },
+    )
+    ai_run_id = ai_run_result.run_id if ai_run_result.ok else None
     append_event_best_effort(
         project_ref=project_ref,
         event_type="story_delta_analyzed",
@@ -820,6 +867,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
             "story_delta_id": delta_id,
             "knowledge_draft_id": knowledge_draft.get("id") if isinstance(knowledge_draft, dict) else None,
             "include_knowledge_draft": include_draft,
+            "ai_run_id": ai_run_id,
         },
         changed_targets=changed_targets,
     )

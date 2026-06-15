@@ -216,6 +216,20 @@ class SafetySnapshotListResponse(BaseModel):
     message: str = ""
 
 
+class AIRunListResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    runs: list[dict[str, Any]]
+    message: str = ""
+
+
+class AIRunResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    run: dict[str, Any]
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

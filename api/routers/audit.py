@@ -4,8 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from api.schemas import EventLogResponse, SafetySnapshotListResponse
+from api.schemas import AIRunListResponse, AIRunResponse, EventLogResponse, SafetySnapshotListResponse
 from config import PROJECT_ROOT
+from services.ai_run_service import get_ai_run, list_ai_runs
 from services.event_log_service import list_events
 from services.safety_snapshot_service import list_safety_snapshots
 
@@ -67,4 +68,30 @@ def get_snapshots(project_ref: str) -> SafetySnapshotListResponse:
         project_ref=result.project_ref,
         snapshots=_sanitize_payload(result.snapshots),
         message="Safety snapshots loaded.",
+    )
+
+
+@router.get("/ai-runs", response_model=AIRunListResponse)
+def get_ai_runs(project_ref: str) -> AIRunListResponse:
+    result = list_ai_runs(project_ref)
+    if not result.ok:
+        _error(result.status_code, result.error_code, result.message)
+    return AIRunListResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        runs=_sanitize_payload(result.runs),
+        message="AI runs loaded.",
+    )
+
+
+@router.get("/ai-runs/{run_id}", response_model=AIRunResponse)
+def get_ai_run_by_id(project_ref: str, run_id: str) -> AIRunResponse:
+    result = get_ai_run(project_ref, run_id)
+    if not result.ok:
+        _error(result.status_code, result.error_code, result.message)
+    return AIRunResponse(
+        ok=True,
+        project_ref=result.project_ref,
+        run=_sanitize_payload(result.run),
+        message="AI run loaded.",
     )
