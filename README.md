@@ -15,6 +15,7 @@
 - 自动维护当前项目的 `chapter_index.md`。
 - 支持指定章节流式生成，读取最近章节正文、历史摘要、大纲和人物卡作为上下文。
 - 支持 Narrative Graph、Context Pack、Story Delta、Knowledge Draft Review & Merge 的 React + FastAPI 工作流。
+- 支持 Event Log + Safety Snapshot Foundation：关键写操作会追加审计事件，Review & Merge accept 与 Narrative Graph update/delete 前会创建安全快照。
 - 支持保存和加载当前项目的 `project_config.json`；新项目默认位于 `workspace/books/{book_id}/`。
 - 支持 React 项目配置页中的 Genesis 只读展示和 Generation Settings 安全编辑。
 - API Key 从环境变量或本地 `.env` 读取，不会写入代码、日志或输出文件。
@@ -318,6 +319,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - Context Pack：可预览并选择是否辅助本次生成，默认关闭。
 - Story Delta：章节存在后可手动触发第二次分析，生成待审核 Knowledge Draft。
 - Knowledge Draft Review & Merge：资料库页支持单条 candidate_change 接受 / 拒绝；第一版只允许 `create_node` / `create_edge` 写入正式 `narrative_graph.json`，拒绝不会写入 graph。
+- Event Log + Safety Snapshot：`workspace/books/{book_id}/history/events.json` 记录章节生成、Story Delta、Knowledge Draft review 和 Narrative Graph CRUD 事件；`workspace/books/{book_id}/snapshots/` 保存 Review & Merge accept 与 Narrative Graph update/delete 前的关键 JSON 快照。第一版不提供 rollback / restore UI、diff view、自动清理、AI Run Provenance、Prompt Profile、Timeline、Health Dashboard、Future Outline Revision、Consistency Policy 或 Advanced Review & Merge。
 - 暂不支持合并的 operation 会展示但不可接受，包括人物卡写入、`update_node` / `update_edge`、批量接受、自动冲突检测和自动 duplicate resolution。
 
 批量章节生成和独立“一键继续下一章”按钮暂未迁移。

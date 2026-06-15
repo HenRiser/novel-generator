@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing/detail plus single-change review accept/reject, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, batch draft merge, or full project-management APIs.
+The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing/detail plus single-change review accept/reject, read-only event and snapshot listing, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, batch draft merge, rollback/restore UI, diff view, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -147,6 +147,10 @@ Current React support:
 - accepted `create_node` / `create_edge` changes write to the formal `narrative_graph.json`
 - rejected changes do not write the Narrative Graph
 - unsupported operations are displayed but cannot be accepted
+- Event Log foundation at `workspace/books/{book_id}/history/events.json`
+- Safety Snapshot foundation at `workspace/books/{book_id}/snapshots/`
+- read-only `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`
+- safety snapshots before Knowledge Draft accept and Narrative Graph update/delete operations
 - dry-run analysis mode for local testing without calling DeepSeek
 - read-only Genesis settings display in the project settings page
 - editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
@@ -181,6 +185,8 @@ Current React limits:
 - no single-pass chapter prose plus metadata trailer output
 - no automatic character-card merge from Story Delta
 - no `update_node` / `update_edge`, character-card writes, batch accept/reject, duplicate resolution, conflict detection, or AI auto-review for Knowledge Drafts
+- no AI Run Provenance, Prompt Profile, Narrative Timeline Review, Workflow Guard, Narrative Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge
+- no rollback / restore UI, snapshot diff view, automatic snapshot cleanup, or full Git-style branch system
 - no AI auto-extraction or AI auto-tagging for graph entities
 - no project deletion / rename / archive
 - no batch streaming generation

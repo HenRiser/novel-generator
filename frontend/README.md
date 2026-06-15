@@ -122,6 +122,9 @@ Implemented:
 - Single candidate-change accept / reject
 - Accepted `create_node` / `create_edge` changes write to the formal `narrative_graph.json`
 - Unsupported operations are displayed but cannot be accepted
+- Event Log foundation for chapter generation, Story Delta, Knowledge Draft review, and Narrative Graph CRUD events
+- Safety Snapshot foundation before Knowledge Draft accept and Narrative Graph update/delete operations
+- Read-only audit APIs: `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`
 - Dry-run analysis mode for local testing without calling DeepSeek
 - Project settings with read-only Genesis fields
 - Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
@@ -156,6 +159,8 @@ Not implemented in this stage:
 - Single-pass chapter prose plus metadata trailer output
 - Automatic character-card merge from Story Delta
 - `update_node` / `update_edge`, character-card writes, batch accept/reject, duplicate resolution, conflict detection, or AI auto-review for Knowledge Drafts
+- AI Run Provenance, Prompt Profile, Timeline Review, Workflow Guard, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge
+- Rollback / restore UI, snapshot diff view, automatic snapshot cleanup, or full Git-style branch system
 - AI automatic graph extraction or AI automatic tagging
 - Full project management
 - Project deletion / rename / archive
@@ -183,6 +188,8 @@ Context Pack preview in React calls `POST /api/projects/{project_ref}/context-pa
 Story Delta analysis in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/story-delta/analyze`. It is manually triggered after a chapter exists. Dry-run mode does not call DeepSeek. Non-dry-run mode performs a second model call dedicated to analysis. Successful analysis writes pending-review draft files under `workspace/books/{book_id}/memory/` and does not modify the official chapter file, character cards, outline, or `narrative_graph.json`.
 
 Knowledge Draft review in React uses `GET /api/projects/{project_ref}/knowledge-drafts`, `GET /api/projects/{project_ref}/knowledge-drafts/{draft_id}`, `POST /api/projects/{project_ref}/knowledge-drafts/{draft_id}/changes/{change_id}/accept`, and `POST /api/projects/{project_ref}/knowledge-drafts/{draft_id}/changes/{change_id}/reject`. Accepting is intentionally limited to `create_node` and `create_edge`; rejecting is available for unsupported operations too. This is a review foundation, not AI auto-review, batch merge, character-card merge, duplicate resolution, or conflict detection.
+
+Audit review APIs expose `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`. They are read-only. Event Log and Safety Snapshot are foundations only: they record audit events and create pre-write JSON backups for selected high-risk operations, but they do not provide rollback, restore UI, diff view, automatic cleanup, AI Run Provenance, Prompt Profile, Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge.
 
 Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button. When the user enables context-assisted generation, React sends the previewed Narrative Context Pack text as optional generation context; when disabled or absent, the request path stays unchanged.
 

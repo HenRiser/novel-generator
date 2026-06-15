@@ -11,6 +11,7 @@ from typing import Any
 from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
 
+from .event_log_service import append_event_best_effort
 from .narrative_graph_service import (
     NODE_TYPES,
     build_graph_edge_for_create,
@@ -19,6 +20,7 @@ from .narrative_graph_service import (
     load_graph_documents_for_review,
     save_graph_documents_for_review,
 )
+from .safety_snapshot_service import create_safety_snapshot
 
 
 DOCUMENT_VERSION = 1
@@ -650,6 +652,18 @@ def accept_candidate_change(
     if entity is None or not entity_id:
         return _error_result(project_ref, "Candidate change could not be converted.", "knowledge_draft_change_invalid", 400)
 
+    snapshot_result = create_safety_snapshot(
+        project_ref=project_ref,
+        reason="before_accept_knowledge_draft_change",
+        source={
+            "draft_id": _clean_text(draft.get("id")),
+            "candidate_change_id": _clean_text(change.get("id")),
+            "operation": operation,
+        },
+    )
+    if not snapshot_result.ok:
+        return _error_result(project_ref, snapshot_result.message, snapshot_result.error_code, snapshot_result.status_code)
+
     if not recovered_before:
         graph.setdefault("graph", {}).setdefault("nodes" if entity_kind == "node" else "edges", []).append(entity)
 
@@ -672,6 +686,25 @@ def accept_candidate_change(
             "knowledge_draft_write_failed",
             400,
         )
+
+    changed_targets = ["memory/knowledge_drafts.json"]
+    if not recovered_before:
+        changed_targets.insert(0, "memory/narrative_graph.json")
+    append_event_best_effort(
+        project_ref=project_ref,
+        event_type="knowledge_draft_change_accepted",
+        summary=f"Accepted {operation}: {entity_id}",
+        chapter_number=_chapter_number(draft),
+        source={
+            "draft_id": _clean_text(draft.get("id")),
+            "candidate_change_id": _clean_text(change.get("id")),
+            "operation": operation,
+            "created_node_id": entity_id if entity_kind == "node" else None,
+            "created_edge_id": entity_id if entity_kind == "edge" else None,
+        },
+        changed_targets=changed_targets,
+        snapshot_id=snapshot_result.snapshot_id,
+    )
 
     return KnowledgeDraftReviewResult(
         True,
@@ -716,6 +749,20 @@ def reject_candidate_change(
         _save_document(ctx, document)
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"Knowledge Draft write failed: {exc}", "knowledge_draft_write_failed", 400)
+
+    append_event_best_effort(
+        project_ref=project_ref,
+        event_type="knowledge_draft_change_rejected",
+        summary=f"Rejected candidate change: {_clean_text(change.get('id'))}",
+        chapter_number=_chapter_number(draft),
+        source={
+            "draft_id": _clean_text(draft.get("id")),
+            "candidate_change_id": _clean_text(change.get("id")),
+            "operation": _clean_text(change.get("operation")),
+        },
+        changed_targets=["memory/knowledge_drafts.json"],
+        snapshot_id=None,
+    )
 
     return KnowledgeDraftReviewResult(
         True,

@@ -23,6 +23,7 @@ from prompt_templates import (
 )
 
 from .chapter_service import extract_chapter_title
+from .event_log_service import append_event_best_effort
 from .schemas import ChapterGenerationResult, OutlineCharacterGenerationResult
 
 
@@ -273,6 +274,23 @@ def _finalize_generated_chapter(
             chapter_title_model=chapter_title_model,
             summary_model=summary_model,
         )
+
+    changed_targets = [f"chapters/{Path(chapter_path).name}", Path(index_path).name]
+    if summary_path:
+        changed_targets.insert(1, f"summaries/{Path(summary_path).name}")
+    append_event_best_effort(
+        project_ref=project_ref,
+        event_type="chapter_generated",
+        summary=f"Generated chapter {chapter_number}: {chapter_title}",
+        chapter_number=chapter_number,
+        source={
+            "chapter_file": Path(chapter_path).name,
+            "summary_file": Path(summary_path).name if summary_path else None,
+            "index_file": Path(index_path).name,
+            "summary_error": summary_error,
+        },
+        changed_targets=changed_targets,
+    )
 
     return ChapterGenerationResult(
         True,

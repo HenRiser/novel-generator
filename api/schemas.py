@@ -202,6 +202,20 @@ class KnowledgeDraftChangeReviewResponse(BaseModel):
     message: str = ""
 
 
+class EventLogResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    events: list[dict[str, Any]]
+    message: str = ""
+
+
+class SafetySnapshotListResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    snapshots: list[dict[str, Any]]
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

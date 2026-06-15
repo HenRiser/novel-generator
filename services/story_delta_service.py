@@ -12,6 +12,7 @@ from deepseek_client import DeepSeekClientError, generate_text
 from file_manager import read_latest_characters, read_latest_outline, resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
 
+from .event_log_service import append_event_best_effort
 from .narrative_graph_service import load_narrative_graph
 from .project_service import load_project_detail
 from .reader_service import read_chapter_for_display
@@ -806,6 +807,22 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
         draft_result = save_knowledge_draft(project_ref, knowledge_draft)
         if not draft_result.ok:
             return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=draft_result.message)
+
+    changed_targets = ["memory/story_deltas.json"]
+    if include_draft:
+        changed_targets.append("memory/knowledge_drafts.json")
+    append_event_best_effort(
+        project_ref=project_ref,
+        event_type="story_delta_analyzed",
+        summary=f"Story Delta analyzed for chapter {number}.",
+        chapter_number=number,
+        source={
+            "story_delta_id": delta_id,
+            "knowledge_draft_id": knowledge_draft.get("id") if isinstance(knowledge_draft, dict) else None,
+            "include_knowledge_draft": include_draft,
+        },
+        changed_targets=changed_targets,
+    )
 
     return StoryDeltaResult(
         True,

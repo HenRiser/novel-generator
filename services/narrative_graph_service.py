@@ -10,7 +10,9 @@ from typing import Any
 from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
 
+from .event_log_service import append_event_best_effort
 from .schemas import NarrativeGraphResult
+from .safety_snapshot_service import SafetySnapshotResult, create_safety_snapshot
 
 
 GRAPH_VERSION = 1
@@ -41,6 +43,7 @@ DEFAULT_NODE_IMPORTANCE = {
     "event": 5,
     "organization": 5,
 }
+GRAPH_CHANGED_TARGETS = ["memory/narrative_graph.json"]
 
 
 def _timestamp() -> str:
@@ -202,6 +205,35 @@ def _save_documents(ctx: Any, graph: dict[str, Any], views: dict[str, Any] | Non
 
 def _clean_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _create_graph_snapshot(
+    project_ref: str,
+    reason: str,
+    source: dict[str, Any],
+) -> SafetySnapshotResult:
+    return create_safety_snapshot(project_ref=project_ref, reason=reason, source=source)
+
+
+def _snapshot_failure(project_ref: str, snapshot: SafetySnapshotResult) -> NarrativeGraphResult:
+    return NarrativeGraphResult(False, project_ref=project_ref, message=snapshot.message or "Safety snapshot failed.")
+
+
+def _record_graph_event(
+    project_ref: str,
+    event_type: str,
+    summary: str,
+    source: dict[str, Any],
+    snapshot_id: str | None = None,
+) -> None:
+    append_event_best_effort(
+        project_ref=project_ref,
+        event_type=event_type,
+        summary=summary,
+        source=source,
+        changed_targets=GRAPH_CHANGED_TARGETS,
+        snapshot_id=snapshot_id,
+    )
 
 
 def _string_list(value: Any) -> list[str] | None:
@@ -650,6 +682,12 @@ def add_graph_tag(project_ref: str, tag_payload: dict[str, Any]) -> NarrativeGra
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_tag_created",
+        f"Created graph tag: {name}",
+        {"tag_name": name},
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, tag={name: tag}, message="Tag saved.")
 
 
@@ -683,6 +721,12 @@ def add_graph_node(project_ref: str, node_payload: dict[str, Any]) -> NarrativeG
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_node_created",
+        f"Created graph node: {_clean_text(node.get('label')) or node.get('id')}",
+        {"node_id": node.get("id"), "label": node.get("label"), "type": node.get("type")},
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, node=node, message="Node saved.")
 
 
@@ -715,6 +759,17 @@ def add_graph_edge(project_ref: str, edge_payload: dict[str, Any]) -> NarrativeG
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_edge_created",
+        f"Created graph edge: {_clean_text(edge.get('label')) or edge.get('id')}",
+        {
+            "edge_id": edge.get("id"),
+            "source": edge.get("source"),
+            "target": edge.get("target"),
+            "type": edge.get("type"),
+        },
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, edge=edge, message="Edge saved.")
 
 
@@ -732,6 +787,9 @@ def update_graph_tag(project_ref: str, tag_name: str, tag_payload: dict[str, Any
     tag, error = _validate_tag_update(graph, name, tag_payload)
     if tag is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=error)
+    snapshot = _create_graph_snapshot(project_ref, "before_narrative_graph_tag_update", {"tag_name": name})
+    if not snapshot.ok:
+        return _snapshot_failure(project_ref, snapshot)
     graph["tag_registry"][name] = tag
 
     try:
@@ -739,6 +797,13 @@ def update_graph_tag(project_ref: str, tag_name: str, tag_payload: dict[str, Any
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_tag_updated",
+        f"Updated graph tag: {name}",
+        {"tag_name": name},
+        snapshot.snapshot_id,
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, tag={name: tag}, message="Tag updated.")
 
 
@@ -765,12 +830,22 @@ def delete_graph_tag(project_ref: str, tag_name: str) -> NarrativeGraphResult:
             message=f"Tag is still used by {len(used_by)} nodes.",
         )
 
+    snapshot = _create_graph_snapshot(project_ref, "before_narrative_graph_tag_delete", {"tag_name": name})
+    if not snapshot.ok:
+        return _snapshot_failure(project_ref, snapshot)
     deleted = registry.pop(name)
     try:
         _save_documents(ctx, graph, views)
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_tag_deleted",
+        f"Deleted graph tag: {name}",
+        {"tag_name": name},
+        snapshot.snapshot_id,
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, tag={name: deleted}, message="Tag deleted.")
 
 
@@ -795,6 +870,9 @@ def update_graph_node(project_ref: str, node_id: str, node_payload: dict[str, An
         return NarrativeGraphResult(False, project_ref=project_ref, message=error)
     node["id"] = current.get("id")
     node["source"] = current.get("source", node.get("source"))
+    snapshot = _create_graph_snapshot(project_ref, "before_narrative_graph_node_update", {"node_id": node_id})
+    if not snapshot.ok:
+        return _snapshot_failure(project_ref, snapshot)
     nodes[index] = node
 
     try:
@@ -802,6 +880,13 @@ def update_graph_node(project_ref: str, node_id: str, node_payload: dict[str, An
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_node_updated",
+        f"Updated graph node: {_clean_text(node.get('label')) or node_id}",
+        {"node_id": node_id, "label": node.get("label"), "type": node.get("type")},
+        snapshot.snapshot_id,
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, node=node, message="Node updated.")
 
 
@@ -831,6 +916,14 @@ def delete_graph_node(project_ref: str, node_id: str, delete_edges: bool = False
             message="Node has connected edges. Confirm delete_edges=true to delete the node and its connected edges.",
         )
 
+    connected_edge_ids = [_clean_text(edge.get("id")) for edge in connected_edges if _clean_text(edge.get("id"))]
+    snapshot = _create_graph_snapshot(
+        project_ref,
+        "before_narrative_graph_node_delete",
+        {"node_id": node_id, "delete_edges": bool(delete_edges), "connected_edge_ids": connected_edge_ids},
+    )
+    if not snapshot.ok:
+        return _snapshot_failure(project_ref, snapshot)
     deleted = graph["graph"]["nodes"].pop(index)
     if connected_edges:
         graph["graph"]["edges"] = [
@@ -845,6 +938,13 @@ def delete_graph_node(project_ref: str, node_id: str, delete_edges: bool = False
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
     suffix = f" {len(connected_edges)} connected edges deleted." if connected_edges else ""
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_node_deleted",
+        f"Deleted graph node: {_clean_text(deleted.get('label')) or node_id}",
+        {"node_id": node_id, "label": deleted.get("label"), "connected_edge_ids": connected_edge_ids},
+        snapshot.snapshot_id,
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, node=deleted, message=f"Node deleted.{suffix}")
 
 
@@ -869,6 +969,9 @@ def update_graph_edge(project_ref: str, edge_id: str, edge_payload: dict[str, An
         return NarrativeGraphResult(False, project_ref=project_ref, message=error)
     edge["id"] = current.get("id")
     edge["source_info"] = current.get("source_info", edge.get("source_info"))
+    snapshot = _create_graph_snapshot(project_ref, "before_narrative_graph_edge_update", {"edge_id": edge_id})
+    if not snapshot.ok:
+        return _snapshot_failure(project_ref, snapshot)
     edges[index] = edge
 
     try:
@@ -876,6 +979,13 @@ def update_graph_edge(project_ref: str, edge_id: str, edge_payload: dict[str, An
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_edge_updated",
+        f"Updated graph edge: {_clean_text(edge.get('label')) or edge_id}",
+        {"edge_id": edge_id, "source": edge.get("source"), "target": edge.get("target"), "type": edge.get("type")},
+        snapshot.snapshot_id,
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, edge=edge, message="Edge updated.")
 
 
@@ -893,12 +1003,22 @@ def delete_graph_edge(project_ref: str, edge_id: str) -> NarrativeGraphResult:
     if index is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message="Edge not found.")
 
+    snapshot = _create_graph_snapshot(project_ref, "before_narrative_graph_edge_delete", {"edge_id": edge_id})
+    if not snapshot.ok:
+        return _snapshot_failure(project_ref, snapshot)
     deleted = graph["graph"]["edges"].pop(index)
     try:
         _save_documents(ctx, graph, views)
     except OSError as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
+    _record_graph_event(
+        project_ref,
+        "narrative_graph_edge_deleted",
+        f"Deleted graph edge: {_clean_text(deleted.get('label')) or edge_id}",
+        {"edge_id": edge_id, "source": deleted.get("source"), "target": deleted.get("target"), "type": deleted.get("type")},
+        snapshot.snapshot_id,
+    )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, edge=deleted, message="Edge deleted.")
 
 
