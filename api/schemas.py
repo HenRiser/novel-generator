@@ -230,6 +230,37 @@ class AIRunResponse(BaseModel):
     message: str = ""
 
 
+class ChapterStatusResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapter_status: dict[str, Any]
+    message: str = ""
+
+
+class ChapterStatusOverviewResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapters: list[dict[str, Any]]
+    summary: dict[str, Any]
+    message: str = ""
+
+
+class WorkflowGuardCheckRequest(BaseModel):
+    action: str | None = None
+    chapter_number: Any = None
+
+
+class WorkflowGuardCheckResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    action: str
+    chapter_number: int
+    blocking: bool = False
+    warnings: list[dict[str, Any]] = []
+    suggested_actions: list[str] = []
+    message: str = ""
+
+
 class ChapterSummaryResponse(BaseModel):
     chapter_number: int
     title: str

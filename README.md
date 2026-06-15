@@ -17,6 +17,7 @@
 - 支持 Narrative Graph、Context Pack、Story Delta、Knowledge Draft Review & Merge 的 React + FastAPI 工作流。
 - 支持 Event Log + Safety Snapshot Foundation：关键写操作会追加审计事件，Review & Merge accept 与 Narrative Graph update/delete 前会创建安全快照。
 - 支持 AI Run Provenance + Prompt Profile Foundation：第一版记录 `chapter_generation` 与 `story_delta_analysis` 的模型、参数、prompt profile、prompt hash、限长 preview、上下文引用和结果引用。
+- 支持 Chapter Status Panel / Workflow Guard Foundation：创作页汇总每章正文、Story Delta、Knowledge Draft、AI Run、Event 状态，并在生成前给出非阻断提醒。
 - 支持保存和加载当前项目的 `project_config.json`；新项目默认位于 `workspace/books/{book_id}/`。
 - 支持 React 项目配置页中的 Genesis 只读展示和 Generation Settings 安全编辑。
 - API Key 从环境变量或本地 `.env` 读取，不会写入代码、日志或输出文件。
@@ -322,6 +323,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - Knowledge Draft Review & Merge：资料库页支持单条 candidate_change 接受 / 拒绝；第一版只允许 `create_node` / `create_edge` 写入正式 `narrative_graph.json`，拒绝不会写入 graph。
 - Event Log + Safety Snapshot：`workspace/books/{book_id}/history/events.json` 记录章节生成、Story Delta、Knowledge Draft review 和 Narrative Graph CRUD 事件；`workspace/books/{book_id}/snapshots/` 保存 Review & Merge accept 与 Narrative Graph update/delete 前的关键 JSON 快照。第一版不提供 rollback / restore UI、diff view、自动清理、Timeline、Health Dashboard、Future Outline Revision、Consistency Policy 或 Advanced Review & Merge。
 - AI Run Provenance：`workspace/books/{book_id}/logs/ai_runs/` 保存 AI 调用追溯记录。第一版只接入 `chapter_generation` 与 `story_delta_analysis`，不保存完整 prompt 明文，不保存 API Key，不返回本地绝对路径；Prompt Profile 仅在代码中定义 `chapter_generation_v1` 与 `story_delta_analysis_v1`，Prompt Editor、Timeline、Health Dashboard、Future Outline Revision、Consistency Policy 和 Advanced Review & Merge 仍未实现。
+- Chapter Status / Workflow Guard：创作页显示当前章节状态，API 提供 `GET /api/projects/{project_ref}/chapters/{chapter_number}/status`、`GET /api/projects/{project_ref}/chapter-status` 和 `POST /api/projects/{project_ref}/workflow-guard/check`。Workflow Guard 第一版只针对 `generate_chapter` 给出软提醒，不强制阻断；没有可靠持久化 freshness 元数据时，Context Pack 状态显示为 `unknown`，不会误报 stale。Timeline Review、Health Dashboard、Future Outline Revision、Consistency Policy 和 Advanced Review & Merge 仍未实现。
 - 暂不支持合并的 operation 会展示但不可接受，包括人物卡写入、`update_node` / `update_edge`、批量接受、自动冲突检测和自动 duplicate resolution。
 
 批量章节生成和独立“一键继续下一章”按钮暂未迁移。

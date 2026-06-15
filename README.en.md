@@ -88,7 +88,7 @@ The API is available at:
 http://127.0.0.1:8000
 ```
 
-The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing/detail plus single-change review accept/reject, read-only event, snapshot, and AI run listing, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, batch draft merge, Prompt Editor, rollback/restore UI, diff view, or full project-management APIs.
+The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing/detail plus single-change review accept/reject, Chapter Status and Workflow Guard checks, read-only event, snapshot, and AI run listing, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, batch draft merge, Prompt Editor, rollback/restore UI, diff view, or full project-management APIs.
 
 Terminal 2, start React:
 
@@ -112,7 +112,7 @@ React opens to the Braipen home page by default. Clicking the logo mark or `Brai
 Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
 ```
 
-The creation page is for project creation, onboarding, outline/character generation, Context Pack preview, optional context-assisted streaming chapter generation, manual Story Delta / Next Chapter Proposal analysis, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation plus Knowledge Draft review: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, an enhanced Entity Inspector, and single-change accept/reject for supported draft candidates. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
+The creation page is for project creation, onboarding, outline/character generation, Context Pack preview, optional context-assisted streaming chapter generation, manual Story Delta / Next Chapter Proposal analysis, Chapter Status review, non-blocking Workflow Guard warnings before generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation plus Knowledge Draft review: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, an enhanced Entity Inspector, and single-change accept/reject for supported draft candidates. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
 
 Current React support:
 
@@ -155,6 +155,9 @@ Current React support:
 - read-only `GET /api/projects/{project_ref}/ai-runs` and `GET /api/projects/{project_ref}/ai-runs/{run_id}`
 - first-version AI run tracking for `chapter_generation` and `story_delta_analysis`
 - prompt profile records with `template_version`, `prompt_hash`, limited `prompt_preview`, model/config, context refs, and result refs
+- Chapter Status API and creation-page panel for per-chapter prose, Story Delta, Knowledge Draft, AI Run, and event status
+- non-blocking Workflow Guard foundation for `generate_chapter`
+- Context Pack freshness reports `unknown` when no reliable persisted freshness metadata exists
 - dry-run analysis mode for local testing without calling DeepSeek
 - read-only Genesis settings display in the project settings page
 - editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
@@ -192,6 +195,8 @@ Current React limits:
 - no Prompt Editor or user-defined prompt UI
 - no saved complete prompt text in AI run records
 - no rollback / restore UI, snapshot diff view, automatic snapshot cleanup, or full Git-style branch system
+- no Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or hard workflow lock system
+- no precise Context Pack freshness calculation without persisted freshness metadata
 - no AI auto-extraction or AI auto-tagging for graph entities
 - no project deletion / rename / archive
 - no batch streaming generation

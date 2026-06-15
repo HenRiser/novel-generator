@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   API_BASE_URL,
   analyzeStoryDelta,
+  checkWorkflowGuard,
   createProject,
   exportChapterUrl,
   exportFullBookUrl,
@@ -11,6 +12,7 @@ import {
   generateOutlineCharacters,
   getChapter,
   getChapters,
+  getChapterStatus,
   getGenerationStatus,
   getHealth,
   getProject,
@@ -21,6 +23,7 @@ import {
   safePublicMessage,
 } from "./api";
 import { AppHeader, type ActivePage } from "./components/AppHeader";
+import { ChapterStatusPanel } from "./components/ChapterStatusPanel";
 import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
 import { ProjectSettingsPage } from "./components/ProjectSettingsPage";
@@ -30,6 +33,7 @@ import type {
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
+  ChapterStatus,
   ChapterStreamDoneEvent,
   ContextPackPreviewRequest,
   ContextPackPreviewResponse,
@@ -42,6 +46,7 @@ import type {
   ProjectDetail,
   ProjectSummary,
   StoryDeltaAnalyzeResponse,
+  WorkflowGuardWarning,
 } from "./types";
 
 const DEFAULT_GENERATION_REQUEST: GenerationRequest = {
@@ -590,6 +595,10 @@ export function App() {
   const [generationStatusError, setGenerationStatusError] = useState("");
   const [generationMessage, setGenerationMessage] = useState("");
   const [generationError, setGenerationError] = useState("");
+  const [chapterStatus, setChapterStatus] = useState<ChapterStatus | null>(null);
+  const [chapterStatusLoading, setChapterStatusLoading] = useState(false);
+  const [chapterStatusError, setChapterStatusError] = useState("");
+  const [workflowGuardWarnings, setWorkflowGuardWarnings] = useState<WorkflowGuardWarning[]>([]);
   const [outlineGenerating, setOutlineGenerating] = useState(false);
   const [chapterGenerating, setChapterGenerating] = useState(false);
   const [chapterStreaming, setChapterStreaming] = useState(false);
@@ -652,6 +661,9 @@ export function App() {
     setStoryDeltaResult(null);
     setStoryDeltaError("");
     setStoryDeltaMessage("");
+    setChapterStatus(null);
+    setChapterStatusError("");
+    setWorkflowGuardWarnings([]);
   }, [selectedProjectRef]);
 
   useEffect(() => {
@@ -683,6 +695,43 @@ export function App() {
       setGenerationStatusLoading(false);
     }
   }, []);
+
+  const refreshChapterStatus = useCallback(
+    async (chapterNumber?: number) => {
+      if (!selectedProjectRef) {
+        setChapterStatus(null);
+        setChapterStatusError("");
+        return null;
+      }
+      const number = chapterNumber ?? Number.parseInt(chapterNumberInput, 10);
+      if (!Number.isInteger(number) || number < 1) {
+        setChapterStatus(null);
+        setChapterStatusError("");
+        return null;
+      }
+      setChapterStatusLoading(true);
+      setChapterStatusError("");
+      try {
+        const result = await getChapterStatus(selectedProjectRef, number);
+        setChapterStatus(result.chapter_status);
+        return result.chapter_status;
+      } catch (error) {
+        setChapterStatus(null);
+        setChapterStatusError(publicErrorMessage(error, "Chapter status load failed."));
+        return null;
+      } finally {
+        setChapterStatusLoading(false);
+      }
+    },
+    [chapterNumberInput, selectedProjectRef],
+  );
+
+  useEffect(() => {
+    setWorkflowGuardWarnings([]);
+    if (apiStatus === "online") {
+      void refreshChapterStatus();
+    }
+  }, [apiStatus, chapterNumberInput, refreshChapterStatus]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -1098,6 +1147,7 @@ export function App() {
           ? "Dry-run analysis saved as pending_review draft. No DeepSeek call was made."
           : "Story Delta analysis saved as pending_review draft.",
       );
+      await refreshChapterStatus(chapterNumber);
     } catch (error) {
       setStoryDeltaResult(null);
       setStoryDeltaError(publicErrorMessage(error, "Story Delta analysis failed."));
@@ -1113,6 +1163,7 @@ export function App() {
     storyDeltaDryRun,
     storyDeltaIncludeDraft,
     storyDeltaIncludeNext,
+    refreshChapterStatus,
   ]);
 
   const generationRequestWithOptionalContext = useCallback((): GenerationRequest => {
@@ -1125,6 +1176,26 @@ export function App() {
     }
     return generationRequest;
   }, [contextPackPreview, generationRequest, useContextPackForGeneration]);
+
+  const runGenerateChapterGuard = useCallback(
+    async (chapterNumber: number) => {
+      if (!selectedProjectRef) {
+        return false;
+      }
+      try {
+        const result = await checkWorkflowGuard(selectedProjectRef, {
+          action: "generate_chapter",
+          chapter_number: chapterNumber,
+        });
+        setWorkflowGuardWarnings(result.warnings || []);
+        return !result.blocking;
+      } catch (error) {
+        setGenerationError(publicErrorMessage(error, "Workflow guard check failed."));
+        return false;
+      }
+    },
+    [selectedProjectRef],
+  );
 
   const handleGenerateChapterStream = useCallback(async (chapterNumberOverride?: number) => {
     if (!selectedProjectRef) {
@@ -1141,6 +1212,9 @@ export function App() {
     setGenerationMessage("");
     setGenerationError("");
     if (!(await ensureGenerationIdle())) {
+      return;
+    }
+    if (!(await runGenerateChapterGuard(chapterNumber))) {
       return;
     }
     setStreamingContent("");
@@ -1175,6 +1249,7 @@ export function App() {
         setGenerationError("章节已生成，但自动读取正文失败，请手动刷新或重新选择章节。");
       }
       await refreshGenerationStatus();
+      await refreshChapterStatus(result.chapter_number || chapterNumber);
     } catch (error) {
       const message = publicErrorMessage(error, "章节流式生成失败。");
       setStreamingPreviewStatus("failed_unsaved");
@@ -1190,7 +1265,9 @@ export function App() {
     generationRequestWithOptionalContext,
     loadChapterAfterGeneration,
     refreshGenerationStatus,
+    refreshChapterStatus,
     refreshProjectAndChapters,
+    runGenerateChapterGuard,
     selectedProjectRef,
   ]);
 
@@ -1211,6 +1288,9 @@ export function App() {
     if (!(await ensureGenerationIdle())) {
       return;
     }
+    if (!(await runGenerateChapterGuard(chapterNumber))) {
+      return;
+    }
     setStreamingContent("");
     setStreamingError("");
     setStreamingResult(null);
@@ -1227,6 +1307,7 @@ export function App() {
         setGenerationError("章节已生成，但自动读取正文失败，请手动刷新或重新选择章节。");
       }
       await refreshGenerationStatus();
+      await refreshChapterStatus(result.chapter_number || chapterNumber);
     } catch (error) {
       setGenerationError(publicErrorMessage(error, "章节生成失败。"));
       await refreshGenerationStatus();
@@ -1239,7 +1320,9 @@ export function App() {
     generationRequestWithOptionalContext,
     loadChapterAfterGeneration,
     refreshGenerationStatus,
+    refreshChapterStatus,
     refreshProjectAndChapters,
+    runGenerateChapterGuard,
     selectedProjectRef,
   ]);
 
@@ -1856,6 +1939,12 @@ export function App() {
           </p>
           <p>如果生成内容明显中断，可提高 max_tokens 或重新生成该章节。</p>
         </div>
+        <ChapterStatusPanel
+          status={chapterStatus}
+          loading={chapterStatusLoading}
+          error={chapterStatusError}
+          workflowWarnings={workflowGuardWarnings}
+        />
         {generationMessage && <p className="state-text success-text">{generationMessage}</p>}
         {generationError && <p className="state-text error-text">{generationError}</p>}
         {streamingPreviewVisible && (

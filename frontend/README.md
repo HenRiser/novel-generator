@@ -1,6 +1,6 @@
 # React Reader / Generation Foundation
 
-This frontend is the only official Braipen frontend for `novel-generator`. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph, can manually create post-generation Story Delta / Knowledge Draft analysis, and can review supported Knowledge Draft candidates in the library page. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
+This frontend is the only official Braipen frontend for `novel-generator`. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. It consumes the FastAPI endpoints, uses streaming single-chapter generation by default, keeps the synchronous generation endpoint as a fallback path, can optionally preview and attach a Narrative Context Pack selected from the user's Narrative Graph, can manually create post-generation Story Delta / Knowledge Draft analysis, can review supported Knowledge Draft candidates in the library page, and now shows a lightweight Chapter Status panel with non-blocking Workflow Guard warnings before generation. The current visual direction is a quiet long-form reading and writing workspace: warm paper surfaces, low-saturation status colors, manuscript-style preview, and restrained transitions.
 
 ## Workspace navigation
 
@@ -21,7 +21,7 @@ The library page has moved beyond the initial foundation: it supports safe edit/
 
 The creation page now includes Context Pack Builder foundation support. It previews a structured Narrative Context Pack selected from the Narrative Graph by local rules, lets the user control `min_importance`, node and edge limits, unresolved foreshadowing, and neighbor inclusion, and keeps context-assisted generation disabled by default. It does not inject the full graph by default.
 
-The creation page also includes Story Delta + Next Chapter Proposal foundation support. This uses plan B: after chapter prose has already been saved, the user can manually trigger a second analysis pass. Story Delta describes what happened in the current chapter, Next Chapter Proposal describes suggested planning for the next chapter, and Knowledge Draft stores pending-review candidate changes. The library page can accept or reject these changes one at a time. Only `create_node` and `create_edge` are accepted into the formal `narrative_graph.json`; unsupported operations are shown but cannot be accepted. Rejected changes do not write the graph.
+The creation page also includes Story Delta + Next Chapter Proposal foundation support. This uses plan B: after chapter prose has already been saved, the user can manually trigger a second analysis pass. Story Delta describes what happened in the current chapter, Next Chapter Proposal describes suggested planning for the next chapter, and Knowledge Draft stores pending-review candidate changes. The library page can accept or reject these changes one at a time. Only `create_node` and `create_edge` are accepted into the formal `narrative_graph.json`; unsupported operations are shown but cannot be accepted. Rejected changes do not write the graph. The Chapter Status panel summarizes prose, Story Delta, Knowledge Draft review counts, AI Run provenance, related events, and Context Pack freshness; freshness is shown as `unknown` when no reliable persisted freshness metadata exists.
 
 This stage does not add React Router, Three.js, React Three Fiber, GSAP, React Flow, 2D/3D graph visualization, vector search, embeddings, external search APIs, AI automatic graph extraction, AI automatic graph updates, or complete API Key management.
 
@@ -128,6 +128,10 @@ Implemented:
 - AI Run Provenance foundation for `chapter_generation` and `story_delta_analysis`
 - Read-only AI run APIs: `GET /api/projects/{project_ref}/ai-runs` and `GET /api/projects/{project_ref}/ai-runs/{run_id}`
 - Prompt profile records with `template_version`, `prompt_hash`, limited `prompt_preview`, model/config, context refs, and result refs
+- Chapter Status panel in the creation page
+- Chapter Status APIs: `GET /api/projects/{project_ref}/chapters/{chapter_number}/status` and `GET /api/projects/{project_ref}/chapter-status`
+- Workflow Guard soft-warning API: `POST /api/projects/{project_ref}/workflow-guard/check`
+- Non-blocking generation warnings for existing target prose, previous chapter missing Story Delta, previous pending Knowledge Drafts, missing Story Delta AI Run provenance, and unknown Context Pack freshness
 - Dry-run analysis mode for local testing without calling DeepSeek
 - Project settings with read-only Genesis fields
 - Editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
@@ -165,6 +169,9 @@ Not implemented in this stage:
 - Prompt Editor or user-defined prompt UI
 - Saved complete prompt text in AI run records
 - Rollback / restore UI, snapshot diff view, automatic snapshot cleanup, or full Git-style branch system
+- Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge
+- Hard workflow locks or forced generation sequencing
+- Precise Context Pack freshness calculation without persisted freshness metadata
 - AI automatic graph extraction or AI automatic tagging
 - Full project management
 - Project deletion / rename / archive
@@ -196,6 +203,8 @@ Knowledge Draft review in React uses `GET /api/projects/{project_ref}/knowledge-
 Audit review APIs expose `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`. They are read-only. Event Log and Safety Snapshot are foundations only: they record audit events and create pre-write JSON backups for selected high-risk operations, but they do not provide rollback, restore UI, diff view, automatic cleanup, Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or Advanced Review & Merge.
 
 AI Run Provenance APIs expose `GET /api/projects/{project_ref}/ai-runs` and `GET /api/projects/{project_ref}/ai-runs/{run_id}`. The first version records only chapter generation and Story Delta analysis runs. It stores model/config values, prompt profile ids, template versions, prompt hashes, limited prompt previews, context refs, and output refs. It does not save complete prompt text, API keys, `.env` content, local absolute paths, Prompt Editor data, Timeline data, Health Dashboard data, Future Outline Revision data, Consistency Policy results, or Advanced Review & Merge state.
+
+Chapter Status APIs expose `GET /api/projects/{project_ref}/chapters/{chapter_number}/status`, `GET /api/projects/{project_ref}/chapter-status`, and `POST /api/projects/{project_ref}/workflow-guard/check`. They are read-only for status/guard evaluation: querying them does not write Event Log entries, create snapshots, or modify AI Run records. Workflow Guard is a soft-warning foundation for `generate_chapter`; it does not block generation unless the backend returns a real request/project error.
 
 Single-chapter generation in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate/stream` and reads newline-delimited JSON events with `fetch()` and `ReadableStream`. The existing synchronous `POST /api/projects/{project_ref}/chapters/{chapter_number}/generate` endpoint remains available as the "synchronous fallback" button. When the user enables context-assisted generation, React sends the previewed Narrative Context Pack text as optional generation context; when disabled or absent, the request path stays unchanged.
 

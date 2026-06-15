@@ -3,6 +3,7 @@ import type {
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
+  ChapterStatusResponse,
   ChapterStreamDoneEvent,
   ChapterStreamErrorEvent,
   ChapterStreamEvent,
@@ -35,6 +36,8 @@ import type {
   StoryDeltaAnalyzeRequest,
   StoryDeltaAnalyzeResponse,
   StoryDeltaListResponse,
+  WorkflowGuardCheckRequest,
+  WorkflowGuardCheckResponse,
 } from "./types";
 
 export const API_BASE_URL =
@@ -449,6 +452,25 @@ export function getChapters(projectRef: string): Promise<ChapterSummary[]> {
 export function getChapter(projectRef: string, chapterNumber: number): Promise<ChapterContent> {
   return apiFetch<ChapterContent>(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}`,
+  );
+}
+
+export function getChapterStatus(projectRef: string, chapterNumber: number): Promise<ChapterStatusResponse> {
+  return apiFetch<ChapterStatusResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/status`,
+  );
+}
+
+export function checkWorkflowGuard(
+  projectRef: string,
+  request: WorkflowGuardCheckRequest,
+): Promise<WorkflowGuardCheckResponse> {
+  return postJson<WorkflowGuardCheckResponse>(
+    `/api/projects/${projectPath(projectRef)}/workflow-guard/check`,
+    {
+      action: request.action,
+      chapter_number: request.chapter_number,
+    },
   );
 }
 

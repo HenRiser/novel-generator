@@ -51,6 +51,87 @@ export type ChapterContent = {
   content: string;
 };
 
+export type WorkflowGuardWarning = {
+  code: string;
+  severity: string;
+  message: string;
+};
+
+export type ChapterStatusCounts = {
+  pending_review: number;
+  accepted: number;
+  rejected: number;
+  failed: number;
+  superseded: number;
+  unsupported: number;
+  total: number;
+};
+
+export type ChapterStatus = {
+  chapter_number: number;
+  chapter: {
+    exists: boolean;
+    ref: string | null;
+  };
+  story_delta: {
+    status: string;
+    delta_ids: string[];
+    event_ids: string[];
+    ai_run_ids: string[];
+  };
+  knowledge_drafts: {
+    status: string;
+    draft_ids: string[];
+    counts: ChapterStatusCounts;
+  };
+  review: {
+    status: string;
+    pending_count: number;
+    accepted_count: number;
+    rejected_count: number;
+    failed_count: number;
+  };
+  ai_runs: {
+    chapter_generation: string[];
+    story_delta_analysis: string[];
+  };
+  events: {
+    chapter_generated: string[];
+    story_delta_analyzed: string[];
+    knowledge_draft_change_accepted: string[];
+    knowledge_draft_change_rejected: string[];
+  };
+  context_pack: {
+    status: string;
+    message: string;
+  };
+  warnings: WorkflowGuardWarning[];
+  next_actions: string[];
+};
+
+export type ChapterStatusResponse = {
+  ok: boolean;
+  project_ref: string;
+  chapter_status: ChapterStatus;
+  message: string;
+};
+
+export type WorkflowGuardCheckRequest = {
+  action: "generate_chapter";
+  chapter_number: number;
+};
+
+export type WorkflowGuardCheckResponse = {
+  ok: boolean;
+  project_ref: string;
+  action: string;
+  chapter_number: number;
+  blocking: boolean;
+  warnings: WorkflowGuardWarning[];
+  suggested_actions: string[];
+  message: string;
+};
+
 export type ApiStatus = "loading" | "online" | "offline";
 
 export type GenerationStatus = {
