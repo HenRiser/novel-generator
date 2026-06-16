@@ -354,3 +354,12 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - `.env` 文件只保存在本地。
 - 如果生成失败，页面会显示可读错误原因。
 - 如果摘要生成失败，章节正文仍会正常保存。
+
+## Story Delta / Knowledge Draft schema alignment
+
+- Story Delta candidate_changes are aligned with Review & Merge.
+- New `create_node` payloads use `type`, not `node_type`.
+- Legacy `node_type` payloads remain accepted as a compatibility fallback for old drafts.
+- First-order `create_world_fact`, `create_foreshadowing`, `create_plot_direction`, and `create_character_card` candidates are normalized into `create_node` where possible.
+- `create_edge` can reference existing graph nodes or same-draft node candidates with `source_change_id` and `target_change_id`.
+- Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.

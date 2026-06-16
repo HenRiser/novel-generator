@@ -117,6 +117,31 @@ def _normalize_result(value: Any) -> dict[str, Any]:
     return result
 
 
+def _normalize_payload_for_operation(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    if operation == "create_node":
+        node_type = _clean_text(normalized.get("type")) or _clean_text(normalized.get("node_type"))
+        if node_type:
+            normalized["type"] = node_type
+        normalized.pop("node_type", None)
+        if not _clean_text(normalized.get("summary")) and _clean_text(normalized.get("description")):
+            normalized["summary"] = _clean_text(normalized.get("description"))
+    elif operation == "create_edge":
+        for endpoint in ("source", "target"):
+            node_id_key = f"{endpoint}_node_id"
+            if not _clean_text(normalized.get(endpoint)) and _clean_text(normalized.get(node_id_key)):
+                normalized[endpoint] = _clean_text(normalized.get(node_id_key))
+        if not _clean_text(normalized.get("label")):
+            normalized["label"] = (
+                _clean_text(normalized.get("description"))
+                or _clean_text(normalized.get("summary"))
+                or _clean_text(normalized.get("type"))
+            )
+        if not _clean_text(normalized.get("summary")) and _clean_text(normalized.get("description")):
+            normalized["summary"] = _clean_text(normalized.get("description"))
+    return normalized
+
+
 def normalize_candidate_change(change: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(change)
     status = _clean_text(normalized.get("status")) or "pending_review"
@@ -129,7 +154,10 @@ def normalize_candidate_change(change: dict[str, Any]) -> dict[str, Any]:
     normalized.setdefault("review_note", "")
     normalized["result"] = _normalize_result(normalized.get("result"))
     payload = normalized.get("payload")
-    normalized["payload"] = dict(payload) if isinstance(payload, dict) else payload
+    if isinstance(payload, dict):
+        normalized["payload"] = _normalize_payload_for_operation(_clean_text(normalized.get("operation")), payload)
+    else:
+        normalized["payload"] = payload
     return normalized
 
 
@@ -320,6 +348,11 @@ def _resolved_status(payload: dict[str, Any], change: dict[str, Any]) -> str:
 def _payload_for_graph(payload: dict[str, Any], change: dict[str, Any]) -> dict[str, Any]:
     graph_payload = dict(payload)
     graph_payload.pop("suggested_status", None)
+    graph_payload.pop("node_type", None)
+    graph_payload.pop("source_node_id", None)
+    graph_payload.pop("target_node_id", None)
+    if not _clean_text(graph_payload.get("summary")) and _clean_text(payload.get("description")):
+        graph_payload["summary"] = _clean_text(payload.get("description"))
     graph_payload["status"] = _resolved_status(payload, change)
     return graph_payload
 
@@ -455,14 +488,15 @@ def get_knowledge_draft(project_ref: str, draft_id: str) -> KnowledgeDraftReview
 
 def _payload_from_request(change: dict[str, Any], request: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     override = request.get("payload_override")
+    operation = _clean_text(change.get("operation"))
     if override is not None:
         if not isinstance(override, dict):
             return None, "payload_override must be a JSON object when provided."
-        return dict(override), ""
+        return _normalize_payload_for_operation(operation, override), ""
     payload = change.get("payload")
     if not isinstance(payload, dict):
         return None, "Candidate payload must be a JSON object."
-    return dict(payload), ""
+    return _normalize_payload_for_operation(operation, payload), ""
 
 
 def _validate_common_accept(change: dict[str, Any], payload: dict[str, Any]) -> str:
@@ -482,7 +516,7 @@ def _build_node_from_change(
     label = _clean_text(payload.get("label"))
     if not label:
         return None, "", "Node label cannot be empty."
-    node_type = _clean_text(payload.get("type"))
+    node_type = _clean_text(payload.get("type")) or _clean_text(payload.get("node_type"))
     if not node_type:
         return None, "", "Node type cannot be empty."
     if node_type not in NODE_TYPES:
@@ -513,7 +547,7 @@ def _resolve_edge_endpoint(
     endpoint_key: str,
 ) -> tuple[str, str]:
     node_ids = graph_node_ids(graph)
-    direct = _clean_text(payload.get(endpoint_key))
+    direct = _clean_text(payload.get(endpoint_key)) or _clean_text(payload.get(f"{endpoint_key}_node_id"))
     if direct:
         if direct in node_ids:
             return direct, ""
@@ -561,6 +595,12 @@ def _build_edge_from_change(
     if not edge_type:
         return None, "", "Edge type cannot be empty."
     if not _clean_text(payload.get("label")):
+        payload["label"] = (
+            _clean_text(payload.get("description"))
+            or _clean_text(payload.get("summary"))
+            or edge_type
+        )
+    if not _clean_text(payload.get("label")):
         return None, "", "Edge label cannot be empty."
 
     edge_id = _safe_graph_id("edge", _clean_text(change.get("id")))
@@ -576,6 +616,8 @@ def _build_edge_from_change(
     graph_payload["target"] = target
     graph_payload.pop("source_label", None)
     graph_payload.pop("target_label", None)
+    graph_payload.pop("source_node_id", None)
+    graph_payload.pop("target_node_id", None)
     graph_payload.pop("source_change_id", None)
     graph_payload.pop("target_change_id", None)
     edge, error = build_graph_edge_for_create(

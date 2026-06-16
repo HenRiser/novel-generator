@@ -106,6 +106,8 @@ http://127.0.0.1:5173
 
 The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file. The creation page can preview a Narrative Context Pack selected from the current Narrative Graph and can optionally attach that previewed context to chapter generation; the option is disabled by default. After a chapter exists, the creation page can manually run a second Story Delta analysis pass and save pending-review Knowledge Draft candidates. The library page can review those candidates one at a time; accepting supported `create_node` / `create_edge` changes writes to `narrative_graph.json`, while rejecting a change does not write the graph.
 
+Story Delta candidate changes are aligned with the Review & Merge schema. New `create_node` payloads use `type`, not `node_type`; legacy `node_type` draft payloads are accepted as a compatibility fallback. First-order world fact, foreshadowing, plot direction, and character-card candidates are normalized into `create_node` where possible. `create_edge` candidates can reference existing graph node ids or same-draft node candidates through `source_change_id` and `target_change_id`. Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, and Advanced Review & Merge remain unimplemented.
+
 React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
 
 ```text

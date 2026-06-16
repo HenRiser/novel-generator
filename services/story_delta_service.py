@@ -61,6 +61,27 @@ ALLOWED_OPERATIONS = {
     "merge_suggestion",
 }
 ALLOWED_STATUSES = {"pending_review", "accepted", "rejected", "failed", "superseded"}
+OPERATION_TO_NODE_TYPE = {
+    "create_world_fact": "world_fact",
+    "create_foreshadowing": "foreshadowing",
+    "create_plot_direction": "plot_direction",
+    "create_character_card": "character",
+}
+EDGE_TYPES = {
+    "appears_in",
+    "causes",
+    "leads_to",
+    "reveals",
+    "foreshadows",
+    "monitors",
+    "constrains",
+    "protects",
+    "threatens",
+    "located_at",
+    "related_to",
+    "changes_status_of",
+}
+LAYERS = {"core", "major", "detail", "background"}
 
 
 @dataclass(frozen=True)
@@ -105,6 +126,13 @@ def _clean_text(value: Any) -> str:
 def _safe_id(prefix: str) -> str:
     stamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
     return f"{prefix}_{stamp}_{secrets.token_hex(3)}"
+
+
+def _safe_provided_id(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    return re.sub(r"[^A-Za-z0-9_:-]+", "_", text).strip("_")[:120]
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
@@ -412,13 +440,21 @@ Analyze chapter {chapter_number} and return a single JSON object with this shape
   }},
   "candidate_changes": [
     {{
+      "id": "change_1",
       "operation": "create_node",
       "target": "narrative_graph",
       "source": "story_delta",
       "confidence": 0.5,
       "requires_review": true,
       "evidence": "quote or concise evidence from chapter text",
-      "payload": {{}}
+      "payload": {{
+        "type": "event",
+        "label": "",
+        "summary": "",
+        "importance": 5,
+        "layer": "major",
+        "status": "confirmed"
+      }}
     }}
   ],
   "warnings": []
@@ -435,10 +471,25 @@ Rules:
 - Put uncertain facts in warnings, not in story_delta.
 - New characters must include evidence.
 - Foreshadowing status changes must use introduced, reinforced, partially_revealed, revealed, or unresolved.
-- Candidate operations may only be create_character_card, update_character_card, create_node, update_node, create_edge, update_edge, create_plot_direction, create_world_fact, create_foreshadowing, update_foreshadowing, or merge_suggestion.
+- Candidate operations should be create_node or create_edge only.
+- Do not output create_character_card, update_character_card, create_world_fact, create_foreshadowing, update_foreshadowing, create_plot_direction, update_node, update_edge, or merge_suggestion.
+- If a world fact, foreshadowing, plot direction, character state, or relationship note should be remembered, map it to create_node instead:
+  - world fact -> create_node payload.type="world_fact"
+  - foreshadowing -> create_node payload.type="foreshadowing"
+  - plot direction -> create_node payload.type="plot_direction"
+  - character card or character state -> create_node payload.type="character" or payload.type="relationship_note"
+- create_node payloads must use "type"; do not use "node_type".
+- create_node payloads should include label, summary, importance, layer, and status or suggested_status.
+- When you create multiple nodes with clear relationships, add 1-3 high-confidence create_edge changes.
+- create_edge payloads should use simple edge types: appears_in, causes, leads_to, reveals, foreshadows, monitors, constrains, protects, threatens, located_at, related_to, changes_status_of.
+- create_edge payloads must include type, label, summary, importance, layer, and either source/target for existing graph node ids or source_change_id/target_change_id for nodes created in this same candidate_changes array.
+- If an edge connects two nodes created in this same response, set source_change_id and target_change_id to the candidate change ids of those create_node records.
+- Do not use source_label or target_label as merge identifiers.
+- Do not generate edges with endpoints you cannot identify.
 - Do not propose delete operations.
-- Every candidate change must include requires_review=true and evidence or rationale.
-- Keep candidate_changes focused and concise; prefer 3-10 high-value changes rather than many low-value records.
+- Every candidate change must include a stable id like "change_1", requires_review=true, and evidence or rationale.
+- Keep candidate_changes focused and concise; prefer 3-8 high-value changes rather than many low-value records.
+- Create at most 5 create_node changes.
 - Keep payload text concise. Do not copy long chapter passages into payload.
 - Candidate payloads for next chapter proposals should use suggested_status="planned".
 - Candidate payloads for facts observed in this chapter should use suggested_status="confirmed".
@@ -749,9 +800,10 @@ def _candidate_change(
     evidence: str = "",
     rationale: str = "",
     confidence: float | None = None,
+    change_id: str = "",
 ) -> dict[str, Any]:
     change: dict[str, Any] = {
-        "id": _safe_id("change"),
+        "id": _safe_provided_id(change_id) or _safe_id("change"),
         "operation": operation,
         "target": target,
         "source": source if source in {"story_delta", "next_chapter_proposal"} else "story_delta",
@@ -767,12 +819,123 @@ def _candidate_change(
     return change
 
 
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = _clean_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _normalized_importance(value: Any, default: int) -> int:
+    if value in (None, "") or isinstance(value, bool):
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if 1 <= parsed <= 10 else default
+
+
+def _normalized_layer(value: Any, default: str) -> str:
+    layer = _clean_text(value)
+    return layer if layer in LAYERS else default
+
+
+def _normalize_node_candidate_payload(payload: dict[str, Any], forced_type: str = "") -> dict[str, Any]:
+    normalized = dict(payload)
+    node_type = _clean_text(forced_type) or _clean_text(normalized.get("type")) or _clean_text(normalized.get("node_type"))
+    if node_type:
+        normalized["type"] = node_type
+    normalized.pop("node_type", None)
+
+    label = _first_text(
+        normalized.get("label"),
+        normalized.get("name"),
+        normalized.get("character_name"),
+        normalized.get("fact"),
+        normalized.get("foreshadowing"),
+        normalized.get("direction"),
+        normalized.get("title"),
+    )
+    if label:
+        normalized["label"] = _truncate(label, 120)
+
+    summary = _first_text(
+        normalized.get("summary"),
+        normalized.get("description"),
+        normalized.get("changes"),
+        normalized.get("change"),
+        normalized.get("fact"),
+        normalized.get("evidence"),
+    )
+    if summary:
+        normalized["summary"] = _truncate(summary, 500)
+
+    default_importance = 6 if node_type == "world_fact" else 5
+    default_layer = "major" if node_type in {"foreshadowing", "plot_direction", "world_fact", "event"} else "detail"
+    normalized["importance"] = _normalized_importance(normalized.get("importance"), default_importance)
+    normalized["layer"] = _normalized_layer(normalized.get("layer"), default_layer)
+    return normalized
+
+
+def _normalize_edge_endpoint_refs(payload: dict[str, Any]) -> None:
+    for endpoint in ("source", "target"):
+        node_id_key = f"{endpoint}_node_id"
+        if not _clean_text(payload.get(endpoint)) and _clean_text(payload.get(node_id_key)):
+            payload[endpoint] = _clean_text(payload.get(node_id_key))
+        change_id_key = f"{endpoint}_change_id"
+        if _clean_text(payload.get(change_id_key)):
+            payload[change_id_key] = _safe_provided_id(payload.get(change_id_key))
+
+
+def _normalize_edge_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(payload)
+    _normalize_edge_endpoint_refs(normalized)
+
+    edge_type = _clean_text(normalized.get("type")) or "related_to"
+    if edge_type not in EDGE_TYPES:
+        edge_type = "related_to"
+    normalized["type"] = edge_type
+
+    label = _first_text(normalized.get("label"), normalized.get("description"), normalized.get("summary"), edge_type)
+    normalized["label"] = _truncate(label.replace("_", " "), 120)
+
+    summary = _first_text(normalized.get("summary"), normalized.get("description"), normalized.get("change"), normalized.get("evidence"))
+    if summary:
+        normalized["summary"] = _truncate(summary, 500)
+
+    normalized["importance"] = _normalized_importance(normalized.get("importance"), 5)
+    normalized["layer"] = _normalized_layer(normalized.get("layer"), "detail")
+    return normalized
+
+
+def _normalize_candidate_operation_and_payload(
+    operation: str,
+    payload: dict[str, Any],
+    warnings: list[str],
+) -> tuple[str, dict[str, Any]] | None:
+    if operation in OPERATION_TO_NODE_TYPE:
+        mapped_type = OPERATION_TO_NODE_TYPE[operation]
+        warnings.append(f"Mapped {operation} candidate to create_node type={mapped_type}.")
+        return "create_node", _normalize_node_candidate_payload(payload, mapped_type)
+    if operation == "create_node":
+        return "create_node", _normalize_node_candidate_payload(payload)
+    if operation == "create_edge":
+        return "create_edge", _normalize_edge_candidate_payload(payload)
+    if operation in ALLOWED_OPERATIONS:
+        return operation, dict(payload)
+    warnings.append(f"Skipped unsupported candidate operation: {operation or '[empty]'}")
+    return None
+
+
 def _normalize_candidate_change(change: dict[str, Any], warnings: list[str]) -> dict[str, Any] | None:
     operation = _clean_text(change.get("operation"))
-    if operation not in ALLOWED_OPERATIONS:
-        warnings.append(f"Skipped unsupported candidate operation: {operation or '[empty]'}")
-        return None
     payload = _dict(change.get("payload"))
+    normalized_operation = _normalize_candidate_operation_and_payload(operation, payload, warnings)
+    if normalized_operation is None:
+        return None
+    operation, payload = normalized_operation
     source = _clean_text(change.get("source")) or "story_delta"
     if source not in {"story_delta", "next_chapter_proposal"}:
         source = "story_delta"
@@ -781,14 +944,18 @@ def _normalize_candidate_change(change: dict[str, Any], warnings: list[str]) -> 
     if not evidence and not rationale:
         warnings.append(f"Candidate change {operation} lacked evidence/rationale and was marked for extra review.")
         rationale = "Model omitted evidence; reviewer must confirm before merge."
+    target = _clean_text(change.get("target")) or "narrative_graph"
+    if operation in {"create_node", "create_edge"}:
+        target = "narrative_graph"
     normalized = _candidate_change(
         operation=operation,
-        target=_clean_text(change.get("target")) or "narrative_graph",
+        target=target,
         source=source,
         payload=payload,
         evidence=evidence,
         rationale=rationale,
         confidence=_confidence(change.get("confidence")),
+        change_id=_clean_text(change.get("id")),
     )
     normalized["requires_review"] = True
     return normalized
@@ -801,22 +968,30 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
             label = _clean_text(item.get("label") or item.get("name"))
             changes.append(
                 _candidate_change(
-                    "create_character_card",
-                    "characters",
+                    "create_node",
+                    "narrative_graph",
                     "story_delta",
-                    {**item, "suggested_status": "confirmed"},
+                    _normalize_node_candidate_payload({**item, "type": "character", "label": label, "suggested_status": "confirmed"}),
                     evidence=_clean_text(item.get("evidence")),
                     rationale=f"New character candidate: {label}",
                 )
             )
     for item in _list(story_delta.get("character_updates")):
         if isinstance(item, dict):
+            character = _clean_text(item.get("character") or item.get("name") or item.get("label"))
             changes.append(
                 _candidate_change(
-                    "update_character_card",
-                    "characters",
+                    "create_node",
+                    "narrative_graph",
                     "story_delta",
-                    {**item, "suggested_status": "confirmed"},
+                    _normalize_node_candidate_payload(
+                        {
+                            **item,
+                            "type": "relationship_note",
+                            "label": f"{character} 状态变化" if character else _clean_text(item.get("label")),
+                            "suggested_status": "confirmed",
+                        }
+                    ),
                     evidence=_clean_text(item.get("evidence")),
                     rationale="Character update candidate from chapter facts.",
                 )
@@ -831,27 +1006,38 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
     for key, node_type in node_sources:
         for item in _list(story_delta.get(key)):
             if isinstance(item, dict):
-                operation = "update_foreshadowing" if key == "foreshadowing_updates" else "create_node"
-                if key == "world_fact_updates":
-                    operation = "create_world_fact"
                 changes.append(
                     _candidate_change(
-                        operation,
+                        "create_node",
                         "narrative_graph",
                         "story_delta",
-                        {**item, "type": item.get("type") or node_type, "suggested_status": "confirmed"},
+                        _normalize_node_candidate_payload(
+                            {**item, "type": item.get("type") or node_type, "suggested_status": "confirmed"},
+                            node_type,
+                        ),
                         evidence=_clean_text(item.get("evidence")),
                         rationale=f"{node_type} candidate from chapter facts.",
                     )
                 )
     for item in _list(story_delta.get("relationship_updates")):
         if isinstance(item, dict):
+            label = _clean_text(item.get("label"))
+            if not label:
+                characters = item.get("characters")
+                if isinstance(characters, list):
+                    names = [_clean_text(name) for name in characters if _clean_text(name)]
+                    label = " / ".join(names[:3])
+            if not label:
+                label = "Relationship note"
             changes.append(
                 _candidate_change(
-                    "create_edge",
+                    "create_node",
                     "narrative_graph",
                     "story_delta",
-                    {**item, "suggested_status": "confirmed"},
+                    _normalize_node_candidate_payload(
+                        {**item, "type": "relationship_note", "label": label, "suggested_status": "confirmed"},
+                        "relationship_note",
+                    ),
                     evidence=_clean_text(item.get("evidence")),
                     rationale="Relationship candidate from chapter facts.",
                 )
@@ -863,7 +1049,7 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                     "create_node",
                     "narrative_graph",
                     "next_chapter_proposal",
-                    {**item, "suggested_status": "planned"},
+                    _normalize_node_candidate_payload({**item, "suggested_status": "planned"}),
                     rationale=_clean_text(item.get("rationale")) or "Suggested node for next chapter planning.",
                 )
             )
@@ -874,7 +1060,7 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                     "create_edge",
                     "narrative_graph",
                     "next_chapter_proposal",
-                    {**item, "suggested_status": "planned"},
+                    _normalize_edge_candidate_payload({**item, "suggested_status": "planned"}),
                     rationale=_clean_text(item.get("rationale")) or "Suggested edge for next chapter planning.",
                 )
             )
@@ -882,14 +1068,55 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
         if isinstance(item, dict):
             changes.append(
                 _candidate_change(
-                    "create_plot_direction",
+                    "create_node",
                     "narrative_graph",
                     "next_chapter_proposal",
-                    {**item, "suggested_status": "planned"},
+                    _normalize_node_candidate_payload(
+                        {**item, "type": "plot_direction", "suggested_status": "planned"},
+                        "plot_direction",
+                    ),
                     rationale=_clean_text(item.get("rationale")) or "Suggested plot direction for next chapter planning.",
                 )
             )
     return changes
+
+
+def _dedupe_candidate_change_ids(changes: list[dict[str, Any]], namespace: str = "") -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    id_map: dict[str, str] = {}
+    result: list[dict[str, Any]] = []
+    safe_namespace = _safe_provided_id(namespace)
+    for change in changes:
+        original = _safe_provided_id(change.get("id")) or _safe_id("change")
+        current = original
+        if safe_namespace and not current.startswith(f"{safe_namespace}_"):
+            current = f"{safe_namespace}_{current}"
+        base_current = current
+        suffix = 2
+        while current in seen:
+            current = f"{base_current}_{suffix}"
+            suffix += 1
+        seen.add(current)
+        if original != current:
+            id_map[original] = current
+        normalized = dict(change)
+        normalized["id"] = current
+        result.append(normalized)
+
+    if id_map:
+        for change in result:
+            if _clean_text(change.get("operation")) != "create_edge":
+                continue
+            payload = dict(change.get("payload") if isinstance(change.get("payload"), dict) else {})
+            changed = False
+            for key in ("source_change_id", "target_change_id"):
+                ref = _safe_provided_id(payload.get(key))
+                if ref in id_map:
+                    payload[key] = id_map[ref]
+                    changed = True
+            if changed:
+                change["payload"] = payload
+    return result
 
 
 def build_knowledge_draft(
@@ -900,6 +1127,7 @@ def build_knowledge_draft(
     candidate_changes: list[dict[str, Any]],
     warnings: list[str],
 ) -> dict[str, Any]:
+    draft_id = _safe_id(f"draft_chapter_{int(chapter_number):03d}")
     normalized_changes: list[dict[str, Any]] = []
     for change in candidate_changes:
         normalized = _normalize_candidate_change(change, warnings)
@@ -907,8 +1135,9 @@ def build_knowledge_draft(
             normalized_changes.append(normalized)
     if not normalized_changes:
         normalized_changes.extend(_derive_changes_from_delta(story_delta, next_proposal))
+    normalized_changes = _dedupe_candidate_change_ids(normalized_changes, draft_id)
     return {
-        "id": _safe_id(f"draft_chapter_{int(chapter_number):03d}"),
+        "id": draft_id,
         "chapter_number": int(chapter_number),
         "source_delta_id": source_delta_id,
         "status": "pending_review",
