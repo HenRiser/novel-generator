@@ -108,6 +108,8 @@ The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://
 
 Story Delta candidate changes are aligned with the Review & Merge schema. New `create_node` payloads use `type`, not `node_type`; legacy `node_type` draft payloads are accepted as a compatibility fallback. First-order world fact, foreshadowing, plot direction, and character-card candidates are normalized into `create_node` where possible. `create_edge` candidates can reference existing graph node ids or same-draft node candidates through `source_change_id` and `target_change_id`. Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, and Advanced Review & Merge remain unimplemented.
 
+The library page also includes a creator-focused Narrative View for the graph. It groups story assets into characters, events/scenes, foreshadowing, world rules, plot directions, relationship notes, relationships, and other records. Raw node/edge details remain available in Debug sections and the Raw / Technical View. Knowledge Draft review cards now summarize `create_node` and `create_edge` candidates in story terms first, while operation names and payload JSON stay available in collapsed Debug details.
+
 React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
 
 ```text

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { GraphNarrativeView } from "./library/GraphNarrativeView";
 import { KnowledgeDraftReviewPanel } from "./library/KnowledgeDraftReviewPanel";
 import {
   createNarrativeGraphEdge,
@@ -74,7 +75,7 @@ type SelectedEntity =
   | { entityType: "edge"; id: string }
   | null;
 
-type ActiveLibraryPanel = "browse" | "node" | "edge" | "tags" | "drafts";
+type ActiveLibraryPanel = "narrative" | "browse" | "node" | "edge" | "tags" | "drafts";
 
 type SearchResult = {
   entityType: "node" | "edge";
@@ -506,7 +507,7 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
   const [actionMessage, setActionMessage] = useState("");
   const [actionError, setActionError] = useState("");
   const [busyAction, setBusyAction] = useState("");
-  const [activePanel, setActivePanel] = useState<ActiveLibraryPanel>("browse");
+  const [activePanel, setActivePanel] = useState<ActiveLibraryPanel>("narrative");
   const [tagForm, setTagForm] = useState<TagForm>(DEFAULT_TAG_FORM);
   const [nodeForm, setNodeForm] = useState<NodeForm>(DEFAULT_NODE_FORM);
   const [edgeForm, setEdgeForm] = useState<EdgeForm>(DEFAULT_EDGE_FORM);
@@ -906,11 +907,18 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
 
             <nav className="library-tab-bar" aria-label="资料库工作区">
               <button
+                className={`library-tab ${activePanel === "narrative" ? "selected" : ""}`}
+                type="button"
+                onClick={() => setActivePanel("narrative")}
+              >
+                创作者视图 / Narrative View
+              </button>
+              <button
                 className={`library-tab ${activePanel === "browse" ? "selected" : ""}`}
                 type="button"
                 onClick={() => setActivePanel("browse")}
               >
-                浏览 / 检索
+                Raw / Technical View
               </button>
               <button
                 className={`library-tab ${activePanel === "node" ? "selected" : ""}`}
@@ -941,6 +949,15 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
                 草稿审核 / Knowledge Drafts
               </button>
             </nav>
+
+            {activePanel === "narrative" && (
+              <GraphNarrativeView
+                edges={edges}
+                nodes={nodes}
+                selectedEntity={selectedEntity}
+                onSelectEntity={setSelectedEntity}
+              />
+            )}
 
             {activePanel === "browse" && (
               <section className="library-browser-grid" aria-label="创作资料浏览器">
@@ -1393,6 +1410,7 @@ export function LibraryPage({ selectedProject, apiStatus }: LibraryPageProps) {
             {activePanel === "drafts" && selectedProject && (
               <KnowledgeDraftReviewPanel
                 apiStatus={apiStatus}
+                graph={graph}
                 selectedProject={selectedProject}
                 onGraphUpdated={setGraph}
               />

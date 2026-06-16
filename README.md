@@ -363,3 +363,12 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - First-order `create_world_fact`, `create_foreshadowing`, `create_plot_direction`, and `create_character_card` candidates are normalized into `create_node` where possible.
 - `create_edge` can reference existing graph nodes or same-draft node candidates with `source_change_id` and `target_change_id`.
 - Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.
+
+## Graph Narrative View / Review Semantic Cards
+
+- The Library page includes a creator-focused Narrative View for Graph records.
+- Narrative View groups records as characters, events/scenes, foreshadowing, world rules, plot directions, relationship notes, relationships, and other records.
+- Relationship cards show node labels instead of raw source/target ids when labels are available.
+- Knowledge Draft review cards summarize `create_node` and `create_edge` candidates as story assets and narrative relationships first.
+- Operation names, ids, targets, and payload JSON remain available in collapsed Debug details and Raw / Technical View.
+- Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.

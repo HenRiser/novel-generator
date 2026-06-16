@@ -17,6 +17,7 @@ import type {
 
 type KnowledgeDraftReviewPanelProps = {
   apiStatus: ApiStatus;
+  graph: NarrativeGraphDocument | null;
   onGraphUpdated: (graph: NarrativeGraphDocument) => void;
   selectedProject: ProjectSummary;
 };
@@ -41,10 +42,19 @@ function canAccept(change: CandidateChange): boolean {
 }
 
 function statusLabel(status: string): string {
-  if (status === "pending_review") {
-    return "pending_review";
+  if (status === "accepted") {
+    return "已接受";
   }
-  return status || "pending_review";
+  if (status === "rejected") {
+    return "已拒绝";
+  }
+  if (status === "failed") {
+    return "合并失败";
+  }
+  if (status === "superseded") {
+    return "已替换";
+  }
+  return "待审核";
 }
 
 function confidenceLabel(confidence: number | undefined): string {
@@ -71,6 +81,119 @@ function changeResult(change: CandidateChange): string {
   return "";
 }
 
+const NODE_TYPE_LABELS: Record<string, string> = {
+  character: "人物",
+  event: "事件",
+  scene: "场景",
+  foreshadowing: "伏笔",
+  world_fact: "世界规则",
+  plot_direction: "剧情方向",
+  relationship_note: "关系备注",
+  item: "物品",
+  organization: "组织",
+};
+
+const EDGE_TYPE_LABELS: Record<string, string> = {
+  appears_in: "出现在",
+  causes: "导致",
+  leads_to: "引向",
+  reveals: "揭示",
+  foreshadows: "埋下伏笔",
+  monitors: "监视",
+  constrains: "限制",
+  protects: "保护",
+  threatens: "威胁",
+  located_at: "位于",
+  related_to: "相关",
+  changes_status_of: "改变状态",
+};
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function numberValue(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  return "-";
+}
+
+function readableNodeType(type: string): string {
+  return NODE_TYPE_LABELS[type] || type || "故事资料";
+}
+
+function readableEdgeType(type: string): string {
+  return EDGE_TYPE_LABELS[type] || type || "关系";
+}
+
+function payloadLabel(change: CandidateChange): string {
+  return (
+    textValue(change.payload.label) ||
+    textValue(change.payload.name) ||
+    textValue(change.payload.title) ||
+    textValue(change.payload.summary) ||
+    "未命名故事资料"
+  );
+}
+
+function payloadSummary(change: CandidateChange): string {
+  return (
+    textValue(change.payload.summary) ||
+    textValue(change.payload.description) ||
+    textValue(change.payload.notes) ||
+    textValue(change.evidence) ||
+    "暂无说明。"
+  );
+}
+
+function payloadStatus(change: CandidateChange): string {
+  return textValue(change.payload.status) || textValue(change.payload.suggested_status) || "-";
+}
+
+function graphNodeLabels(graph: NarrativeGraphDocument | null): Map<string, string> {
+  const nodes = graph?.graph.nodes ?? [];
+  return new Map(nodes.map((node) => [node.id, node.label || node.id]));
+}
+
+function draftCandidateLabels(draft: KnowledgeDraft | null): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const change of draft?.candidate_changes ?? []) {
+    if (change.operation !== "create_node") {
+      continue;
+    }
+    labels.set(change.id, payloadLabel(change));
+    const createdNodeId = change.result?.created_node_id;
+    if (createdNodeId) {
+      labels.set(createdNodeId, payloadLabel(change));
+    }
+  }
+  return labels;
+}
+
+function endpointLabel(
+  change: CandidateChange,
+  endpoint: "source" | "target",
+  draftLabels: Map<string, string>,
+  nodeLabels: Map<string, string>,
+): string {
+  const changeRef = textValue(change.payload[`${endpoint}_change_id`]);
+  if (changeRef && draftLabels.has(changeRef)) {
+    return draftLabels.get(changeRef) || "未知节点";
+  }
+  const directRef = textValue(change.payload[endpoint]) || textValue(change.payload[`${endpoint}_node_id`]);
+  if (directRef && nodeLabels.has(directRef)) {
+    return nodeLabels.get(directRef) || "未知节点";
+  }
+  if (directRef && draftLabels.has(directRef)) {
+    return draftLabels.get(directRef) || "未知节点";
+  }
+  return "未知节点";
+}
+
 function summarizeDraft(draft: KnowledgeDraft): string {
   const changes = draft.candidate_changes ?? [];
   const pending = changes.filter((change) => changeStatus(change) === "pending_review").length;
@@ -82,6 +205,7 @@ function summarizeDraft(draft: KnowledgeDraft): string {
 
 export function KnowledgeDraftReviewPanel({
   apiStatus,
+  graph,
   onGraphUpdated,
   selectedProject,
 }: KnowledgeDraftReviewPanelProps) {
@@ -188,6 +312,8 @@ export function KnowledgeDraftReviewPanel({
       ),
     [drafts],
   );
+  const nodeLabels = useMemo(() => graphNodeLabels(graph), [graph]);
+  const draftLabels = useMemo(() => draftCandidateLabels(draft), [draft]);
 
   function updateDraftState(nextDraft: KnowledgeDraft): void {
     setDraft(nextDraft);
@@ -326,6 +452,16 @@ export function KnowledgeDraftReviewPanel({
                   const pendingReview = canReview(change);
                   const busy = busyChangeId === change.id;
                   const resultText = changeResult(change);
+                  const nodeType = readableNodeType(textValue(change.payload.type) || textValue(change.payload.node_type));
+                  const edgeType = readableEdgeType(textValue(change.payload.type));
+                  const sourceLabel = endpointLabel(change, "source", draftLabels, nodeLabels);
+                  const targetLabel = endpointLabel(change, "target", draftLabels, nodeLabels);
+                  const cardTitle =
+                    change.operation === "create_node"
+                      ? `新增故事资料：${payloadLabel(change)}`
+                      : change.operation === "create_edge"
+                        ? "新增叙事关系"
+                        : "暂不能直接合并的候选";
                   return (
                     <article className="candidate-review-card" key={change.id}>
                       <div className="candidate-review-header">
@@ -335,27 +471,77 @@ export function KnowledgeDraftReviewPanel({
                           </span>
                           {!supported && <span className="review-status review-status-unsupported">暂不支持合并</span>}
                         </div>
-                        <strong>{change.operation}</strong>
+                        <strong>{cardTitle}</strong>
                       </div>
 
-                      <dl className="draft-meta-grid compact">
-                        <div>
-                          <dt>change_id</dt>
-                          <dd>{change.id}</dd>
-                        </div>
-                        <div>
-                          <dt>target</dt>
-                          <dd>{change.target || "-"}</dd>
-                        </div>
-                        <div>
-                          <dt>source</dt>
-                          <dd>{change.source || "-"}</dd>
-                        </div>
-                        <div>
-                          <dt>confidence</dt>
-                          <dd>{confidenceLabel(change.confidence)}</dd>
-                        </div>
-                      </dl>
+                      {change.operation === "create_node" && (
+                        <section className="semantic-change-body">
+                          <p>{payloadSummary(change)}</p>
+                          <dl className="draft-meta-grid compact">
+                            <div>
+                              <dt>类型</dt>
+                              <dd>{nodeType}</dd>
+                            </div>
+                            <div>
+                              <dt>重要度</dt>
+                              <dd>{numberValue(change.payload.importance)}</dd>
+                            </div>
+                            <div>
+                              <dt>状态</dt>
+                              <dd>{payloadStatus(change)}</dd>
+                            </div>
+                            <div>
+                              <dt>置信度</dt>
+                              <dd>{confidenceLabel(change.confidence)}</dd>
+                            </div>
+                          </dl>
+                        </section>
+                      )}
+
+                      {change.operation === "create_edge" && (
+                        <section className="semantic-change-body">
+                          <p className="semantic-relation-line">
+                            <strong>{sourceLabel}</strong>
+                            <span>--{textValue(change.payload.label) || edgeType}--&gt;</span>
+                            <strong>{targetLabel}</strong>
+                          </p>
+                          <p>{payloadSummary(change)}</p>
+                          <dl className="draft-meta-grid compact">
+                            <div>
+                              <dt>关系</dt>
+                              <dd>{edgeType}</dd>
+                            </div>
+                            <div>
+                              <dt>重要度</dt>
+                              <dd>{numberValue(change.payload.importance)}</dd>
+                            </div>
+                            <div>
+                              <dt>状态</dt>
+                              <dd>{payloadStatus(change)}</dd>
+                            </div>
+                            <div>
+                              <dt>置信度</dt>
+                              <dd>{confidenceLabel(change.confidence)}</dd>
+                            </div>
+                          </dl>
+                        </section>
+                      )}
+
+                      {!supported && (
+                        <section className="semantic-change-body">
+                          <p>系统当前还不支持自动合并这种变更类型。你可以拒绝它，或等待后续版本支持。</p>
+                          <dl className="draft-meta-grid compact">
+                            <div>
+                              <dt>候选类型</dt>
+                              <dd>{change.operation}</dd>
+                            </div>
+                            <div>
+                              <dt>置信度</dt>
+                              <dd>{confidenceLabel(change.confidence)}</dd>
+                            </div>
+                          </dl>
+                        </section>
+                      )}
 
                       {change.evidence && (
                         <p className="candidate-review-text">
@@ -371,7 +557,28 @@ export function KnowledgeDraftReviewPanel({
                       )}
                       {resultText && <p className="candidate-review-result">{resultText}</p>}
 
-                      <pre className="json-snippet">{formatJson(change.payload)}</pre>
+                      <details className="debug-details">
+                        <summary>技术细节 / Debug</summary>
+                        <dl className="draft-meta-grid compact">
+                          <div>
+                            <dt>operation</dt>
+                            <dd>{change.operation}</dd>
+                          </div>
+                          <div>
+                            <dt>target</dt>
+                            <dd>{change.target || "-"}</dd>
+                          </div>
+                          <div>
+                            <dt>source</dt>
+                            <dd>{change.source || "-"}</dd>
+                          </div>
+                          <div>
+                            <dt>change_id</dt>
+                            <dd>{change.id}</dd>
+                          </div>
+                        </dl>
+                        <pre className="json-snippet">{formatJson(change.payload)}</pre>
+                      </details>
 
                       <label className="form-field">
                         <span>review_note</span>

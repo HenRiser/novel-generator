@@ -1826,6 +1826,119 @@ code {
   grid-column: 1 / -1;
 }
 
+.graph-narrative-view,
+.graph-narrative-sections,
+.graph-narrative-section,
+.relationship-group,
+.relationship-list {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.graph-narrative-intro p,
+.graph-narrative-section p {
+  line-height: 1.65;
+  margin: 0;
+}
+
+.graph-narrative-card-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.narrative-node-card,
+.relationship-card {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.narrative-node-card.selected,
+.relationship-card.selected {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(117, 95, 68, 0.14);
+}
+
+.narrative-node-card > button,
+.relationship-card > button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.narrative-node-card > button span {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.narrative-node-card strong,
+.relationship-card strong {
+  overflow-wrap: anywhere;
+}
+
+.narrative-card-meta {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  min-width: 0;
+}
+
+.narrative-card-meta.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.narrative-card-meta div {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+  padding: var(--space-2);
+}
+
+.narrative-card-meta dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 0 0 2px;
+}
+
+.narrative-card-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.relationship-group h4 {
+  font-size: 15px;
+  margin: 0;
+}
+
+.debug-details {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-top: var(--space-2);
+}
+
+.debug-details summary {
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
 .knowledge-draft-panel,
 .knowledge-draft-detail,
 .candidate-review-list {
@@ -1957,6 +2070,29 @@ code {
   border-radius: var(--radius-sm);
   margin: 0;
   padding: var(--space-3);
+}
+
+.semantic-change-body {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.semantic-change-body p {
+  line-height: 1.65;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.semantic-relation-line {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.semantic-relation-line span {
+  color: var(--color-text-muted);
 }
 
 .generation-status-card {
@@ -2150,6 +2286,9 @@ code {
   .context-pack-preview-grid,
   .chapter-status-grid,
   .chapter-status-grid.compact,
+  .graph-narrative-card-grid,
+  .narrative-card-meta,
+  .narrative-card-meta.compact,
   .system-grid,
   .quick-start-grid {
     grid-template-columns: 1fr;
