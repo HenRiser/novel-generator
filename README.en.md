@@ -110,6 +110,8 @@ Story Delta candidate changes are aligned with the Review & Merge schema. New `c
 
 The library page also includes a creator-focused Narrative View for the graph. It groups story assets into characters, events/scenes, foreshadowing, world rules, plot directions, relationship notes, relationships, and other records. Raw node/edge details remain available in Debug sections and the Raw / Technical View. Knowledge Draft review cards now summarize `create_node` and `create_edge` candidates in story terms first, while operation names and payload JSON stay available in collapsed Debug details.
 
+The creation page includes a creator-focused Context Pack preview. It groups selected next-chapter context into characters, events/scenes, foreshadowing, world rules, plot directions, narrative relationships, and high-priority reminders. Raw Prompt / Debug remains available for inspection. This is preview polish only: Context Pack selection, prompt construction, Graph writes, Story Delta, and Review & Merge behavior are unchanged.
+
 React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
 
 ```text

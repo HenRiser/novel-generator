@@ -194,7 +194,7 @@ Use React for project creation, reading projects, outline/character generation, 
 .\start-react.bat
 ```
 
-Context Pack preview in React calls `POST /api/projects/{project_ref}/context-pack/preview`. The preview reads the current Narrative Graph, returns a structured pack plus prompt text, and does not call the model or write graph/chapter files.
+Context Pack preview in React calls `POST /api/projects/{project_ref}/context-pack/preview`. The preview reads the current Narrative Graph, returns a structured pack plus prompt text, and does not call the model or write graph/chapter files. The UI now shows a creator-focused preview that groups selected context into characters, events/scenes, foreshadowing, world rules, plot directions, narrative relationships, and high-priority reminders for the next chapter. Raw Prompt / Debug remains available; the selection algorithm and generated prompt content are unchanged.
 
 Story Delta analysis in React calls `POST /api/projects/{project_ref}/chapters/{chapter_number}/story-delta/analyze`. It is manually triggered after a chapter exists. Dry-run mode does not call DeepSeek. Non-dry-run mode performs a second model call dedicated to analysis. Successful analysis writes pending-review draft files under `workspace/books/{book_id}/memory/` and does not modify the official chapter file, character cards, outline, or `narrative_graph.json`.
 

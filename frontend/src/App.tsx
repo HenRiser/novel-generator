@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { AppHeader, type ActivePage } from "./components/AppHeader";
 import { ChapterStatusPanel } from "./components/ChapterStatusPanel";
+import { ContextPackCreatorPreview } from "./components/ContextPackCreatorPreview";
 import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
 import { ProjectSettingsPage } from "./components/ProjectSettingsPage";
@@ -1641,67 +1642,12 @@ export function App() {
         {apiStatus !== "online" && <p className="state-text error-text">API Offline. 无法预览 context pack。</p>}
         {contextPackError && <p className="state-text error-text">{contextPackError}</p>}
         {pack && (
-          <div className="context-pack-preview">
-            <div className="context-pack-stats">
-              <div>
-                <span>nodes</span>
-                <strong>{pack.stats.nodes_selected}/{pack.stats.nodes_considered}</strong>
-              </div>
-              <div>
-                <span>edges</span>
-                <strong>{pack.stats.edges_selected}/{pack.stats.edges_considered}</strong>
-              </div>
-              <div>
-                <span>truncated nodes</span>
-                <strong>{pack.stats.truncated_nodes}</strong>
-              </div>
-              <div>
-                <span>truncated edges</span>
-                <strong>{pack.stats.truncated_edges}</strong>
-              </div>
-            </div>
-            {pack.warnings.length > 0 && (
-              <div className="context-pack-warnings">
-                {pack.warnings.map((warning) => (
-                  <p key={warning} className="state-text warning-text">{warning}</p>
-                ))}
-              </div>
-            )}
-            <div className="context-pack-preview-grid">
-              <section>
-                <h3>Selected nodes</h3>
-                {pack.selected_nodes.length === 0 && <p className="empty-state">当前没有选中 node。</p>}
-                {pack.selected_nodes.slice(0, 8).map((node) => (
-                  <article className="context-pack-item" key={node.id}>
-                    <strong>{node.label || node.id}</strong>
-                    <span>{node.type} · importance {node.importance} · score {node.score}</span>
-                    {node.reasons.length > 0 && <small>{node.reasons.join(" / ")}</small>}
-                  </article>
-                ))}
-              </section>
-              <section>
-                <h3>Selected edges</h3>
-                {pack.selected_edges.length === 0 && <p className="empty-state">当前没有选中 edge。</p>}
-                {pack.selected_edges.slice(0, 8).map((edge) => (
-                  <article className="context-pack-item" key={edge.id}>
-                    <strong>{edge.label || edge.type}</strong>
-                    <span>{edge.source_label} → {edge.target_label}</span>
-                    {edge.reasons.length > 0 && <small>{edge.reasons.join(" / ")}</small>}
-                  </article>
-                ))}
-              </section>
-            </div>
-            <button
-              className="button subtle-button compact-button"
-              type="button"
-              onClick={() => setContextPackPromptExpanded((current) => !current)}
-            >
-              {contextPackPromptExpanded ? "收起 prompt_text" : "展开 prompt_text"}
-            </button>
-            {contextPackPromptExpanded && (
-              <pre className="context-pack-prompt">{promptText || "当前 context pack 为空，未生成 prompt_text。"}</pre>
-            )}
-          </div>
+          <ContextPackCreatorPreview
+            pack={pack}
+            promptExpanded={contextPackPromptExpanded}
+            promptText={promptText}
+            onTogglePrompt={() => setContextPackPromptExpanded((current) => !current)}
+          />
         )}
       </section>
     );
