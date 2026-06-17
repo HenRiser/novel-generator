@@ -46,12 +46,42 @@ const EDGE_TYPE_LABELS: Record<string, string> = {
   changes_status_of: "改变状态",
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  active: "活跃",
+  confirmed: "已确认",
+  planned: "计划中",
+  draft: "草稿",
+  deprecated: "已废弃",
+  completed: "已完成",
+};
+
+const LAYER_LABELS: Record<string, string> = {
+  core: "核心",
+  major: "主要",
+  detail: "细节",
+  background: "背景",
+};
+
 function readableNodeType(type: string): string {
   return NODE_TYPE_LABELS[type] || type || "其他";
 }
 
 function readableEdgeType(type: string): string {
   return EDGE_TYPE_LABELS[type] || type || "关系";
+}
+
+function readableStatus(status: string | undefined): string {
+  if (!status) {
+    return "未标注";
+  }
+  return STATUS_LABELS[status] || status;
+}
+
+function readableLayer(layer: string | undefined): string {
+  if (!layer) {
+    return "未标注";
+  }
+  return LAYER_LABELS[layer] || layer;
 }
 
 function nodeSummary(node: NarrativeGraphNode): string {
@@ -219,11 +249,11 @@ export function GraphNarrativeView({
                       </div>
                       <div>
                         <dt>状态</dt>
-                        <dd>{node.status || "active"}</dd>
+                        <dd>{readableStatus(node.status)}</dd>
                       </div>
                       <div>
                         <dt>层级</dt>
-                        <dd>{node.layer || "detail"}</dd>
+                        <dd>{readableLayer(node.layer)}</dd>
                       </div>
                       <div>
                         <dt>关联关系</dt>
@@ -263,11 +293,14 @@ export function GraphNarrativeView({
                 const selected = selectedEntity?.entityType === "edge" && selectedEntity.id === edge.id;
                 return (
                   <article className={`relationship-card ${selected ? "selected" : ""}`} key={edge.id}>
-                    <button type="button" onClick={() => onSelectEntity({ entityType: "edge", id: edge.id })}>
-                      <strong>
-                        {nodeLabel(nodeById, edge.source)} --{edge.label || readableEdgeType(edge.type)}--&gt;{" "}
-                        {nodeLabel(nodeById, edge.target)}
-                      </strong>
+                    <button
+                      className="narrative-relation-button"
+                      type="button"
+                      onClick={() => onSelectEntity({ entityType: "edge", id: edge.id })}
+                    >
+                      <strong>{nodeLabel(nodeById, edge.source)}</strong>
+                      <span>--{edge.label || readableEdgeType(edge.type)}--&gt;</span>
+                      <strong>{nodeLabel(nodeById, edge.target)}</strong>
                     </button>
                     <p>{edgeSummary(edge)}</p>
                     <dl className="narrative-card-meta compact">
@@ -277,11 +310,11 @@ export function GraphNarrativeView({
                       </div>
                       <div>
                         <dt>状态</dt>
-                        <dd>{edge.status || "active"}</dd>
+                        <dd>{readableStatus(edge.status)}</dd>
                       </div>
                       <div>
                         <dt>层级</dt>
-                        <dd>{edge.layer || "detail"}</dd>
+                        <dd>{readableLayer(edge.layer)}</dd>
                       </div>
                     </dl>
                     <details className="debug-details">

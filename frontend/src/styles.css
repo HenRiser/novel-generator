@@ -1884,6 +1884,17 @@ code {
   font-size: 12px;
 }
 
+.narrative-relation-button {
+  align-items: center;
+  display: flex !important;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.narrative-relation-button span {
+  color: var(--color-text-muted);
+}
+
 .narrative-node-card strong,
 .relationship-card strong {
   overflow-wrap: anywhere;

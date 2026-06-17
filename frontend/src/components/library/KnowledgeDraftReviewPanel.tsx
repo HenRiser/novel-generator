@@ -108,6 +108,15 @@ const EDGE_TYPE_LABELS: Record<string, string> = {
   changes_status_of: "改变状态",
 };
 
+const STORY_STATUS_LABELS: Record<string, string> = {
+  active: "活跃",
+  confirmed: "已确认",
+  planned: "计划中",
+  draft: "草稿",
+  deprecated: "已废弃",
+  completed: "已完成",
+};
+
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -119,7 +128,7 @@ function numberValue(value: unknown): string {
   if (typeof value === "string" && value.trim()) {
     return value.trim();
   }
-  return "-";
+  return "未标注";
 }
 
 function readableNodeType(type: string): string {
@@ -128,6 +137,13 @@ function readableNodeType(type: string): string {
 
 function readableEdgeType(type: string): string {
   return EDGE_TYPE_LABELS[type] || type || "关系";
+}
+
+function readableStoryStatus(status: string): string {
+  if (!status) {
+    return "未指定";
+  }
+  return STORY_STATUS_LABELS[status] || status;
 }
 
 function payloadLabel(change: CandidateChange): string {
@@ -151,7 +167,7 @@ function payloadSummary(change: CandidateChange): string {
 }
 
 function payloadStatus(change: CandidateChange): string {
-  return textValue(change.payload.status) || textValue(change.payload.suggested_status) || "-";
+  return readableStoryStatus(textValue(change.payload.status) || textValue(change.payload.suggested_status));
 }
 
 function graphNodeLabels(graph: NarrativeGraphDocument | null): Map<string, string> {
