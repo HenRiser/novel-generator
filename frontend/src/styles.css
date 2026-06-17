@@ -1986,6 +1986,65 @@ code {
   margin: 0;
 }
 
+.graph-filter-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.graph-search-field {
+  max-width: none;
+}
+
+.graph-filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.filter-chip {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.filter-chip:hover {
+  border-color: var(--color-border-strong);
+}
+
+.filter-chip.selected {
+  background: var(--color-accent-soft);
+  border-color: var(--color-accent);
+  color: var(--color-accent-strong);
+}
+
+.graph-filter-select-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.graph-filter-summary {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.graph-filter-summary span {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
 .graph-narrative-card-grid {
   display: grid;
   gap: var(--space-3);

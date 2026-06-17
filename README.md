@@ -368,6 +368,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 
 - The Library page includes a creator-focused Narrative View for Graph records.
 - Narrative View groups records as characters, events/scenes, foreshadowing, world rules, plot directions, relationship notes, relationships, and other records.
+- Narrative View supports local search and filters by keyword, story asset type, importance, status, and layer; relationship cards stay creator-readable during filtering.
 - Relationship cards show node labels instead of raw source/target ids when labels are available.
 - Knowledge Draft review cards summarize `create_node` and `create_edge` candidates as story assets and narrative relationships first.
 - Operation names, ids, targets, and payload JSON remain available in collapsed Debug details and Raw / Technical View.
