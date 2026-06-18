@@ -59,6 +59,7 @@ class ChapterGenerationResult:
     chapter_model: str = ""
     chapter_title_model: str = ""
     summary_model: str = ""
+    consistency_warnings: list[dict[str, str]] = field(default_factory=list)
 
     def to_legacy_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +75,7 @@ class ChapterGenerationResult:
             "notices": list(self.notices),
             "title_error": self.title_error,
             "summary_error": self.summary_error,
+            "consistency_warnings": list(self.consistency_warnings),
             "index_path": self.index_path,
             "error": None if self.ok else self.message,
         }

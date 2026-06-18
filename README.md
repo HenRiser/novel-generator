@@ -319,6 +319,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - 默认流式生成：实时预览正文，完成后保存章节、摘要并更新 `chapter_index.md`。
 - 同步备用生成：保留为流式异常时的备用 / 调试入口。
 - Context Pack：可预览并选择是否辅助本次生成，默认关闭；单章生成区域会显示本次是否注入 Context Pack，以及资料、关系和硬约束数量摘要。
+- Lightweight Consistency Check：章节生成保存后会基于本次注入的 Hard Continuity Constraints 返回轻量一致性提醒，第一版只覆盖显式日期、死亡 / 存活状态、身份状态和组织归属冲突；提醒非阻断，不会自动改正文，也不是完整 Consistency Policy / Conflict Detection。
 - Story Delta：章节存在后可手动触发第二次分析，生成待审核 Knowledge Draft。
 - Knowledge Draft Review & Merge：资料库页支持单条 candidate_change 接受 / 拒绝；第一版只允许 `create_node` / `create_edge` 写入正式 `narrative_graph.json`，拒绝不会写入 graph。
 - Event Log + Safety Snapshot：`workspace/books/{book_id}/history/events.json` 记录章节生成、Story Delta、Knowledge Draft review 和 Narrative Graph CRUD 事件；`workspace/books/{book_id}/snapshots/` 保存 Review & Merge accept 与 Narrative Graph update/delete 前的关键 JSON 快照。第一版不提供 rollback / restore UI、diff view、自动清理、Timeline、Health Dashboard、Future Outline Revision、Consistency Policy 或 Advanced Review & Merge。
@@ -381,5 +382,5 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - Relationship cards show source and target labels when available instead of making raw node ids the primary reading surface.
 - Raw Prompt / Debug remains available for inspection.
 - Context Pack selection is unchanged, but prompt text now separates selected records into Hard Continuity Constraints, Confirmed Facts, and Background Context. Only selected `status=confirmed` records with `importance >= 8` become hard constraints; Graph writes, Story Delta, and Review & Merge behavior are unchanged.
-- The chapter generation panel shows whether the current generation will inject the previewed Context Pack. This usage-state UI does not change Context Pack selection or prompt rendering, and it does not implement lightweight consistency checks.
+- The chapter generation panel shows whether the current generation will inject the previewed Context Pack. After generation is saved, a lightweight consistency warning pass compares the prose with the injected Hard Continuity Constraints for explicit date, life/death, identity, and organization-affiliation conflicts. Warnings are non-blocking and never rewrite prose; this is not a full Consistency Policy / Conflict Detection system.
 - Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.

@@ -133,6 +133,27 @@ def _outline_response(result: Any) -> dict[str, Any]:
     }
 
 
+def _public_consistency_warnings(warnings: Any) -> list[dict[str, str]]:
+    public_warnings: list[dict[str, str]] = []
+    if not isinstance(warnings, list):
+        return public_warnings
+
+    for warning in warnings:
+        if not isinstance(warning, dict):
+            continue
+        public_warnings.append(
+            {
+                "code": str(warning.get("code") or ""),
+                "severity": str(warning.get("severity") or "warning"),
+                "message": public_message(str(warning.get("message") or "")),
+                "constraint": public_message(str(warning.get("constraint") or "")),
+                "evidence": public_message(str(warning.get("evidence") or "")),
+                "suggestion": public_message(str(warning.get("suggestion") or "")),
+            }
+        )
+    return public_warnings
+
+
 def _chapter_response(result: Any) -> dict[str, Any]:
     response = {
         "ok": True,
@@ -142,6 +163,7 @@ def _chapter_response(result: Any) -> dict[str, Any]:
         "summary_file": public_file_name(result.summary_path),
         "index_file": public_file_name(result.index_path),
         "message": "Chapter generated.",
+        "consistency_warnings": _public_consistency_warnings(getattr(result, "consistency_warnings", [])),
     }
     if result.summary_error:
         response["summary_error"] = public_message(result.summary_error)
@@ -170,6 +192,7 @@ def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
             "summary_file": public_file_name(str(event.get("summary_file") or event.get("summary_path") or "")),
             "index_file": public_file_name(str(event.get("index_file") or event.get("index_path") or "")),
             "message": public_message(str(event.get("message") or "Chapter generated.")),
+            "consistency_warnings": _public_consistency_warnings(event.get("consistency_warnings")),
         }
         if event.get("summary_error"):
             response["summary_error"] = public_message(str(event["summary_error"]))

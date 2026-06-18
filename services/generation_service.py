@@ -24,6 +24,7 @@ from prompt_templates import (
 
 from .chapter_service import extract_chapter_title
 from .ai_run_service import create_ai_run_record_best_effort
+from .consistency_check_service import check_generated_chapter_consistency
 from .event_log_service import append_event_best_effort
 from .prompt_profile_service import build_prompt_profile
 from .schemas import ChapterGenerationResult, OutlineCharacterGenerationResult
@@ -239,6 +240,7 @@ def _finalize_generated_chapter(
     task_models: dict[str, str],
     notices: list[str] | None = None,
     ai_run_metadata: dict[str, Any] | None = None,
+    narrative_context_text: str | None = None,
 ) -> ChapterGenerationResult:
     notices = list(notices or [])
     chapter_model = _model(task_models, "chapter")
@@ -347,6 +349,11 @@ def _finalize_generated_chapter(
         changed_targets=changed_targets,
     )
 
+    try:
+        consistency_warnings = check_generated_chapter_consistency(chapter_content, narrative_context_text)
+    except Exception:
+        consistency_warnings = []
+
     return ChapterGenerationResult(
         True,
         chapter_number=chapter_number,
@@ -361,6 +368,7 @@ def _finalize_generated_chapter(
         chapter_model=chapter_model,
         chapter_title_model=chapter_title_model,
         summary_model=summary_model,
+        consistency_warnings=consistency_warnings,
     )
 
 
@@ -393,6 +401,8 @@ def _stream_done_event(result: ChapterGenerationResult) -> dict[str, Any]:
     }
     if result.summary_error:
         event["summary_error"] = result.summary_error
+    if result.consistency_warnings:
+        event["consistency_warnings"] = list(result.consistency_warnings)
     return event
 
 
@@ -439,7 +449,15 @@ def generate_single_chapter(
     except Exception as exc:
         return _chapter_failure(number, f"Chapter generation failed: {exc}", task_models)
 
-    return _finalize_generated_chapter(ref, number, chapter_content, task_models, notices, ai_run_metadata)
+    return _finalize_generated_chapter(
+        ref,
+        number,
+        chapter_content,
+        task_models,
+        notices,
+        ai_run_metadata,
+        narrative_context_text,
+    )
 
 
 def stream_generate_single_chapter(
@@ -500,7 +518,15 @@ def stream_generate_single_chapter(
         use_previous_context,
         narrative_context_text,
     )
-    result = _finalize_generated_chapter(ref, number, chapter_content, task_models, notices, ai_run_metadata)
+    result = _finalize_generated_chapter(
+        ref,
+        number,
+        chapter_content,
+        task_models,
+        notices,
+        ai_run_metadata,
+        narrative_context_text,
+    )
     if not result.ok:
         yield _stream_error_event(result.message, number, partial_length=len(chapter_content))
         return

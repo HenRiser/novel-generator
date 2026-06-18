@@ -57,6 +57,15 @@ export type WorkflowGuardWarning = {
   message: string;
 };
 
+export type ConsistencyWarning = {
+  code: string;
+  severity: "warning" | string;
+  message: string;
+  constraint: string;
+  evidence: string;
+  suggestion?: string;
+};
+
 export type ChapterStatusCounts = {
   pending_review: number;
   accepted: number;
@@ -508,6 +517,7 @@ export type ChapterGenerationResponse = {
   summary_file: string;
   index_file?: string;
   message: string;
+  consistency_warnings: ConsistencyWarning[];
 };
 
 export type ChapterStreamDeltaEvent = {
@@ -525,6 +535,7 @@ export type ChapterStreamDoneEvent = {
   index_file?: string;
   message: string;
   summary_error?: string;
+  consistency_warnings: ConsistencyWarning[];
 };
 
 export type ChapterStreamErrorEvent = {

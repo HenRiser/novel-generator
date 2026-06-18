@@ -36,6 +36,7 @@ import type {
   ChapterSummary,
   ChapterStatus,
   ChapterStreamDoneEvent,
+  ConsistencyWarning,
   ContextPackPreviewRequest,
   ContextPackPreviewResponse,
   CreateProjectRequest,
@@ -324,6 +325,22 @@ function chapterStreamSuccessMessage(result: ChapterStreamDoneEvent): string {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function consistencyWarningTypeLabel(code: string): string {
+  if (code === "possible_date_conflict") {
+    return "日期 / 时间冲突";
+  }
+  if (code === "possible_life_state_conflict") {
+    return "死亡 / 存活状态冲突";
+  }
+  if (code === "possible_identity_state_conflict") {
+    return "身份状态冲突";
+  }
+  if (code === "possible_organization_affiliation_conflict") {
+    return "组织归属冲突";
+  }
+  return "一致性提醒";
 }
 
 function streamingStatusLabel(status: StreamingPreviewStatus): string {
@@ -647,6 +664,7 @@ export function App() {
   const [chapterStatusLoading, setChapterStatusLoading] = useState(false);
   const [chapterStatusError, setChapterStatusError] = useState("");
   const [workflowGuardWarnings, setWorkflowGuardWarnings] = useState<WorkflowGuardWarning[]>([]);
+  const [consistencyWarnings, setConsistencyWarnings] = useState<ConsistencyWarning[]>([]);
   const [outlineGenerating, setOutlineGenerating] = useState(false);
   const [chapterGenerating, setChapterGenerating] = useState(false);
   const [chapterStreaming, setChapterStreaming] = useState(false);
@@ -717,6 +735,7 @@ export function App() {
     setChapterStatus(null);
     setChapterStatusError("");
     setWorkflowGuardWarnings([]);
+    setConsistencyWarnings([]);
   }, [selectedProjectRef]);
 
   useEffect(() => {
@@ -1086,6 +1105,7 @@ export function App() {
 
     setGenerationMessage("");
     setGenerationError("");
+    setConsistencyWarnings([]);
     if (!(await ensureGenerationIdle())) {
       return;
     }
@@ -1273,6 +1293,7 @@ export function App() {
     setStreamingContent("");
     setStreamingError("");
     setStreamingResult(null);
+    setConsistencyWarnings([]);
     setStreamingPreviewStatus("streaming");
     setStreamingPreviewVisible(true);
 
@@ -1285,6 +1306,7 @@ export function App() {
         },
         onDone: (doneEvent) => {
           setStreamingResult(doneEvent);
+          setConsistencyWarnings(doneEvent.consistency_warnings || []);
           setStreamingPreviewStatus("saved");
           setStreamingError("");
         },
@@ -1294,6 +1316,7 @@ export function App() {
         },
       });
       setStreamingResult(result);
+      setConsistencyWarnings(result.consistency_warnings || []);
       setStreamingPreviewStatus("saved");
       setGenerationMessage(chapterStreamSuccessMessage(result));
       await refreshProjectAndChapters(selectedProjectRef);
@@ -1347,12 +1370,14 @@ export function App() {
     setStreamingContent("");
     setStreamingError("");
     setStreamingResult(null);
+    setConsistencyWarnings([]);
     setStreamingPreviewStatus("idle");
     setStreamingPreviewVisible(false);
 
     setChapterGenerating(true);
     try {
       const result = await generateChapter(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext());
+      setConsistencyWarnings(result.consistency_warnings || []);
       setGenerationMessage(chapterSuccessMessage(result));
       await refreshProjectAndChapters(selectedProjectRef);
       const loaded = await loadChapterAfterGeneration(selectedProjectRef, result.chapter_number || chapterNumber);
@@ -1923,6 +1948,46 @@ export function App() {
     );
   };
 
+  const renderConsistencyWarnings = () => {
+    if (consistencyWarnings.length === 0) {
+      return null;
+    }
+
+    return (
+      <section className="consistency-warning-card" aria-live="polite">
+        <div className="consistency-warning-header">
+          <span className="section-kicker">Continuity check</span>
+          <h3>一致性提醒</h3>
+          <p>系统发现正文可能与已确认事实存在冲突。请检查以下内容；这些提醒不会阻断保存。</p>
+        </div>
+        <div className="consistency-warning-list">
+          {consistencyWarnings.map((warning, index) => (
+            <article className="consistency-warning-item" key={`${warning.code}-${index}`}>
+              <strong>{consistencyWarningTypeLabel(warning.code)}</strong>
+              <p>{warning.message}</p>
+              <dl>
+                <div>
+                  <dt>已确认事实</dt>
+                  <dd>{warning.constraint || "-"}</dd>
+                </div>
+                <div>
+                  <dt>正文证据</dt>
+                  <dd>{warning.evidence || "-"}</dd>
+                </div>
+                {warning.suggestion && (
+                  <div>
+                    <dt>建议</dt>
+                    <dd>{warning.suggestion}</dd>
+                  </div>
+                )}
+              </dl>
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  };
+
   const renderGenerationPanel = () => (
     <aside className="tool-stack" aria-label="生成与状态">
       <section className="panel generation-panel">
@@ -1994,6 +2059,7 @@ export function App() {
           workflowWarnings={workflowGuardWarnings}
         />
         {generationMessage && <p className="state-text success-text">{generationMessage}</p>}
+        {renderConsistencyWarnings()}
         {generationError && <p className="state-text error-text">{generationError}</p>}
         {streamingPreviewVisible && (
           <section
