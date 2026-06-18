@@ -80,6 +80,11 @@ const DEFAULT_CONTEXT_PACK_FORM: ContextPackPreviewRequest = {
 
 type StreamingPreviewStatus = "idle" | "streaming" | "saved" | "failed_unsaved";
 type CreateProjectPanelTarget = "" | "sidebar" | "detail" | "reader";
+type ContextPackUsageSummary = {
+  nodeCount: number | null;
+  edgeCount: number | null;
+  hardConstraintCount: number | null;
+};
 
 function asText(value: unknown, fallback = "未填写"): string {
   if (typeof value === "string" && value.trim()) {
@@ -111,6 +116,48 @@ function configNumberValue(
     }
   }
   return fallback;
+}
+
+function countValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function contextItemImportance(item: { importance?: unknown }): number | null {
+  const value = item.importance;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function isHardContextItem(item: { status?: unknown; importance?: unknown }): boolean {
+  return String(item.status || "").trim().toLowerCase() === "confirmed" && (contextItemImportance(item) ?? 0) >= 8;
+}
+
+function contextPackUsageSummary(preview: ContextPackPreviewResponse | null): ContextPackUsageSummary {
+  const pack = preview?.context_pack;
+  if (!pack) {
+    return { nodeCount: null, edgeCount: null, hardConstraintCount: null };
+  }
+
+  const nodes = Array.isArray(pack.selected_nodes) ? pack.selected_nodes : [];
+  const edges = Array.isArray(pack.selected_edges) ? pack.selected_edges : [];
+  const nodeCount = countValue(pack.stats?.nodes_selected) ?? nodes.length;
+  const edgeCount = countValue(pack.stats?.edges_selected) ?? edges.length;
+  const hardConstraintCount =
+    Array.isArray(pack.selected_nodes) && Array.isArray(pack.selected_edges)
+      ? [...nodes, ...edges].filter(isHardContextItem).length
+      : null;
+
+  return { nodeCount, edgeCount, hardConstraintCount };
+}
+
+function displayCount(value: number | null): string {
+  return value === null ? "未知" : `${value} 条`;
 }
 
 function generationRequestFromConfig(config: Record<string, unknown> | undefined): GenerationRequest {
@@ -643,6 +690,11 @@ export function App() {
     [chapters, selectedChapterNumber],
   );
 
+  const contextPackSummary = useMemo(() => contextPackUsageSummary(contextPackPreview), [contextPackPreview]);
+  const contextPackPromptText = contextPackPreview?.prompt_text?.trim() ?? "";
+  const contextPackHasPreview = Boolean(contextPackPreview);
+  const contextPackCanInject = Boolean(contextPackPromptText);
+  const contextPackWillBeUsed = Boolean(useContextPackForGeneration && contextPackCanInject);
   const suggestedChapterNumber = useMemo(() => nextChapterSuggestion(chapters), [chapters]);
   const streamingCharacterCount = streamingContent.length;
   const generationBusy =
@@ -1822,6 +1874,55 @@ export function App() {
     );
   };
 
+  const renderContextPackUsageState = () => {
+    let markerClass = "context-pack-usage-off";
+    let markerText = "不会注入 Context Pack";
+    let statusText = "尚未预览 Context Pack。本次生成将不会使用图谱上下文。";
+
+    if (contextPackHasPreview && contextPackWillBeUsed) {
+      markerClass = "context-pack-usage-on";
+      markerText = "将注入 Context Pack";
+      statusText = "本次生成将使用当前 Context Pack。";
+    } else if (contextPackHasPreview && contextPackCanInject) {
+      markerClass = "context-pack-usage-warning";
+      statusText = "已预览 Context Pack，但本次生成不会自动使用。勾选“使用 Context Pack”后，图谱资料才会注入生成。";
+    } else if (contextPackHasPreview) {
+      statusText = "已预览 Context Pack，但当前预览没有可注入内容。本次生成将不会使用图谱上下文。";
+    }
+
+    return (
+      <section className={`context-pack-usage-card ${markerClass}`} aria-live="polite">
+        <div className="context-pack-usage-heading">
+          <div>
+            <span>Context Pack 使用状态</span>
+            <strong>{markerText}</strong>
+          </div>
+          <span className="context-pack-usage-marker">{markerText}</span>
+        </div>
+        <p>{statusText}</p>
+        {contextPackHasPreview && (
+          <div className="context-pack-usage-summary">
+            <span>本次上下文包</span>
+            <dl className="context-pack-usage-stats" aria-label="本次上下文包摘要">
+              <div>
+                <dt>资料</dt>
+                <dd>{displayCount(contextPackSummary.nodeCount)}</dd>
+              </div>
+              <div>
+                <dt>关系</dt>
+                <dd>{displayCount(contextPackSummary.edgeCount)}</dd>
+              </div>
+              <div>
+                <dt>硬约束</dt>
+                <dd>{displayCount(contextPackSummary.hardConstraintCount)}</dd>
+              </div>
+            </dl>
+          </div>
+        )}
+      </section>
+    );
+  };
+
   const renderGenerationPanel = () => (
     <aside className="tool-stack" aria-label="生成与状态">
       <section className="panel generation-panel">
@@ -1877,6 +1978,7 @@ export function App() {
             {chapterGenerating ? "正在同步生成章节..." : "同步生成（备用）"}
           </button>
         </div>
+        {renderContextPackUsageState()}
         <div className="hint-box">
           <p>默认使用流式生成；同步生成仅作为流式异常时的备用 / 调试入口。</p>
           <p>
