@@ -380,5 +380,5 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - The preview groups selected context as characters, events/scenes, foreshadowing, world rules, plot directions, narrative relationships, and high-priority reminders for the next chapter.
 - Relationship cards show source and target labels when available instead of making raw node ids the primary reading surface.
 - Raw Prompt / Debug remains available for inspection.
-- This is a preview-layer polish only: Context Pack selection, prompt construction, Graph writes, Story Delta, and Review & Merge behavior are unchanged.
+- Context Pack selection is unchanged, but prompt text now separates selected records into Hard Continuity Constraints, Confirmed Facts, and Background Context. Only selected `status=confirmed` records with `importance >= 8` become hard constraints; Graph writes, Story Delta, and Review & Merge behavior are unchanged.
 - Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.

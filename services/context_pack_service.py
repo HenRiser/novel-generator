@@ -10,6 +10,7 @@ from .narrative_graph_service import load_narrative_graph
 DEFAULT_MIN_IMPORTANCE = 5
 DEFAULT_MAX_NODES = 20
 DEFAULT_MAX_EDGES = 30
+HARD_CONSTRAINT_MIN_IMPORTANCE = 8
 MAX_PROMPT_ITEMS_PER_SECTION = 20
 UNRESOLVED_FORESHADOWING_STATUSES = {"unresolved", "foreshadowed", "active"}
 SECTION_BY_TYPE = {
@@ -22,6 +23,17 @@ SECTION_BY_TYPE = {
     "event": "events",
     "organization": "organizations",
 }
+PROMPT_SECTION_TITLES = [
+    ("Core Facts", "core_facts"),
+    ("Characters", "characters"),
+    ("Scenes", "scenes"),
+    ("Items", "items"),
+    ("Foreshadowing", "foreshadowing"),
+    ("Plot Directions", "plot_directions"),
+    ("World Facts", "world_facts"),
+    ("Events", "events"),
+    ("Organizations", "organizations"),
+]
 
 
 @dataclass(frozen=True)
@@ -469,45 +481,104 @@ def _render_edge_line(edge: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _is_confirmed_item(item: dict[str, Any]) -> bool:
+    return _clean_text(item.get("status")).lower() == "confirmed"
+
+
+def _is_hard_constraint_item(item: dict[str, Any]) -> bool:
+    return _is_confirmed_item(item) and _importance(item.get("importance")) >= HARD_CONSTRAINT_MIN_IMPORTANCE
+
+
+def _render_hard_constraints(
+    lines: list[str],
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> None:
+    lines.extend(
+        [
+            "",
+            "### Hard Continuity Constraints",
+            "Treat these records as canon. Do not rewrite their dates, life/death state, identity state, organization affiliation, or causal relationships.",
+            "If the chapter needs to work around one of these constraints, preserve the constraint or leave uncertain details unstated.",
+        ]
+    )
+    if not nodes and not edges:
+        lines.append("- No selected confirmed high-importance records met the hard-constraint threshold.")
+        return
+
+    for node in nodes[:MAX_PROMPT_ITEMS_PER_SECTION]:
+        lines.extend(_render_node_line(node))
+    if edges:
+        lines.extend(["", "#### Relationships"])
+    for edge in edges[:MAX_PROMPT_ITEMS_PER_SECTION]:
+        lines.extend(_render_edge_line(edge))
+
+
+def _render_context_layer(
+    lines: list[str],
+    title: str,
+    intro: str,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> None:
+    if not nodes and not edges:
+        return
+
+    sections = _build_sections(nodes, edges)
+    lines.extend(["", f"### {title}", intro])
+    for section_title, key in PROMPT_SECTION_TITLES:
+        items = [item for item in _list(sections.get(key)) if isinstance(item, dict)]
+        if not items:
+            continue
+        lines.extend(["", f"#### {section_title}"])
+        for item in items[:MAX_PROMPT_ITEMS_PER_SECTION]:
+            lines.extend(_render_node_line(item))
+
+    relationships = [item for item in _list(sections.get("relationships")) if isinstance(item, dict)]
+    if relationships:
+        lines.extend(["", "#### Relationships"])
+        for item in relationships[:MAX_PROMPT_ITEMS_PER_SECTION]:
+            lines.extend(_render_edge_line(item))
+
+
 def render_context_pack_for_prompt(context_pack: dict[str, Any]) -> str:
     nodes = _list(context_pack.get("selected_nodes"))
     edges = _list(context_pack.get("selected_edges"))
     if not nodes and not edges:
         return ""
 
-    sections = _dict(context_pack.get("sections"))
+    selected_nodes = [node for node in nodes if isinstance(node, dict)]
+    selected_edges = [edge for edge in edges if isinstance(edge, dict)]
+    hard_nodes = [node for node in selected_nodes if _is_hard_constraint_item(node)]
+    hard_edges = [edge for edge in selected_edges if _is_hard_constraint_item(edge)]
+    confirmed_nodes = [node for node in selected_nodes if _is_confirmed_item(node) and not _is_hard_constraint_item(node)]
+    confirmed_edges = [edge for edge in selected_edges if _is_confirmed_item(edge) and not _is_hard_constraint_item(edge)]
+    background_nodes = [node for node in selected_nodes if not _is_confirmed_item(node)]
+    background_edges = [edge for edge in selected_edges if not _is_confirmed_item(edge)]
     lines = [
         "## Narrative Context Pack",
         "",
-        "These structured notes are selected from the user's story graph. Use them to preserve continuity. Do not introduce facts that contradict them.",
+        "These structured notes are selected from the user's story graph. Use them to preserve continuity.",
+        "Priority order: Hard Continuity Constraints > Confirmed Facts > Background Context.",
     ]
     chapter_goal = _clean_text(context_pack.get("chapter_goal"))
     if chapter_goal:
         lines.extend(["", f"Chapter goal: {chapter_goal}"])
 
-    section_titles = [
-        ("Core Facts", "core_facts"),
-        ("Characters", "characters"),
-        ("Scenes", "scenes"),
-        ("Items", "items"),
-        ("Foreshadowing", "foreshadowing"),
-        ("Plot Directions", "plot_directions"),
-        ("World Facts", "world_facts"),
-        ("Events", "events"),
-        ("Organizations", "organizations"),
-    ]
-    for title, key in section_titles:
-        items = [item for item in _list(sections.get(key)) if isinstance(item, dict)]
-        if not items:
-            continue
-        lines.extend(["", f"### {title}"])
-        for item in items[:MAX_PROMPT_ITEMS_PER_SECTION]:
-            lines.extend(_render_node_line(item))
-
-    relationships = [item for item in _list(sections.get("relationships")) if isinstance(item, dict)]
-    if relationships:
-        lines.extend(["", "### Relationships"])
-        for item in relationships[:MAX_PROMPT_ITEMS_PER_SECTION]:
-            lines.extend(_render_edge_line(item))
+    _render_hard_constraints(lines, hard_nodes, hard_edges)
+    _render_context_layer(
+        lines,
+        "Confirmed Facts",
+        "These confirmed records support continuity but are below the hard-constraint threshold.",
+        confirmed_nodes,
+        confirmed_edges,
+    )
+    _render_context_layer(
+        lines,
+        "Background Context",
+        "These records provide useful context, direction, or unresolved material. Use them flexibly and do not treat them as immutable facts.",
+        background_nodes,
+        background_edges,
+    )
 
     return "\n".join(lines).strip()

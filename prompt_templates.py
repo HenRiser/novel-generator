@@ -386,6 +386,7 @@ def build_chapter_prompt(
 11. 如果提供了上一章内容，必须自然承接上一章结尾。
 12. 不要突然引入没有铺垫的设定。
 13. 不要把故事写成总结，要写成具体场景。
+14. 如果可用上下文中提供了 Narrative Context Pack 的 Hard Continuity Constraints，必须视为最高优先级连续性约束，不得改写其中的日期、死亡/存活状态、身份状态、组织归属或因果关系。
 """
     return _messages(user_prompt, story_scale)
 
