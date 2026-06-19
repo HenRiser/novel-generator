@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   acceptKnowledgeDraftChange,
@@ -24,6 +24,15 @@ type KnowledgeDraftReviewPanelProps = {
 
 const SUPPORTED_ACCEPT_OPERATIONS = new Set(["create_node", "create_edge"]);
 const TERMINAL_STATUSES = new Set(["accepted", "rejected", "superseded"]);
+const PENDING_STATUSES = new Set(["pending", "pending_review"]);
+
+function normalizedStatus(status: unknown): string {
+  return typeof status === "string" ? status.trim().toLowerCase() : "";
+}
+
+function isPendingStatus(status: unknown): boolean {
+  return PENDING_STATUSES.has(normalizedStatus(status));
+}
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value ?? {}, null, 2);
@@ -42,6 +51,25 @@ function canAccept(change: CandidateChange): boolean {
 }
 
 function statusLabel(status: string): string {
+  const normalized = normalizedStatus(status);
+  if (normalized === "pending" || normalized === "pending_review") {
+    return "待审核";
+  }
+  if (normalized === "accepted") {
+    return "已接受";
+  }
+  if (normalized === "rejected") {
+    return "已拒绝";
+  }
+  if (normalized === "failed") {
+    return "合并失败";
+  }
+  if (normalized === "superseded") {
+    return "已替换";
+  }
+  if (normalized === "completed") {
+    return "已完成";
+  }
   if (status === "accepted") {
     return "已接受";
   }
@@ -212,11 +240,55 @@ function endpointLabel(
 
 function summarizeDraft(draft: KnowledgeDraft): string {
   const changes = draft.candidate_changes ?? [];
-  const pending = changes.filter((change) => changeStatus(change) === "pending_review").length;
+  const pending = changes.filter((change) => isPendingStatus(changeStatus(change))).length;
   const accepted = changes.filter((change) => changeStatus(change) === "accepted").length;
   const rejected = changes.filter((change) => changeStatus(change) === "rejected").length;
   const failed = changes.filter((change) => changeStatus(change) === "failed").length;
   return `${changes.length} changes · ${pending} pending · ${accepted} accepted · ${rejected} rejected · ${failed} failed`;
+}
+
+function hasPendingCandidateChange(draft: KnowledgeDraft): boolean {
+  return (draft.candidate_changes ?? []).some((change) => isPendingStatus(changeStatus(change)));
+}
+
+function isPendingDraft(draft: KnowledgeDraft): boolean {
+  return isPendingStatus(draft.status) || hasPendingCandidateChange(draft);
+}
+
+function draftTimestamp(draft: KnowledgeDraft): number {
+  const draftWithUpdatedAt = draft as KnowledgeDraft & { updated_at?: string };
+  const rawTimestamp = textValue(draftWithUpdatedAt.updated_at) || textValue(draft.created_at);
+  const timestamp = Date.parse(rawTimestamp);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function draftChapterNumber(draft: KnowledgeDraft): number {
+  return typeof draft.chapter_number === "number" && Number.isFinite(draft.chapter_number)
+    ? draft.chapter_number
+    : 0;
+}
+
+function compareDraftsLatestFirst(left: KnowledgeDraft, right: KnowledgeDraft): number {
+  const timestampDiff = draftTimestamp(right) - draftTimestamp(left);
+  if (timestampDiff !== 0) {
+    return timestampDiff;
+  }
+
+  const chapterDiff = draftChapterNumber(right) - draftChapterNumber(left);
+  if (chapterDiff !== 0) {
+    return chapterDiff;
+  }
+
+  return String(right.id || "").localeCompare(String(left.id || ""));
+}
+
+function sortDraftsLatestFirst(drafts: KnowledgeDraft[]): KnowledgeDraft[] {
+  return [...drafts].sort(compareDraftsLatestFirst);
+}
+
+function pickDefaultDraft(drafts: KnowledgeDraft[]): KnowledgeDraft | null {
+  const sorted = sortDraftsLatestFirst(drafts);
+  return sorted.find((item) => isPendingDraft(item)) || sorted[0] || null;
 }
 
 export function KnowledgeDraftReviewPanel({
@@ -235,8 +307,21 @@ export function KnowledgeDraftReviewPanel({
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [selectionHint, setSelectionHint] = useState("");
+  const selectedDraftIdRef = useRef("");
 
   const projectRef = selectedProject.project_ref;
+
+  useEffect(() => {
+    selectedDraftIdRef.current = selectedDraftId;
+  }, [selectedDraftId]);
+
+  useEffect(() => {
+    selectedDraftIdRef.current = "";
+    setSelectedDraftId("");
+    setDraft(null);
+    setSelectionHint("");
+  }, [projectRef]);
 
   useEffect(() => {
     let ignore = false;
@@ -250,13 +335,18 @@ export function KnowledgeDraftReviewPanel({
         if (ignore) {
           return;
         }
-        setDrafts(response.drafts);
-        setSelectedDraftId((current) => {
-          if (current && response.drafts.some((item) => item.id === current)) {
-            return current;
-          }
-          return response.drafts[0]?.id || "";
-        });
+        const nextDrafts = response.drafts;
+        const currentSelection = selectedDraftIdRef.current;
+        const currentStillExists = Boolean(currentSelection && nextDrafts.some((item) => item.id === currentSelection));
+        const defaultDraft = pickDefaultDraft(nextDrafts);
+        setDrafts(nextDrafts);
+        if (currentStillExists) {
+          setSelectedDraftId(currentSelection);
+          setSelectionHint("");
+        } else {
+          setSelectedDraftId(defaultDraft?.id || "");
+          setSelectionHint(defaultDraft && isPendingDraft(defaultDraft) ? "已自动定位到最新待审核草稿。" : "");
+        }
         if (response.drafts.length === 0) {
           setDraft(null);
         }
@@ -266,6 +356,7 @@ export function KnowledgeDraftReviewPanel({
           setDrafts([]);
           setDraft(null);
           setSelectedDraftId("");
+          setSelectionHint("");
         }
       } finally {
         if (!ignore) {
@@ -280,6 +371,7 @@ export function KnowledgeDraftReviewPanel({
       setDrafts([]);
       setDraft(null);
       setSelectedDraftId("");
+      setSelectionHint("");
     }
 
     return () => {
@@ -322,11 +414,12 @@ export function KnowledgeDraftReviewPanel({
   }, [apiStatus, projectRef, reloadToken, selectedDraftId]);
 
   const sortedDrafts = useMemo(
-    () =>
-      [...drafts].sort((left, right) =>
-        String(right.created_at || "").localeCompare(String(left.created_at || "")),
-      ),
+    () => sortDraftsLatestFirst(drafts),
     [drafts],
+  );
+  const recommendedDraftId = useMemo(
+    () => sortedDrafts.find((item) => isPendingDraft(item))?.id || "",
+    [sortedDrafts],
   );
   const nodeLabels = useMemo(() => graphNodeLabels(graph), [graph]);
   const draftLabels = useMemo(() => draftCandidateLabels(draft), [draft]);
@@ -399,6 +492,7 @@ export function KnowledgeDraftReviewPanel({
         <p className="review-notice">
           Accepting supported create_node / create_edge changes writes them into the formal Narrative Graph. Rejecting a change only updates the draft review state.
         </p>
+        {selectionHint && <p className="draft-selection-hint">{selectionHint}</p>}
         {message && <p className="state-text success-text">{message}</p>}
         {error && <p className="state-text error-text">{error}</p>}
       </section>
@@ -414,18 +508,33 @@ export function KnowledgeDraftReviewPanel({
           {loadingDrafts && <p className="state-text loading-text">正在加载 Knowledge Drafts...</p>}
           {!loadingDrafts && sortedDrafts.length === 0 && <p className="empty-state">当前项目暂无 Knowledge Draft。</p>}
           <div className="graph-list">
-            {sortedDrafts.map((item) => (
+            {sortedDrafts.map((item) => {
+              const pendingDraft = isPendingDraft(item);
+              const recommendedDraft = recommendedDraftId === item.id;
+              return (
               <button
-                className={`graph-list-item ${selectedDraftId === item.id ? "selected" : ""}`}
+                className={`graph-list-item draft-list-item ${selectedDraftId === item.id ? "selected" : ""} ${
+                  pendingDraft ? "draft-list-item-pending" : "draft-list-item-reviewed"
+                }`}
                 key={item.id}
                 type="button"
-                onClick={() => setSelectedDraftId(item.id)}
+                onClick={() => {
+                  setSelectionHint("");
+                  setSelectedDraftId(item.id);
+                }}
               >
-                <strong>Chapter {item.chapter_number || "-"} · {item.status || "pending_review"}</strong>
+                <span className="draft-list-heading">
+                  <strong>Chapter {item.chapter_number || "-"}</strong>
+                  <span className={`draft-status-pill ${pendingDraft ? "draft-status-pending" : "draft-status-reviewed"}`}>
+                    {pendingDraft ? "待审核" : statusLabel(item.status || "")}
+                  </span>
+                  {recommendedDraft && <span className="draft-status-pill draft-status-recommended">推荐审核</span>}
+                </span>
                 <span>{item.id}</span>
                 <small>{summarizeDraft(item)}</small>
               </button>
-            ))}
+              );
+            })}
           </div>
         </section>
 
