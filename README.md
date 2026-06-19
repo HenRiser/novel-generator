@@ -364,6 +364,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - Legacy `node_type` payloads remain accepted as a compatibility fallback for old drafts.
 - First-order `create_world_fact`, `create_foreshadowing`, `create_plot_direction`, and `create_character_card` candidates are normalized into `create_node` where possible.
 - `create_edge` can reference existing graph nodes or same-draft node candidates with `source_change_id` and `target_change_id`.
+- Story Delta prompt now uses a conservative importance rubric: most future candidate_changes should be 4-7, 8-10 are rare high-priority continuity constraints, and confirmed does not automatically mean high importance. This affects future candidates only; historical Graph data, Context Pack selection, and Hard Constraints extraction are unchanged.
 - Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.
 
 ## Graph Narrative View / Review Semantic Cards

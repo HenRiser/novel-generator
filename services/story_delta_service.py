@@ -494,6 +494,21 @@ Rules:
 - Candidate payloads for next chapter proposals should use suggested_status="planned".
 - Candidate payloads for facts observed in this chapter should use suggested_status="confirmed".
 
+Importance rubric:
+- Importance scale:
+  - 1-3: Minor detail. Useful for local flavor, but unlikely to affect future chapters.
+  - 4-5: Useful continuity fact. May help local continuity but is not a major constraint.
+  - 6-7: Significant story asset. Likely to matter again, but can remain normal context.
+  - 8-9: Major continuity constraint. Should be rare. Affects future plot, identity, irreversible events, key relationships, or world rules.
+  - 10: Foundational canon. Extremely rare. Only for central irreversible facts that would break the story if changed.
+- Most candidate_changes should fall between 4 and 7.
+- confirmed is not the same as high importance. Do not mark every confirmed fact as 8+.
+- Use 8+ only when the information should become a hard continuity constraint in future generation.
+- Dates, death/survival states, identity status, organization affiliation, and major causality can be 8+ only if they are important to future continuity.
+- Ordinary scene events, one-time interactions, minor observations, and local emotional beats should usually be 4-6.
+- create_edge importance should reflect the importance of the relationship itself, not merely the importance of source/target nodes.
+- If uncertain, choose the lower reasonable importance.
+
 Project config:
 {_truncate(_extract_config_text(project_config), 3000)}
 
@@ -831,10 +846,10 @@ def _normalized_importance(value: Any, default: int) -> int:
     if value in (None, "") or isinstance(value, bool):
         return default
     try:
-        parsed = int(value)
-    except (TypeError, ValueError):
+        parsed = int(float(value))
+    except (TypeError, ValueError, OverflowError):
         return default
-    return parsed if 1 <= parsed <= 10 else default
+    return min(10, max(1, parsed))
 
 
 def _normalized_layer(value: Any, default: str) -> str:
