@@ -492,7 +492,24 @@ Rules:
 - Create at most 5 create_node changes.
 - Keep payload text concise. Do not copy long chapter passages into payload.
 - Candidate payloads for next chapter proposals should use suggested_status="planned".
-- Candidate payloads for facts observed in this chapter should use suggested_status="confirmed".
+- Candidate payloads for facts directly stated in this chapter should use suggested_status="confirmed".
+
+Evidence grounding and fact-compression guard:
+- Only create candidate changes from facts explicitly supported by the chapter text.
+- Do not upgrade hints, suspicions, indirect evidence, emotional impressions, or character guesses into confirmed facts.
+- If the chapter only implies something, preserve that uncertainty in the candidate summary and status.
+- Use confirmed only when the chapter text directly states the fact.
+- For indirect evidence, unanswered clues, partial records, suspicious coincidences, or character speculation, use an existing non-confirmed status if supported by the payload type, such as unresolved, introduced, partially_revealed, active, or planned.
+- If no precise uncertainty status fits, keep the summary wording uncertain and choose a lower importance.
+- Do not rewrite or substitute disease names, dates, years, death causes, death timing, voting timing, investigation targets, organization actions, or causality.
+- If the chapter says 肝硬化, do not summarize it as 肝癌.
+- If the chapter says a vote happened after 1987, do not summarize it as happening in 1978.
+- If the chapter suggests a possible link to father's death, do not summarize it as confirmed death causality.
+- If the chapter says an accident investigation occurred, do not turn it into a confirmed operation behind another death.
+- Do not create a causal relationship unless the chapter explicitly states causality.
+- If the text only places two events near each other, or a character suspects a connection, summarize it as a clue or possible link, not as confirmed cause.
+- Uncertain or inferred facts should usually have lower importance than confirmed irreversible facts.
+- Do not use high importance to compensate for weak evidence.
 
 Importance rubric:
 - Importance scale:
