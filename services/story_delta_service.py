@@ -494,6 +494,22 @@ Rules:
 - Candidate payloads for next chapter proposals should use suggested_status="planned".
 - Candidate payloads for facts directly stated in this chapter should use suggested_status="confirmed".
 
+Uncertainty status guard:
+- The summary wording and status must agree.
+- If a candidate summary contains uncertainty markers such as 可能, 怀疑, 暗示, 似乎, 疑似, 尚未明确, 未证实, 间接表明, 线索指向, 可能关联, 推测, 猜测, 无法确认, or English markers like possible, suspected, hinted, implied, unconfirmed, unclear, indirectly suggests, or possible link, the candidate should usually NOT use status="confirmed".
+- Use confirmed only for facts directly stated by the chapter text.
+- Prefer unresolved for unanswered clues, possible links, indirect evidence, or facts that remain uncertain.
+- Prefer introduced for newly introduced concepts, people, organizations, clues, or artifacts that are present but not fully explained.
+- Prefer partially_revealed for information that is partly disclosed but not fully confirmed.
+- Prefer active for ongoing states, open threads, or continuing relationships.
+- Use planned only for future-facing setup or suggested future direction.
+- confirmed is appropriate when the chapter directly states a fact, for example: 张建国的死亡证明日期是2004年9月17日; 张望舒被登记为时间连续者; someone gives 张望舒 a document numbered GA-2001-0923.
+- confirmed is NOT appropriate when the chapter only hints that a file may be related to a death, a character suspects an organization is involved, a record is missing/damaged/marked but its meaning is unclear, a clue points toward a person but the person's role is not confirmed, or a character feels that two events may be connected.
+- If the summary says 可能, 疑似, 暗示, 尚未明确, or 线索指向, do not mark it confirmed.
+- If the status is confirmed, write the summary as a directly stated fact and ensure the chapter explicitly supports it.
+- Do not use confirmed merely because a clue is important. A clue can be important and still be unresolved, introduced, partially_revealed, or active.
+- Do not use high importance to compensate for uncertainty.
+
 Evidence grounding and fact-compression guard:
 - Only create candidate changes from facts explicitly supported by the chapter text.
 - Do not upgrade hints, suspicions, indirect evidence, emotional impressions, or character guesses into confirmed facts.
