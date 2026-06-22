@@ -18,6 +18,7 @@ from file_manager import (
 from prompt_templates import (
     build_chapter_prompt,
     build_character_prompt,
+    build_low_intensity_chapter_constraints_prompt,
     build_outline_prompt,
     build_summary_prompt,
 )
@@ -34,6 +35,37 @@ OUTLINE_MODE = "outline"
 CHARACTER_MODE = "character"
 CHAPTER_MODE = "chapter"
 UNTITLED_CHAPTER = "Untitled chapter"
+CHAPTER_GOAL_PREFIXES = (
+    "Chapter goal:",
+    "Chapter goal：",
+    "章节目标:",
+    "章节目标：",
+    "章节目标文本:",
+    "章节目标文本：",
+)
+LOW_INTENSITY_GOAL_MARKERS = (
+    "低强度",
+    "低烈度",
+    "情绪消化",
+    "行动缓冲",
+    "过渡章节",
+    "不新增设定",
+    "不新增档案",
+    "不新增编号",
+    "不新增纸条",
+    "不新增正典",
+    "不要引入新档案",
+    "不要引入新编号",
+    "不要推进终局",
+    "不要揭示大型设定",
+    "不要堆设定",
+    "low-intensity",
+    "low intensity",
+    "no new canon",
+    "no new archive",
+    "no new file",
+)
+LOW_INTENSITY_NEGATION_MARKERS = ("不要低强度", "不低强度")
 
 
 def _model(task_models: dict[str, str], key: str) -> str:
@@ -59,6 +91,26 @@ def _chapter_failure(
         chapter_title_model=chapter_model,
         summary_model=summary_model,
     )
+
+
+def _extract_chapter_goal_from_narrative_context(narrative_context_text: str | None) -> str:
+    for raw_line in str(narrative_context_text or "").splitlines():
+        line = raw_line.strip()
+        normalized = line.casefold()
+        for prefix in CHAPTER_GOAL_PREFIXES:
+            if normalized.startswith(prefix.casefold()):
+                return line[len(prefix) :].strip()
+    return ""
+
+
+def _is_low_intensity_chapter_goal(chapter_goal: str) -> bool:
+    goal = str(chapter_goal or "").strip()
+    if not goal:
+        return False
+    compact_goal = "".join(goal.split()).casefold()
+    if any("".join(marker.split()).casefold() in compact_goal for marker in LOW_INTENSITY_NEGATION_MARKERS):
+        return False
+    return any("".join(marker.split()).casefold() in compact_goal for marker in LOW_INTENSITY_GOAL_MARKERS)
 
 
 def build_generation_messages(
@@ -115,6 +167,9 @@ def build_generation_messages(
     if context_text:
         messages = _append_user_context(messages, context_text)
         notices.append("Loaded Narrative Context Pack.")
+        chapter_goal = _extract_chapter_goal_from_narrative_context(context_text)
+        if _is_low_intensity_chapter_goal(chapter_goal):
+            messages = _append_user_context(messages, build_low_intensity_chapter_constraints_prompt(chapter_goal))
     return messages, notices
 
 

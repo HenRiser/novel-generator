@@ -391,6 +391,23 @@ def build_chapter_prompt(
     return _messages(user_prompt, story_scale)
 
 
+def build_low_intensity_chapter_constraints_prompt(chapter_goal: str) -> str:
+    goal = _clean(chapter_goal)
+    goal_line = f"\nTriggered chapter goal: {goal}" if goal else ""
+    return f"""
+### Low-Intensity Chapter Constraints{goal_line}
+
+The chapter goal explicitly asks for low-intensity pacing, emotional digestion, relationship focus, or no new canon. Obey that constraint strictly.
+1. Do not introduce new archives, file numbers such as new GA/TC codes, paper notes, physical evidence, canon materials, or core organization secrets.
+2. Do not push the endgame truth forward or explain key relationships such as 陈素素、陈琦、钟副局长、李调查员 all at once.
+3. Prioritize character relationships, emotional digestion, low-intensity action, choices, and consequences.
+4. You may use existing Context Pack facts and previously established clues, but do not invent new core evidence, new files, new serial numbers, or new organization records.
+5. If a clue is needed, reuse an existing clue from the provided context instead of creating a new artifact.
+6. If the general instruction to add suspense or plot movement conflicts with this low-intensity goal, the low-intensity goal wins.
+7. These constraints do not override Hard Continuity Constraints; preserve all confirmed dates, life/death states, identities, affiliations, and causality.
+""".strip()
+
+
 def build_chapter_title_prompt(
     chapter_number: int,
     chapter_content: str,
