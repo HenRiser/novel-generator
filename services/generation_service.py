@@ -59,11 +59,16 @@ LOW_INTENSITY_GOAL_MARKERS = (
     "不要推进终局",
     "不要揭示大型设定",
     "不要堆设定",
+    "不揭示新信息",
+    "不要揭示新信息",
+    "不释放新信息",
+    "不要释放新信息",
     "low-intensity",
     "low intensity",
     "no new canon",
     "no new archive",
     "no new file",
+    "no new revelation",
 )
 LOW_INTENSITY_NEGATION_MARKERS = ("不要低强度", "不低强度")
 
