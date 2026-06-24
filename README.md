@@ -319,7 +319,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - 默认流式生成：实时预览正文，完成后保存章节、摘要并更新 `chapter_index.md`。
 - 同步备用生成：保留为流式异常时的备用 / 调试入口。
 - Context Pack：可预览并选择是否辅助本次生成，默认关闭；单章生成区域会显示本次是否注入 Context Pack，以及资料、关系和硬约束数量摘要。
-- Low-Intensity Goal Compliance：当本次注入的 Context Pack `Chapter goal` 明确要求低强度 / 情绪消化 / 不新增设定、档案、编号或纸条时，章节生成 prompt 会追加低强度约束，避免凭空新增核心证据或组织秘密；这不改变 Context Pack selection、Story Delta、Review & Merge 或 Graph。
+- Low-Intensity Goal Compliance：当本次注入的 Context Pack `Chapter goal` 明确要求低强度 / 情绪消化 / 不新增设定、档案、编号或纸条时，章节生成 prompt 会追加低强度约束；除禁止新增材料外，也禁止打开、检查、引用、解码或揭示既有档案、记录、照片、纸条、教材、证物中的新正典信息。既有线索只能作为已知背景轻提，不能成为新揭示来源；这不改变 Context Pack selection、Story Delta、Review & Merge 或 Graph。
 - Lightweight Consistency Check：章节生成保存后会基于本次注入的 Hard Continuity Constraints 返回轻量一致性提醒，第一版只覆盖显式日期、死亡 / 存活状态、身份状态和组织归属冲突；提醒非阻断，不会自动改正文，也不是完整 Consistency Policy / Conflict Detection。
 - Story Delta：章节存在后可手动触发第二次分析，生成待审核 Knowledge Draft。
 - Knowledge Draft Review & Merge：资料库页支持单条 candidate_change 接受 / 拒绝；第一版只允许 `create_node` / `create_edge` 写入正式 `narrative_graph.json`，拒绝不会写入 graph。
@@ -367,6 +367,7 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - `create_edge` can reference existing graph nodes or same-draft node candidates with `source_change_id` and `target_change_id`.
 - Story Delta prompt now uses a conservative importance rubric: most future candidate_changes should be 4-7, 8-10 are rare high-priority continuity constraints, and confirmed does not automatically mean high importance. This affects future candidates only; historical Graph data, Context Pack selection, and Hard Constraints extraction are unchanged.
 - Story Delta prompt now also applies conservative fact-compression and uncertainty-status guards: candidate changes should distinguish explicit facts from hints, speculation, partial records, and possible links; summaries containing 可能、怀疑、暗示、尚未明确、线索指向, or similar uncertainty markers should usually avoid `confirmed` and use `unresolved`, `partially_revealed`, `introduced`, `active`, or `planned` when appropriate. Story Delta should not rewrite disease names, dates, years, death timing, voting timing, investigation targets, organization actions, or causality. This is prompt guidance only, not a full fact-checking system, and it does not automatically fix or reject candidates.
+- Every future Story Delta `candidate_change` is now explicitly required to include narrative `status` and integer `importance` in its payload. This is prompt guidance only: historical Graph data and drafts are not migrated or repaired automatically.
 - Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.
 
 ## Graph Narrative View / Review Semantic Cards
@@ -386,6 +387,6 @@ React 创作页中的正文生成入口集中在单章生成工作流：
 - Relationship cards show source and target labels when available instead of making raw node ids the primary reading surface.
 - Raw Prompt / Debug remains available for inspection.
 - Context Pack selection is unchanged, but prompt text now separates selected records into Hard Continuity Constraints, Confirmed Facts, and Background Context. Only selected `status=confirmed` records with `importance >= 8` become hard constraints; Graph writes, Story Delta, and Review & Merge behavior are unchanged.
-- When the injected Context Pack `Chapter goal` explicitly asks for low-intensity pacing, emotional digestion, or no new settings / archives / file numbers / paper notes, chapter generation appends a Low-Intensity Chapter Constraints block. This is prompt guidance only and does not change Context Pack selection, Story Delta, Review & Merge, or Graph writes.
+- When the injected Context Pack `Chapter goal` explicitly asks for low-intensity pacing, emotional digestion, or no new settings / archives / file numbers / paper notes, chapter generation appends a Low-Intensity Chapter Constraints block. The block also prevents existing files, records, photos, notes, textbooks, or evidence from being opened or used to reveal new canon; existing clues may only be mentioned as already-known context. This is prompt guidance only and does not change Context Pack selection, Story Delta, Review & Merge, or Graph writes.
 - The chapter generation panel shows whether the current generation will inject the previewed Context Pack. After generation is saved, a lightweight consistency warning pass compares the prose with the injected Hard Continuity Constraints for explicit date, life/death, identity, and organization-affiliation conflicts. Warnings are non-blocking and never rewrite prose; this is not a full Consistency Policy / Conflict Detection system.
 - Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, Advanced Review & Merge, and Streamlit recovery are not implemented in this stage.

@@ -412,7 +412,8 @@ def build_story_delta_prompt(
         "Use strict JSON syntax: double-quote every string, escape internal double quotes, "
         "put commas between all array items and object fields, and never use trailing commas. "
         "Do not treat next-chapter plans as facts that already happened. "
-        "All candidate changes must require user review."
+        "All candidate changes must require user review. "
+        "Every candidate change must include payload.status and payload.importance."
     )
     user_prompt = f"""
 Analyze chapter {chapter_number} and return a single JSON object with this shape:
@@ -448,12 +449,12 @@ Analyze chapter {chapter_number} and return a single JSON object with this shape
       "requires_review": true,
       "evidence": "quote or concise evidence from chapter text",
       "payload": {{
-        "type": "event",
-        "label": "",
-        "summary": "",
-        "importance": 5,
-        "layer": "major",
-        "status": "confirmed"
+        "type": "relationship_note",
+        "label": "张望舒与陈素素的信任缓和",
+        "summary": "二人在交流中没有获得新档案，但关系出现轻微缓和。",
+        "status": "active",
+        "importance": 6,
+        "layer": "detail"
       }}
     }}
   ],
@@ -479,10 +480,16 @@ Rules:
   - plot direction -> create_node payload.type="plot_direction"
   - character card or character state -> create_node payload.type="character" or payload.type="relationship_note"
 - create_node payloads must use "type"; do not use "node_type".
-- create_node payloads should include label, summary, importance, layer, and status or suggested_status.
+- Every candidate_change MUST include narrative status and importance inside its payload.
+- Do not omit payload.status. Do not omit payload.importance.
+- A candidate_change whose payload lacks status or importance is invalid.
+- payload.status must use an existing narrative status when possible: confirmed, introduced, unresolved, partially_revealed, active, or planned.
+- payload.importance must be an integer from 1 to 10.
+- Do not place narrative status at the candidate_change top level; top-level review status is reserved for pending_review, accepted, rejected, failed, or superseded.
+- create_node payloads must include label, summary, importance, layer, and status.
 - When you create multiple nodes with clear relationships, add 1-3 high-confidence create_edge changes.
 - create_edge payloads should use simple edge types: appears_in, causes, leads_to, reveals, foreshadows, monitors, constrains, protects, threatens, located_at, related_to, changes_status_of.
-- create_edge payloads must include type, label, summary, importance, layer, and either source/target for existing graph node ids or source_change_id/target_change_id for nodes created in this same candidate_changes array.
+- create_edge payloads must include type, label, summary, status, importance, layer, and either source/target for existing graph node ids or source_change_id/target_change_id for nodes created in this same candidate_changes array.
 - If an edge connects two nodes created in this same response, set source_change_id and target_change_id to the candidate change ids of those create_node records.
 - Do not use source_label or target_label as merge identifiers.
 - Do not generate edges with endpoints you cannot identify.
@@ -491,8 +498,17 @@ Rules:
 - Keep candidate_changes focused and concise; prefer 3-8 high-value changes rather than many low-value records.
 - Create at most 5 create_node changes.
 - Keep payload text concise. Do not copy long chapter passages into payload.
-- Candidate payloads for next chapter proposals should use suggested_status="planned".
-- Candidate payloads for facts directly stated in this chapter should use suggested_status="confirmed".
+- If the chapter directly states the fact, use payload.status="confirmed".
+- If the chapter introduces a clue, object, person, organization, or concept without fully explaining it, use payload.status="introduced" or payload.status="unresolved".
+- If the chapter only hints at a connection or leaves its meaning unclear, use payload.status="unresolved".
+- If the chapter continues an existing relationship, thread, or state, use payload.status="active".
+- If the item is future-facing setup, use payload.status="planned".
+- If uncertain between statuses, choose the more conservative non-confirmed status.
+- Use payload.importance=4-5 for useful but minor continuity.
+- Use payload.importance=6-7 for significant story assets.
+- Use payload.importance=8-9 only for major continuity constraints.
+- Use payload.importance=10 only for foundational canon.
+- If uncertain, choose a lower reasonable importance. Never omit payload.importance.
 
 Uncertainty status guard:
 - The summary wording and status must agree.

@@ -399,12 +399,15 @@ def build_low_intensity_chapter_constraints_prompt(chapter_goal: str) -> str:
 
 The chapter goal explicitly asks for low-intensity pacing, emotional digestion, relationship focus, or no new canon. Obey that constraint strictly.
 1. Do not introduce new archives, file numbers such as new GA/TC codes, paper notes, physical evidence, canon materials, or core organization secrets.
-2. Do not push the endgame truth forward or explain key relationships such as 陈素素、陈琦、钟副局长、李调查员 all at once.
-3. Prioritize character relationships, emotional digestion, low-intensity action, choices, and consequences.
-4. You may use existing Context Pack facts and previously established clues, but do not invent new core evidence, new files, new serial numbers, or new organization records.
-5. If a clue is needed, reuse an existing clue from the provided context instead of creating a new artifact.
-6. If the general instruction to add suspense or plot movement conflicts with this low-intensity goal, the low-intensity goal wins.
-7. These constraints do not override Hard Continuity Constraints; preserve all confirmed dates, life/death states, identities, affiliations, and causality.
+2. Do not reveal new information from existing files, archives, records, photos, notes, folders, textbooks, cabinets, physical evidence, or numbered materials.
+3. Do not open, inspect, read, browse, quote, decode, photograph, display, reveal, discover hidden layers in, or extract new canon facts from any existing document or object.
+4. Existing clues may be mentioned only as already-known context. Do not turn a known archive number, file, cabinet, textbook, photo, note, record, or piece of evidence into a source of new revelations.
+5. Do not push the endgame truth forward or explain key relationships such as 陈素素、陈琦、钟副局长、李调查员 all at once.
+6. Prioritize character relationships, hesitation, trust negotiation, emotional aftermath, low-intensity action, small decisions, choices, and consequences.
+7. You may use existing Context Pack facts and previously established clues, but do not invent new core evidence, new files, new serial numbers, new organization records, or new contents hidden inside existing materials.
+8. If tension is needed, derive it from already-known clues, character conflict, uncertainty, trust changes, or consequences instead of documents, codes, evidence, hidden contents, or revelations.
+9. If the general instruction to add suspense or plot movement conflicts with this low-intensity goal, the low-intensity goal wins.
+10. These constraints do not override Hard Continuity Constraints; preserve all confirmed dates, life/death states, identities, affiliations, and causality.
 """.strip()
 
 
