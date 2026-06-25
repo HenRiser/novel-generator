@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -169,6 +170,120 @@ class ChapterTaskServiceTests(unittest.TestCase):
 
         self.assertFalse(result.ok)
         self.assertEqual(result.error_code, "chapter_task_invalid")
+
+    def test_none_budget_rejects_primary_information_reveal(self):
+        result = self.save(payload=task_payload(primary_function="information_reveal"))
+
+        self.assertFalse(result.ok)
+        self.assertIn("primary_function 'information_reveal'", result.message)
+        self.assertIn("canon_budget 'none'", result.message)
+        self.assertIn("raise canon_budget", result.message)
+
+    def test_none_budget_rejects_secondary_information_reveal(self):
+        result = self.save(
+            payload=task_payload(secondary_functions=["relationship_progress", "information_reveal"])
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("secondary_functions", result.message)
+        self.assertIn("information_reveal", result.message)
+
+    def test_none_budget_rejects_primary_foreshadowing_setup(self):
+        result = self.save(payload=task_payload(primary_function="foreshadowing_setup"))
+
+        self.assertFalse(result.ok)
+        self.assertIn("foreshadowing_setup", result.message)
+        self.assertIn("canon_budget 'none'", result.message)
+
+    def test_none_budget_rejects_secondary_foreshadowing_setup(self):
+        result = self.save(
+            payload=task_payload(secondary_functions=["relationship_progress", "foreshadowing_setup"])
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("secondary_functions", result.message)
+        self.assertIn("foreshadowing_setup", result.message)
+
+    def test_none_budget_allows_foreshadowing_payoff(self):
+        result = self.save(
+            payload=task_payload(
+                primary_function="foreshadowing_payoff",
+                secondary_functions=["emotional_aftermath"],
+            )
+        )
+
+        self.assertTrue(result.ok)
+
+    def test_none_budget_payoff_contract_contains_specific_boundary(self):
+        draft = self.save(
+            payload=task_payload(
+                primary_function="foreshadowing_payoff",
+                secondary_functions=["emotional_aftermath"],
+            )
+        )
+        approved = self.approve(draft).task
+        contract = derive_allowed_scene_contract(approved)
+
+        self.assertIn("伏笔回收只能兑现已经确认的信息所产生的关系、情绪或现实后果", contract)
+        self.assertIn("不得揭示新的正典事实、身份、因果、证据或终局答案", contract)
+        self.assertIn("零新正典", contract)
+
+    def test_primary_function_cannot_repeat_in_secondary_functions(self):
+        result = self.save(
+            payload=task_payload(
+                primary_function="emotional_aftermath",
+                secondary_functions=["relationship_progress", "emotional_aftermath"],
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("secondary_functions cannot contain primary_function", result.message)
+
+    def test_allowed_and_forbidden_advance_conflict_is_rejected(self):
+        result = self.save(
+            payload=task_payload(
+                allowed_advances=["恢复有限信任"],
+                forbidden_advances=[" 恢复有限信任 "],
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("恢复有限信任", result.message)
+
+    def test_english_case_only_advance_conflict_is_rejected(self):
+        result = self.save(
+            payload=task_payload(
+                allowed_advances=["Reveal Existing Consequence"],
+                forbidden_advances=["reveal existing consequence"],
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("Reveal Existing Consequence", result.message)
+
+    def test_reading_existing_inconsistent_json_fails(self):
+        created = self.save()
+        path = self.first.project_dir / "planning" / TASK_SHEETS_NAME
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document["tasks"][0]["primary_function"] = "information_reveal"
+        path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        result = get_chapter_tasks(self.first_ref, 1, books_root=self.books_root)
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.error_code, "chapter_task_read_failed")
+        self.assertIn("invalid task contract", result.message)
+        self.assertIn("information_reveal", result.message)
+        self.assertEqual(created.task["canon_budget"], "none")
+
+    def test_valid_low_none_emotional_aftermath_remains_supported(self):
+        result = self.save()
+
+        self.assertTrue(result.ok)
+        approved = self.approve(result).task
+        contract = derive_allowed_scene_contract(approved)
+        self.assertIn("允许推进关系、情绪、选择", contract)
+        self.assertIn("揭示新的正典事实、身份、因果、证据或终局答案", contract)
 
     def test_invalid_status_is_rejected(self):
         result = self.save(payload=task_payload(status="approved"))

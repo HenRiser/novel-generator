@@ -30,6 +30,7 @@ CHAPTER_FUNCTIONS = {
 }
 INTENSITIES = {"low", "medium", "high"}
 CANON_BUDGETS = {"none", "minor", "normal"}
+NONE_BUDGET_INCOMPATIBLE_FUNCTIONS = {"information_reveal", "foreshadowing_setup"}
 LIST_FIELDS = {
     "secondary_functions",
     "must_carry",
@@ -209,6 +210,9 @@ def _read_document(path: Path) -> dict[str, Any]:
         for field_name in TEXT_FIELDS:
             if not isinstance(task.get(field_name), str):
                 raise ValueError(f"{path.name} contains an invalid {field_name}.")
+        consistency_message = _cross_field_consistency_error(task)
+        if consistency_message:
+            raise ValueError(f"{path.name} contains an invalid task contract: {consistency_message}")
         if status == "approved":
             if number in approved_chapters:
                 raise ValueError(f"{path.name} contains more than one approved revision for chapter {number}.")
@@ -244,6 +248,64 @@ def _string_list(value: Any, field_name: str) -> tuple[list[str], str]:
             seen.add(text)
             result.append(text)
     return result, ""
+
+
+def _comparison_key(value: Any) -> str:
+    return _clean_text(value).casefold()
+
+
+def _advance_conflicts(
+    allowed_advances: list[str],
+    forbidden_advances: list[str],
+) -> list[str]:
+    forbidden_keys = {_comparison_key(item) for item in forbidden_advances if _comparison_key(item)}
+    conflicts: list[str] = []
+    seen: set[str] = set()
+    for item in allowed_advances:
+        key = _comparison_key(item)
+        if key and key in forbidden_keys and key not in seen:
+            seen.add(key)
+            conflicts.append(_clean_text(item))
+    return conflicts
+
+
+def _cross_field_consistency_error(task: dict[str, Any]) -> str:
+    primary_function = _clean_text(task.get("primary_function"))
+    secondary_functions = list(task.get("secondary_functions") or [])
+    canon_budget = _clean_text(task.get("canon_budget"))
+
+    if primary_function in secondary_functions:
+        return (
+            f"secondary_functions cannot contain primary_function '{primary_function}'. "
+            "Choose distinct primary and secondary chapter functions."
+        )
+
+    if canon_budget == "none":
+        if primary_function in NONE_BUDGET_INCOMPATIBLE_FUNCTIONS:
+            return (
+                f"primary_function '{primary_function}' is incompatible with canon_budget 'none'. "
+                "Change the chapter function or raise canon_budget."
+            )
+        incompatible_secondary = [
+            item for item in secondary_functions if item in NONE_BUDGET_INCOMPATIBLE_FUNCTIONS
+        ]
+        if incompatible_secondary:
+            return (
+                "secondary_functions contains "
+                f"'{incompatible_secondary[0]}', which is incompatible with canon_budget 'none'. "
+                "Change the chapter function or raise canon_budget."
+            )
+
+    conflicts = _advance_conflicts(
+        list(task.get("allowed_advances") or []),
+        list(task.get("forbidden_advances") or []),
+    )
+    if conflicts:
+        return (
+            "allowed_advances and forbidden_advances contain the same normalized item(s): "
+            f"{', '.join(conflicts)}. Remove the conflict from one list."
+        )
+    return ""
 
 
 def _validate_payload(payload: Any) -> tuple[dict[str, Any] | None, str]:
@@ -297,6 +359,9 @@ def _validate_payload(payload: Any) -> tuple[dict[str, Any] | None, str]:
         if value is not None and not isinstance(value, str):
             return None, f"{field_name} must be a string."
         normalized[field_name] = _clean_text(value)
+    message = _cross_field_consistency_error(normalized)
+    if message:
+        return None, message
     return normalized, ""
 
 
@@ -611,21 +676,30 @@ def derive_allowed_scene_contract(task: dict[str, Any]) -> str:
     canon_budget = _clean_text(task.get("canon_budget"))
     if primary_function not in CHAPTER_FUNCTIONS or intensity not in INTENSITIES or canon_budget not in CANON_BUDGETS:
         raise ValueError("Approved Chapter Task Sheet contains invalid enums.")
+    consistency_message = _cross_field_consistency_error(task)
+    if consistency_message:
+        raise ValueError(f"Approved Chapter Task Sheet is inconsistent: {consistency_message}")
 
-    allowed = [
-        FUNCTION_SCENE_DRIVERS[item]
-        for item in [primary_function, *secondary_functions]
-        if item in FUNCTION_SCENE_DRIVERS
-    ]
+    functions = [primary_function, *secondary_functions]
+    allowed = []
+    for item in functions:
+        if item == "foreshadowing_payoff" and canon_budget == "none":
+            allowed.append("兑现既有关系、情绪或现实后果")
+        elif item in FUNCTION_SCENE_DRIVERS:
+            allowed.append(FUNCTION_SCENE_DRIVERS[item])
     forbidden: list[str] = []
     if intensity == "low" and canon_budget == "none":
         allowed = [*LOW_NONE_ALLOWED_SCENE_DRIVERS, *allowed]
         forbidden.extend(LOW_NONE_FORBIDDEN_SCENE_DRIVERS)
-    elif canon_budget == "none":
+    if canon_budget == "none":
+        allowed = [
+            "零新正典：允许推进关系、情绪、选择和已确认事实产生的现实后果",
+            *allowed,
+        ]
         forbidden.extend(
             [
-                "释放新的正典事实",
-                "引入任务单未批准的新组织秘密",
+                "揭示新的正典事实、身份、因果、证据或终局答案",
+                "引入新的组织秘密或用新谜团代替人物与情绪推进",
                 "用材料解读制造新的核心证据",
             ]
         )
@@ -658,6 +732,11 @@ def derive_allowed_scene_contract(task: dict[str, Any]) -> str:
         "- 已知事实可以产生主观反应和现实后果，但不得借此释放未批准的新正典。",
         "- 本合同低于 Hard Continuity Constraints，高于历史大纲、人物卡和通用悬念要求。",
     ]
+    if canon_budget == "none" and "foreshadowing_payoff" in functions:
+        lines.append(
+            "- 伏笔回收只能兑现已经确认的信息所产生的关系、情绪或现实后果；"
+            "不得揭示新的正典事实、身份、因果、证据或终局答案。"
+        )
     return "\n".join(lines).strip()
 
 

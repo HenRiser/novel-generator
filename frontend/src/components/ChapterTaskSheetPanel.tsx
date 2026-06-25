@@ -26,6 +26,10 @@ const FUNCTION_OPTIONS: Array<{ value: ChapterTaskFunction; label: string }> = [
   { value: "suspense_maintenance", label: "悬念维持" },
   { value: "transition", label: "过渡" },
 ];
+const NONE_BUDGET_INCOMPATIBLE_FUNCTIONS = new Set<ChapterTaskFunction>([
+  "information_reveal",
+  "foreshadowing_setup",
+]);
 
 const EMPTY_FORM: ChapterTaskDraftRequest = {
   primary_function: "transition",
@@ -93,17 +97,50 @@ function listValue(values: string[]): string {
   return values.join("\n");
 }
 
-function statusLabel(task: ChapterTaskSheet | null): string {
-  if (!task) {
-    return "未创建";
+function comparisonKey(value: string): string {
+  return value.trim().toLocaleLowerCase("en-US").replace(/ß/g, "ss");
+}
+
+function advanceConflicts(allowed: string[], forbidden: string[]): string[] {
+  const forbiddenKeys = new Set(forbidden.map(comparisonKey).filter(Boolean));
+  const seen = new Set<string>();
+  return allowed.filter((item) => {
+    const key = comparisonKey(item);
+    if (!key || !forbiddenKeys.has(key) || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function formConsistencyErrors(form: ChapterTaskDraftRequest): string[] {
+  const errors: string[] = [];
+  if (
+    form.canon_budget === "none" &&
+    NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(form.primary_function)
+  ) {
+    errors.push(
+      `主要功能 ${form.primary_function} 与新正典预算 none 不兼容；请修改章节功能或提高新正典预算。`,
+    );
   }
-  if (task.status === "approved") {
-    return `revision ${task.revision} · 已批准`;
+  const incompatibleSecondary = form.secondary_functions.filter(
+    (item) =>
+      form.canon_budget === "none" && NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(item),
+  );
+  if (incompatibleSecondary.length > 0) {
+    errors.push(
+      `次要功能 ${incompatibleSecondary.join("、")} 与新正典预算 none 不兼容；请修改章节功能或提高新正典预算。`,
+    );
   }
-  if (task.status === "draft") {
-    return `revision ${task.revision} · 草稿`;
+  if (form.secondary_functions.includes(form.primary_function)) {
+    errors.push("主要功能不能在次要功能中重复选择。");
   }
-  return `revision ${task.revision} · 已替代`;
+  const conflicts = advanceConflicts(form.allowed_advances, form.forbidden_advances);
+  if (conflicts.length > 0) {
+    errors.push(`允许推进与禁止推进存在相同项：${conflicts.join("、")}。`);
+  }
+  return errors;
 }
 
 export function ChapterTaskSheetPanel({
@@ -128,9 +165,9 @@ export function ChapterTaskSheetPanel({
   const [message, setMessage] = useState("");
 
   const editableSource = data?.latest_draft ?? data?.approved ?? null;
-  const activeStatus = data?.latest_draft ?? data?.approved ?? null;
   const isWorkspaceProject = projectRef.startsWith("book:");
   const canUseApi = Boolean(projectRef && isWorkspaceProject && apiStatus === "online");
+  const consistencyErrors = useMemo(() => formConsistencyErrors(form), [form]);
   const historySummary = useMemo(
     () => (data?.history ?? []).map((task) => `r${task.revision} ${task.status}`).join(" · "),
     [data],
@@ -200,6 +237,10 @@ export function ChapterTaskSheetPanel({
     if (!canUseApi) {
       return;
     }
+    if (consistencyErrors.length > 0) {
+      setError(consistencyErrors[0]);
+      return;
+    }
     setSaving(true);
     setError("");
     setMessage("");
@@ -247,7 +288,7 @@ export function ChapterTaskSheetPanel({
           <h2>章节任务单</h2>
         </div>
         <span className={`status-badge ${data?.approved ? "status-badge-online" : ""}`}>
-          {loading ? "Loading" : statusLabel(activeStatus)}
+          {loading ? "Loading" : data?.approved ? "Approved active" : data?.latest_draft ? "Draft only" : "Not created"}
         </span>
       </div>
 
@@ -255,6 +296,17 @@ export function ChapterTaskSheetPanel({
       {projectRef && !isWorkspaceProject && (
         <p className="state-text warning-text">Chapter Task Sheet v1 仅支持 workspace book 项目。</p>
       )}
+
+      <dl className="chapter-task-version-status" aria-label="章节任务单版本状态">
+        <div>
+          <dt>生成生效</dt>
+          <dd>{data?.approved ? `approved revision ${data.approved.revision}` : "无"}</dd>
+        </div>
+        <div>
+          <dt>编辑中</dt>
+          <dd>{data?.latest_draft ? `draft revision ${data.latest_draft.revision}` : "无"}</dd>
+        </div>
+      </dl>
 
       <div className="chapter-task-form">
         <label className="field-stack">
@@ -274,7 +326,14 @@ export function ChapterTaskSheetPanel({
             disabled={fieldsDisabled}
           >
             {FUNCTION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
+              <option
+                key={option.value}
+                value={option.value}
+                disabled={
+                  form.canon_budget === "none" &&
+                  NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(option.value)
+                }
+              >
                 {option.label}
               </option>
             ))}
@@ -324,6 +383,13 @@ export function ChapterTaskSheetPanel({
                   type="checkbox"
                   checked={form.secondary_functions.includes(option.value)}
                   onChange={() => toggleSecondary(option.value)}
+                  disabled={
+                    fieldsDisabled ||
+                    (!form.secondary_functions.includes(option.value) &&
+                      (option.value === form.primary_function ||
+                        (form.canon_budget === "none" &&
+                          NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(option.value))))
+                  }
                 />
                 <span>{option.label}</span>
               </label>
@@ -375,7 +441,7 @@ export function ChapterTaskSheetPanel({
           className="button secondary-button"
           type="button"
           onClick={() => void saveDraft()}
-          disabled={fieldsDisabled}
+          disabled={fieldsDisabled || consistencyErrors.length > 0}
         >
           {saving
             ? "保存中..."
@@ -389,7 +455,7 @@ export function ChapterTaskSheetPanel({
           className="button primary-button"
           type="button"
           onClick={() => void approveDraft()}
-          disabled={fieldsDisabled || !data?.latest_draft}
+          disabled={fieldsDisabled || consistencyErrors.length > 0 || !data?.latest_draft}
         >
           {approving ? "批准中..." : "批准草稿"}
         </button>
@@ -397,6 +463,16 @@ export function ChapterTaskSheetPanel({
 
       {editableSource?.status === "draft" && (
         <p className="state-text warning-text">当前是 draft revision {editableSource.revision}：草稿不会进入正文生成。</p>
+      )}
+      {consistencyErrors.length > 0 && (
+        <div className="chapter-task-conflicts" role="alert">
+          <strong>请先修正任务单冲突：</strong>
+          <ul>
+            {consistencyErrors.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
       )}
       {data?.approved && (
         <p className="state-text success-text">

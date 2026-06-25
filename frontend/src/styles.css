@@ -1862,6 +1862,44 @@ code {
   justify-content: flex-end;
 }
 
+.chapter-task-version-status {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.chapter-task-version-status div {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.chapter-task-version-status dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.chapter-task-version-status dd {
+  font-weight: 700;
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.chapter-task-conflicts {
+  background: var(--color-danger-soft);
+  border: 1px solid #ddb9b5;
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  padding: var(--space-3);
+}
+
+.chapter-task-conflicts ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+
 .chapter-task-history {
   color: var(--color-text-muted);
   font-size: 12px;
@@ -2810,6 +2848,7 @@ code {
   .context-pack-form,
   .chapter-task-form,
   .chapter-task-secondary > div,
+  .chapter-task-version-status,
   .context-pack-creator-summary,
   .context-pack-card-list,
   .context-pack-meta,
