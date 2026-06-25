@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { AppHeader, type ActivePage } from "./components/AppHeader";
 import { ChapterStatusPanel } from "./components/ChapterStatusPanel";
+import { ChapterTaskSheetPanel } from "./components/ChapterTaskSheetPanel";
 import { ContextPackCreatorPreview } from "./components/ContextPackCreatorPreview";
 import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
@@ -35,6 +36,7 @@ import type {
   ChapterGenerationResponse,
   ChapterSummary,
   ChapterStatus,
+  ChapterTaskSheet,
   ChapterStreamDoneEvent,
   ConsistencyWarning,
   ContextPackPreviewRequest,
@@ -694,6 +696,7 @@ export function App() {
   const [storyDeltaError, setStoryDeltaError] = useState("");
   const [storyDeltaMessage, setStoryDeltaMessage] = useState("");
   const [storyDeltaResult, setStoryDeltaResult] = useState<StoryDeltaAnalyzeResponse | null>(null);
+  const [approvedChapterTask, setApprovedChapterTask] = useState<ChapterTaskSheet | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -736,6 +739,7 @@ export function App() {
     setChapterStatusError("");
     setWorkflowGuardWarnings([]);
     setConsistencyWarnings([]);
+    setApprovedChapterTask(null);
   }, [selectedProjectRef]);
 
   useEffect(() => {
@@ -1239,16 +1243,17 @@ export function App() {
     refreshChapterStatus,
   ]);
 
-  const generationRequestWithOptionalContext = useCallback((): GenerationRequest => {
+  const generationRequestWithOptionalContext = useCallback((chapterNumber: number): GenerationRequest => {
     const promptText = contextPackPreview?.prompt_text?.trim();
+    const request: GenerationRequest = { ...generationRequest };
     if (useContextPackForGeneration && promptText) {
-      return {
-        ...generationRequest,
-        narrative_context_text: promptText,
-      };
+      request.narrative_context_text = promptText;
     }
-    return generationRequest;
-  }, [contextPackPreview, generationRequest, useContextPackForGeneration]);
+    if (approvedChapterTask?.chapter_number === chapterNumber) {
+      request.chapter_task_id = approvedChapterTask.id;
+    }
+    return request;
+  }, [approvedChapterTask, contextPackPreview, generationRequest, useContextPackForGeneration]);
 
   const runGenerateChapterGuard = useCallback(
     async (chapterNumber: number) => {
@@ -1299,7 +1304,7 @@ export function App() {
 
     setChapterStreaming(true);
     try {
-      const result = await generateChapterStream(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext(), {
+      const result = await generateChapterStream(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext(chapterNumber), {
         onDelta: (text) => {
           setStreamingContent((current) => `${current}${text}`);
           setStreamingPreviewStatus("streaming");
@@ -1376,7 +1381,7 @@ export function App() {
 
     setChapterGenerating(true);
     try {
-      const result = await generateChapter(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext());
+      const result = await generateChapter(selectedProjectRef, chapterNumber, generationRequestWithOptionalContext(chapterNumber));
       setConsistencyWarnings(result.consistency_warnings || []);
       setGenerationMessage(chapterSuccessMessage(result));
       await refreshProjectAndChapters(selectedProjectRef);
@@ -2102,6 +2107,14 @@ export function App() {
           </section>
         )}
       </section>
+
+      <ChapterTaskSheetPanel
+        projectRef={selectedProjectRef}
+        chapterNumber={Number.parseInt(chapterNumberInput, 10) || 1}
+        apiStatus={apiStatus}
+        disabled={generationBusy}
+        onApprovedTaskChange={setApprovedChapterTask}
+      />
 
       {renderContextPackPanel()}
 

@@ -341,13 +341,19 @@ def build_chapter_prompt(
 
     context_blocks = []
     if outline:
-        context_blocks.append(f"## 已有小说大纲\n{_clip(outline, MAX_REFERENCE_CHARS)}")
+        context_blocks.append(
+            f"## Historical Planning Reference: 小说大纲\n{_clip(outline, MAX_REFERENCE_CHARS)}"
+        )
     if characters:
-        context_blocks.append(f"## 已有人物卡\n{_clip(characters, MAX_REFERENCE_CHARS)}")
+        context_blocks.append(
+            f"## Historical Planning Reference: 人物卡\n{_clip(characters, MAX_REFERENCE_CHARS)}"
+        )
     if summaries:
-        context_blocks.append(f"## 历史章节摘要\n{_clip(summaries, MAX_SUMMARIES_CHARS)}")
+        context_blocks.append(f"## Current Narrative Context: 历史章节摘要\n{_clip(summaries, MAX_SUMMARIES_CHARS)}")
     if previous_chapter:
-        context_blocks.append(f"## 上一章正文\n{_clip(previous_chapter, MAX_PREVIOUS_CHAPTER_CHARS, keep_tail=True)}")
+        context_blocks.append(
+            f"## Previous Chapter\n{_clip(previous_chapter, MAX_PREVIOUS_CHAPTER_CHARS, keep_tail=True)}"
+        )
 
     context_text = "\n\n".join(context_blocks) if context_blocks else "暂无额外上下文。"
 
@@ -359,6 +365,17 @@ def build_chapter_prompt(
 
 ## 章节编号
 第 {chapter_number} 章
+
+## Prompt Authority Order
+When instructions conflict, obey them in this exact order:
+1. Hard Continuity Constraints
+2. Approved Chapter Task Sheet, when present
+3. Derived Allowed Scene Contract, when present
+4. Current Narrative Context
+5. Previous Chapter
+6. Historical Planning References: outline and character cards
+
+Hard Continuity Constraints always win. Historical planning references may be stale and must never override an approved task sheet or confirmed continuity state.
 
 ## 可用上下文
 {context_text}
@@ -387,6 +404,7 @@ def build_chapter_prompt(
 12. 不要突然引入没有铺垫的设定。
 13. 不要把故事写成总结，要写成具体场景。
 14. 如果可用上下文中提供了 Narrative Context Pack 的 Hard Continuity Constraints，必须视为最高优先级连续性约束，不得改写其中的日期、死亡/存活状态、身份状态、组织归属或因果关系。
+15. Historical Planning Reference 中的大纲和人物卡只作为历史规划参考；如果它们与 Approved Chapter Task Sheet 或已确认连续性状态冲突，以后两者为准。
 """
     return _messages(user_prompt, story_scale)
 

@@ -1808,6 +1808,67 @@ code {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.chapter-task-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.chapter-task-panel .panel-header {
+  margin-bottom: 0;
+}
+
+.chapter-task-form {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.chapter-task-form select {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  min-height: 38px;
+  min-width: 0;
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.chapter-task-secondary {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.chapter-task-secondary legend {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 0 var(--space-1);
+}
+
+.chapter-task-secondary > div {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.chapter-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+}
+
+.chapter-task-history {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .field-stack {
   display: grid;
   gap: var(--space-2);
@@ -2747,6 +2808,8 @@ code {
   .draft-meta-grid.compact,
   .graph-filter-bar,
   .context-pack-form,
+  .chapter-task-form,
+  .chapter-task-secondary > div,
   .context-pack-creator-summary,
   .context-pack-card-list,
   .context-pack-meta,

@@ -24,6 +24,7 @@ from prompt_templates import (
 )
 
 from .chapter_service import extract_chapter_title
+from .chapter_task_service import format_approved_task_for_prompt
 from .ai_run_service import create_ai_run_record_best_effort
 from .consistency_check_service import check_generated_chapter_consistency
 from .event_log_service import append_event_best_effort
@@ -125,6 +126,8 @@ def build_generation_messages(
     chapter_number: int,
     use_previous_context: bool,
     narrative_context_text: str | None = None,
+    chapter_task: dict[str, Any] | None = None,
+    allowed_scene_contract: str | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     notices: list[str] = []
 
@@ -168,13 +171,27 @@ def build_generation_messages(
         previous_chapter=previous_chapter,
         summaries=summaries,
     )
+    approved_task = (
+        dict(chapter_task)
+        if isinstance(chapter_task, dict) and chapter_task.get("status") == "approved"
+        else None
+    )
+    if approved_task is not None:
+        messages = _append_user_context(messages, format_approved_task_for_prompt(approved_task))
+        contract_text = str(allowed_scene_contract or "").strip()
+        if contract_text:
+            messages = _append_user_context(messages, contract_text)
+        notices.append(
+            f"Loaded approved Chapter Task Sheet: {approved_task.get('id')} revision {approved_task.get('revision')}."
+        )
     context_text = str(narrative_context_text or "").strip()
     if context_text:
         messages = _append_user_context(messages, context_text)
         notices.append("Loaded Narrative Context Pack.")
-        chapter_goal = _extract_chapter_goal_from_narrative_context(context_text)
-        if _is_low_intensity_chapter_goal(chapter_goal):
-            messages = _append_user_context(messages, build_low_intensity_chapter_constraints_prompt(chapter_goal))
+        if approved_task is None:
+            chapter_goal = _extract_chapter_goal_from_narrative_context(context_text)
+            if _is_low_intensity_chapter_goal(chapter_goal):
+                messages = _append_user_context(messages, build_low_intensity_chapter_constraints_prompt(chapter_goal))
     return messages, notices
 
 
@@ -194,7 +211,14 @@ def _chapter_ai_run_metadata(
     max_tokens: Any,
     use_previous_context: bool,
     narrative_context_text: str | None,
+    chapter_task: dict[str, Any] | None = None,
+    chapter_task_relative_path: str | None = None,
 ) -> dict[str, Any]:
+    approved_task = (
+        dict(chapter_task)
+        if isinstance(chapter_task, dict) and chapter_task.get("status") == "approved"
+        else None
+    )
     return {
         "messages": [dict(message) for message in messages],
         "temperature": temperature,
@@ -209,6 +233,14 @@ def _chapter_ai_run_metadata(
             "metadata": {
                 "use_previous_context": bool(use_previous_context),
                 "narrative_context_attached": bool(str(narrative_context_text or "").strip()),
+                "chapter_task_sheet_id": approved_task.get("id") if approved_task else None,
+                "chapter_task_revision": approved_task.get("revision") if approved_task else None,
+                "chapter_task_status": approved_task.get("status") if approved_task else None,
+                "chapter_task_sheet_path": (
+                    str(chapter_task_relative_path or "").replace("\\", "/") or None
+                    if approved_task
+                    else None
+                ),
             },
         },
     }
@@ -385,6 +417,15 @@ def _finalize_generated_chapter(
                 "metadata": {
                     "summary_file": Path(summary_path).name if summary_path else None,
                     "index_file": Path(index_path).name,
+                    "chapter_task_sheet_id": (
+                        ai_run_metadata.get("context", {}).get("metadata", {}).get("chapter_task_sheet_id")
+                    ),
+                    "chapter_task_revision": (
+                        ai_run_metadata.get("context", {}).get("metadata", {}).get("chapter_task_revision")
+                    ),
+                    "chapter_task_status": (
+                        ai_run_metadata.get("context", {}).get("metadata", {}).get("chapter_task_status")
+                    ),
                 },
             },
         )
@@ -475,6 +516,9 @@ def generate_single_chapter(
     max_tokens: int,
     use_previous_context: bool,
     narrative_context_text: str | None = None,
+    chapter_task: dict[str, Any] | None = None,
+    allowed_scene_contract: str | None = None,
+    chapter_task_relative_path: str | None = None,
 ) -> ChapterGenerationResult:
     valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
     if not valid:
@@ -490,6 +534,8 @@ def generate_single_chapter(
             chapter_number=number,
             use_previous_context=use_previous_context,
             narrative_context_text=narrative_context_text,
+            chapter_task=chapter_task,
+            allowed_scene_contract=allowed_scene_contract,
         )
         chapter_content = generate_text(
             messages=messages,
@@ -503,6 +549,8 @@ def generate_single_chapter(
             max_tokens,
             use_previous_context,
             narrative_context_text,
+            chapter_task,
+            chapter_task_relative_path,
         )
     except DeepSeekClientError as exc:
         return _chapter_failure(number, str(exc), task_models)
@@ -529,6 +577,9 @@ def stream_generate_single_chapter(
     max_tokens: int,
     use_previous_context: bool,
     narrative_context_text: str | None = None,
+    chapter_task: dict[str, Any] | None = None,
+    allowed_scene_contract: str | None = None,
+    chapter_task_relative_path: str | None = None,
 ) -> Iterator[dict[str, Any]]:
     valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
     if not valid:
@@ -546,6 +597,8 @@ def stream_generate_single_chapter(
             chapter_number=number,
             use_previous_context=use_previous_context,
             narrative_context_text=narrative_context_text,
+            chapter_task=chapter_task,
+            allowed_scene_contract=allowed_scene_contract,
         )
         for delta in stream_generate_text(
             messages=messages,
@@ -577,6 +630,8 @@ def stream_generate_single_chapter(
         max_tokens,
         use_previous_context,
         narrative_context_text,
+        chapter_task,
+        chapter_task_relative_path,
     )
     result = _finalize_generated_chapter(
         ref,
