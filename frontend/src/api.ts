@@ -35,6 +35,8 @@ import type {
   ProjectDetail,
   ProjectSummary,
   RejectKnowledgeDraftChangeRequest,
+  ScenePlanDraftRequest,
+  ScenePlanResponse,
   StoryDeltaAnalyzeRequest,
   StoryDeltaAnalyzeResponse,
   StoryDeltaListResponse,
@@ -493,6 +495,41 @@ export function approveChapterTask(
     `/api/projects/${projectPath(projectRef)}/chapter-tasks/${chapterNumber}/approve`,
     {
       task_id: taskId,
+      revision,
+    },
+  );
+}
+
+export function getScenePlan(
+  projectRef: string,
+  chapterNumber: number,
+): Promise<ScenePlanResponse> {
+  return apiFetch<ScenePlanResponse>(
+    `/api/projects/${projectPath(projectRef)}/scene-plans/${chapterNumber}`,
+  );
+}
+
+export function saveScenePlanDraft(
+  projectRef: string,
+  chapterNumber: number,
+  request: ScenePlanDraftRequest,
+): Promise<ScenePlanResponse> {
+  return postJson<ScenePlanResponse>(
+    `/api/projects/${projectPath(projectRef)}/scene-plans/${chapterNumber}`,
+    request,
+  );
+}
+
+export function approveScenePlan(
+  projectRef: string,
+  chapterNumber: number,
+  scenePlanId: string,
+  revision: number,
+): Promise<ScenePlanResponse> {
+  return postJson<ScenePlanResponse>(
+    `/api/projects/${projectPath(projectRef)}/scene-plans/${chapterNumber}/approve`,
+    {
+      scene_plan_id: scenePlanId,
       revision,
     },
   );

@@ -1907,6 +1907,54 @@ code {
   overflow-wrap: anywhere;
 }
 
+.scene-plan-panel {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.task-form-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.task-form-grid .wide-field {
+  grid-column: 1 / -1;
+}
+
+.scene-plan-scenes {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.scene-plan-scene {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-3);
+}
+
+.scene-plan-scene legend {
+  color: var(--color-text-muted);
+  font-size: 13px;
+  padding: 0 var(--space-1);
+}
+
+.scene-plan-scene-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-bottom: var(--space-3);
+}
+
+.warning-box {
+  border-color: #e2c17c;
+}
+
 .field-stack {
   display: grid;
   gap: var(--space-2);

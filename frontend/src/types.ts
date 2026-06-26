@@ -160,6 +160,7 @@ export type GenerationRequest = {
   temperature: number;
   narrative_context_text?: string;
   chapter_task_id?: string;
+  scene_plan_id?: string;
 };
 
 export type GenerationSettingsRequest = {
@@ -453,6 +454,55 @@ export type ChapterTaskResponse = {
   approved: ChapterTaskSheet | null;
   latest_draft: ChapterTaskSheet | null;
   history: ChapterTaskSheet[];
+  message: string;
+};
+
+export type ScenePlanStatus = "draft" | "approved" | "superseded";
+
+export type ScenePlanScene = {
+  scene_no: number;
+  title: string;
+  location: string;
+  participants: string[];
+  scene_function: string;
+  allowed_information: string[];
+  forbidden_information: string[];
+  emotional_shift: string;
+  ending_state: string;
+};
+
+export type ScenePlan = {
+  id: string;
+  project_id: string;
+  chapter_number: number;
+  revision: number;
+  status: ScenePlanStatus;
+  source_chapter_task_id: string | null;
+  source_chapter_task_revision: number | null;
+  scenes: ScenePlanScene[];
+  created_at: string;
+  updated_at: string;
+  approved_at?: string | null;
+  superseded_at?: string | null;
+};
+
+export type ScenePlanDraftRequest = {
+  id?: string;
+  revision?: number;
+  source_chapter_task_id?: string | null;
+  source_chapter_task_revision?: number | null;
+  scenes: ScenePlanScene[];
+};
+
+export type ScenePlanResponse = {
+  ok: boolean;
+  project_ref: string;
+  chapter_number: number;
+  plan: ScenePlan | null;
+  approved: ScenePlan | null;
+  latest_draft: ScenePlan | null;
+  history: ScenePlan[];
+  current_approved_chapter_task: ChapterTaskSheet | null;
   message: string;
 };
 

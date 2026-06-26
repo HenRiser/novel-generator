@@ -315,6 +315,33 @@ class ChapterTaskResponse(BaseModel):
     message: str = ""
 
 
+class ScenePlanDraftRequest(BaseModel):
+    id: Any = None
+    chapter_number: Any = None
+    revision: Any = None
+    status: Any = None
+    source_chapter_task_id: Any = None
+    source_chapter_task_revision: Any = None
+    scenes: Any = None
+
+
+class ScenePlanApproveRequest(BaseModel):
+    scene_plan_id: Any = None
+    revision: Any = None
+
+
+class ScenePlanResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapter_number: int
+    plan: dict[str, Any] | None = None
+    approved: dict[str, Any] | None = None
+    latest_draft: dict[str, Any] | None = None
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    current_approved_chapter_task: dict[str, Any] | None = None
+    message: str = ""
+
+
 class GenerateOutlineCharactersRequest(BaseModel):
     model: str | None = None
     max_tokens: int | None = Field(default=None, ge=512, le=32768)
@@ -328,3 +355,4 @@ class GenerateChapterRequest(BaseModel):
     writing_mode: str | None = None
     narrative_context_text: str | None = Field(default=None, max_length=20000)
     chapter_task_id: str | None = Field(default=None, max_length=120)
+    scene_plan_id: str | None = Field(default=None, max_length=140)

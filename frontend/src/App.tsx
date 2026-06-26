@@ -29,6 +29,7 @@ import { ContextPackCreatorPreview } from "./components/ContextPackCreatorPrevie
 import { HomePage } from "./components/HomePage";
 import { LibraryPage } from "./components/LibraryPage";
 import { ProjectSettingsPage } from "./components/ProjectSettingsPage";
+import { ScenePlanPanel } from "./components/ScenePlanPanel";
 import { SystemSettingsPage } from "./components/SystemSettingsPage";
 import type {
   ApiStatus,
@@ -49,6 +50,7 @@ import type {
   ProjectOnboardingState,
   ProjectDetail,
   ProjectSummary,
+  ScenePlan,
   StoryDeltaAnalyzeResponse,
   WorkflowGuardWarning,
 } from "./types";
@@ -697,6 +699,8 @@ export function App() {
   const [storyDeltaMessage, setStoryDeltaMessage] = useState("");
   const [storyDeltaResult, setStoryDeltaResult] = useState<StoryDeltaAnalyzeResponse | null>(null);
   const [approvedChapterTask, setApprovedChapterTask] = useState<ChapterTaskSheet | null>(null);
+  const [approvedScenePlan, setApprovedScenePlan] = useState<ScenePlan | null>(null);
+  const [scenePlanHasDraft, setScenePlanHasDraft] = useState(false);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -740,7 +744,14 @@ export function App() {
     setWorkflowGuardWarnings([]);
     setConsistencyWarnings([]);
     setApprovedChapterTask(null);
+    setApprovedScenePlan(null);
+    setScenePlanHasDraft(false);
   }, [selectedProjectRef]);
+
+  const handleScenePlanStateChange = useCallback((approved: ScenePlan | null, latestDraft: ScenePlan | null) => {
+    setApprovedScenePlan(approved);
+    setScenePlanHasDraft(Boolean(latestDraft));
+  }, []);
 
   useEffect(() => {
     const parsed = Number.parseInt(chapterNumberInput, 10);
@@ -1252,8 +1263,11 @@ export function App() {
     if (approvedChapterTask?.chapter_number === chapterNumber) {
       request.chapter_task_id = approvedChapterTask.id;
     }
+    if (approvedScenePlan?.chapter_number === chapterNumber) {
+      request.scene_plan_id = approvedScenePlan.id;
+    }
     return request;
-  }, [approvedChapterTask, contextPackPreview, generationRequest, useContextPackForGeneration]);
+  }, [approvedChapterTask, approvedScenePlan, contextPackPreview, generationRequest, useContextPackForGeneration]);
 
   const runGenerateChapterGuard = useCallback(
     async (chapterNumber: number) => {
@@ -2049,6 +2063,14 @@ export function App() {
           </button>
         </div>
         {renderContextPackUsageState()}
+        {scenePlanHasDraft && !approvedScenePlan && (
+          <p className="state-text warning-text">Scene Plan 未生效：当前只有 draft，生成章节不会注入 Scene Plan。</p>
+        )}
+        {approvedScenePlan && (
+          <p className="state-text success-text">
+            Scene Plan 生效：approved revision {approvedScenePlan.revision}
+          </p>
+        )}
         <div className="hint-box">
           <p>默认使用流式生成；同步生成仅作为流式异常时的备用 / 调试入口。</p>
           <p>
@@ -2114,6 +2136,15 @@ export function App() {
         apiStatus={apiStatus}
         disabled={generationBusy}
         onApprovedTaskChange={setApprovedChapterTask}
+      />
+
+      <ScenePlanPanel
+        projectRef={selectedProjectRef}
+        chapterNumber={Number.parseInt(chapterNumberInput, 10) || 1}
+        apiStatus={apiStatus}
+        disabled={generationBusy}
+        approvedChapterTask={approvedChapterTask}
+        onScenePlanStateChange={handleScenePlanStateChange}
       />
 
       {renderContextPackPanel()}
