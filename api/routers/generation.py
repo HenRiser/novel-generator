@@ -24,6 +24,7 @@ from services.generation_service import (
     stream_generate_single_chapter,
 )
 from services.chapter_task_service import resolve_approved_chapter_task
+from services.scene_plan_service import resolve_approved_scene_plan
 from services.project_service import load_project_detail, validate_outline_character_ready
 
 
@@ -124,6 +125,28 @@ def _resolve_chapter_task_or_error(
         project_ref,
         chapter_number,
         task_id=clean_task_id or None,
+    )
+    if not result.ok:
+        _error(result.status_code, result.error_code, result.message)
+    return result
+
+
+def _resolve_scene_plan_or_error(
+    project_ref: str,
+    chapter_number: int,
+    scene_plan_id: str | None,
+    chapter_task: dict[str, Any] | None,
+    explicit_chapter_task_id: bool,
+) -> Any:
+    clean_plan_id = str(scene_plan_id or "").strip()
+    if not clean_plan_id:
+        return None
+    result = resolve_approved_scene_plan(
+        project_ref,
+        chapter_number,
+        scene_plan_id=clean_plan_id,
+        chapter_task=chapter_task,
+        require_task_binding=explicit_chapter_task_id,
     )
     if not result.ok:
         _error(result.status_code, result.error_code, result.message)
@@ -296,6 +319,13 @@ def generate_project_chapter(
     _ensure_outline_character_ready(project_config)
     _ensure_chapter_assets_ready(project_ref)
     chapter_task_result = _resolve_chapter_task_or_error(project_ref, chapter_number, payload.chapter_task_id)
+    scene_plan_result = _resolve_scene_plan_or_error(
+        project_ref,
+        chapter_number,
+        payload.scene_plan_id,
+        chapter_task_result.task if chapter_task_result else None,
+        bool(chapter_task_result and chapter_task_result.task),
+    )
     _ensure_model_configured()
     project_config = _with_optional_writing_mode(project_config, payload.writing_mode)
 
@@ -315,6 +345,8 @@ def generate_project_chapter(
             chapter_task=chapter_task_result.task if chapter_task_result else None,
             allowed_scene_contract=chapter_task_result.contract if chapter_task_result else None,
             chapter_task_relative_path=chapter_task_result.relative_path if chapter_task_result else None,
+            scene_plan=scene_plan_result.plan if scene_plan_result else None,
+            scene_plan_relative_path=scene_plan_result.relative_path if scene_plan_result else None,
         )
         if not result.ok:
             message = public_message(result.message)
@@ -348,6 +380,13 @@ def generate_project_chapter_stream(
     _ensure_outline_character_ready(project_config)
     _ensure_chapter_assets_ready(project_ref)
     chapter_task_result = _resolve_chapter_task_or_error(project_ref, chapter_number, payload.chapter_task_id)
+    scene_plan_result = _resolve_scene_plan_or_error(
+        project_ref,
+        chapter_number,
+        payload.scene_plan_id,
+        chapter_task_result.task if chapter_task_result else None,
+        bool(chapter_task_result and chapter_task_result.task),
+    )
     _ensure_model_configured()
     project_config = _with_optional_writing_mode(project_config, payload.writing_mode)
 
@@ -374,6 +413,8 @@ def generate_project_chapter_stream(
                 chapter_task=chapter_task_result.task if chapter_task_result else None,
                 allowed_scene_contract=chapter_task_result.contract if chapter_task_result else None,
                 chapter_task_relative_path=chapter_task_result.relative_path if chapter_task_result else None,
+                scene_plan=scene_plan_result.plan if scene_plan_result else None,
+                scene_plan_relative_path=scene_plan_result.relative_path if scene_plan_result else None,
             ):
                 public_event = _public_stream_event(event)
                 if public_event["type"] == "delta":

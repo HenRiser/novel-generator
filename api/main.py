@@ -16,6 +16,7 @@ from api.routers import (
     knowledge_drafts,
     narrative_graph,
     projects,
+    scene_plans,
     story_delta,
 )
 
@@ -38,6 +39,7 @@ app.include_router(projects.router)
 app.include_router(audit.router)
 app.include_router(chapter_status.router)
 app.include_router(chapter_tasks.router)
+app.include_router(scene_plans.router)
 app.include_router(narrative_graph.router)
 app.include_router(context_pack.router)
 app.include_router(story_delta.router)
