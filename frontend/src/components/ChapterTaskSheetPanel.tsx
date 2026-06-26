@@ -149,12 +149,14 @@ export function ChapterTaskSheetPanel({
   apiStatus,
   disabled,
   onApprovedTaskChange,
+  onTaskStateChange,
 }: {
   projectRef: string;
   chapterNumber: number;
   apiStatus: ApiStatus;
   disabled: boolean;
   onApprovedTaskChange: (task: ChapterTaskSheet | null) => void;
+  onTaskStateChange?: (approved: ChapterTaskSheet | null, latestDraft: ChapterTaskSheet | null) => void;
 }) {
   const [data, setData] = useState<ChapterTaskResponse | null>(null);
   const [form, setForm] = useState<ChapterTaskDraftRequest>({ ...EMPTY_FORM });
@@ -176,6 +178,7 @@ export function ChapterTaskSheetPanel({
   useEffect(() => {
     let ignore = false;
     onApprovedTaskChange(null);
+    onTaskStateChange?.(null, null);
     setData(null);
     setForm({ ...EMPTY_FORM });
     setError("");
@@ -196,6 +199,7 @@ export function ChapterTaskSheetPanel({
         setData(result);
         setForm(toForm(result.latest_draft ?? result.approved));
         onApprovedTaskChange(result.approved);
+        onTaskStateChange?.(result.approved, result.latest_draft);
       })
       .catch((loadError) => {
         if (!ignore) {
@@ -211,7 +215,7 @@ export function ChapterTaskSheetPanel({
     return () => {
       ignore = true;
     };
-  }, [canUseApi, chapterNumber, onApprovedTaskChange, projectRef]);
+  }, [canUseApi, chapterNumber, onApprovedTaskChange, onTaskStateChange, projectRef]);
 
   function updateList(field: ListField, value: string) {
     setForm((current) => ({ ...current, [field]: splitLines(value) }));
@@ -249,6 +253,7 @@ export function ChapterTaskSheetPanel({
       setData(result);
       setForm(toForm(result.latest_draft));
       onApprovedTaskChange(result.approved);
+      onTaskStateChange?.(result.approved, result.latest_draft);
       setMessage("草稿已保存。草稿不会进入正文生成。");
     } catch (saveError) {
       setError(safePublicMessage(saveError instanceof Error ? saveError.message : "", "任务单草稿保存失败。"));
@@ -270,6 +275,7 @@ export function ChapterTaskSheetPanel({
       setData(result);
       setForm(toForm(result.approved));
       onApprovedTaskChange(result.approved);
+      onTaskStateChange?.(result.approved, result.latest_draft);
       setMessage(`revision ${result.approved?.revision ?? draft.revision} 已批准，将用于本章正文生成。`);
     } catch (approveError) {
       setError(safePublicMessage(approveError instanceof Error ? approveError.message : "", "任务单批准失败。"));

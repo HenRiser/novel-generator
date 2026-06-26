@@ -26,11 +26,13 @@ import { AppHeader, type ActivePage } from "./components/AppHeader";
 import { ChapterStatusPanel } from "./components/ChapterStatusPanel";
 import { ChapterTaskSheetPanel } from "./components/ChapterTaskSheetPanel";
 import { ContextPackCreatorPreview } from "./components/ContextPackCreatorPreview";
-import { HomePage } from "./components/HomePage";
+import { DebugDrawer } from "./components/DebugDrawer";
+import { EffectiveInputsSummary } from "./components/EffectiveInputsSummary";
 import { LibraryPage } from "./components/LibraryPage";
 import { ProjectSettingsPage } from "./components/ProjectSettingsPage";
 import { ScenePlanPanel } from "./components/ScenePlanPanel";
 import { SystemSettingsPage } from "./components/SystemSettingsPage";
+import { WorkflowRail, type WorkflowRailStep } from "./components/WorkflowRail";
 import type {
   ApiStatus,
   ChapterContent,
@@ -642,7 +644,7 @@ function ProjectOnboardingPanel({
 }
 
 export function App() {
-  const [activePage, setActivePage] = useState<ActivePage>("home");
+  const [activePage, setActivePage] = useState<ActivePage>("dashboard");
   const [apiStatus, setApiStatus] = useState<ApiStatus>("loading");
   const [apiError, setApiError] = useState("");
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
@@ -699,8 +701,9 @@ export function App() {
   const [storyDeltaMessage, setStoryDeltaMessage] = useState("");
   const [storyDeltaResult, setStoryDeltaResult] = useState<StoryDeltaAnalyzeResponse | null>(null);
   const [approvedChapterTask, setApprovedChapterTask] = useState<ChapterTaskSheet | null>(null);
+  const [latestChapterTaskDraft, setLatestChapterTaskDraft] = useState<ChapterTaskSheet | null>(null);
   const [approvedScenePlan, setApprovedScenePlan] = useState<ScenePlan | null>(null);
-  const [scenePlanHasDraft, setScenePlanHasDraft] = useState(false);
+  const [latestScenePlanDraft, setLatestScenePlanDraft] = useState<ScenePlan | null>(null);
 
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_ref === selectedProjectRef) ?? null,
@@ -721,6 +724,9 @@ export function App() {
   const contextPackCanInject = Boolean(contextPackPromptText);
   const contextPackWillBeUsed = Boolean(useContextPackForGeneration && contextPackCanInject);
   const suggestedChapterNumber = useMemo(() => nextChapterSuggestion(chapters), [chapters]);
+  const currentChapterNumber = Number.parseInt(chapterNumberInput, 10);
+  const validCurrentChapterNumber = Number.isInteger(currentChapterNumber) && currentChapterNumber > 0 ? currentChapterNumber : 1;
+  const currentChapterExists = chapters.some((chapter) => chapter.chapter_number === validCurrentChapterNumber);
   const streamingCharacterCount = streamingContent.length;
   const generationBusy =
     Boolean(generationStatus?.running) || outlineGenerating || chapterGenerating || chapterStreaming;
@@ -744,14 +750,140 @@ export function App() {
     setWorkflowGuardWarnings([]);
     setConsistencyWarnings([]);
     setApprovedChapterTask(null);
+    setLatestChapterTaskDraft(null);
     setApprovedScenePlan(null);
-    setScenePlanHasDraft(false);
+    setLatestScenePlanDraft(null);
   }, [selectedProjectRef]);
+
+  const handleChapterTaskStateChange = useCallback((approved: ChapterTaskSheet | null, latestDraft: ChapterTaskSheet | null) => {
+    setApprovedChapterTask(approved);
+    setLatestChapterTaskDraft(latestDraft);
+  }, []);
 
   const handleScenePlanStateChange = useCallback((approved: ScenePlan | null, latestDraft: ScenePlan | null) => {
     setApprovedScenePlan(approved);
-    setScenePlanHasDraft(Boolean(latestDraft));
+    setLatestScenePlanDraft(latestDraft);
   }, []);
+
+  const contextPackState = contextPackWillBeUsed
+    ? "attached"
+    : contextPackHasPreview && contextPackCanInject
+      ? "available"
+      : contextPackHasPreview
+        ? "not_ready"
+        : "unknown";
+
+  const scenePlanBoundToApprovedTask = Boolean(
+    approvedScenePlan &&
+      approvedChapterTask &&
+      approvedScenePlan.source_chapter_task_id === approvedChapterTask.id &&
+      approvedScenePlan.source_chapter_task_revision === approvedChapterTask.revision,
+  );
+
+  const effectiveInputWarnings = useMemo(() => {
+    const warnings: string[] = [];
+    if (!approvedChapterTask && latestChapterTaskDraft) {
+      warnings.push("Chapter Task draft exists, but no approved task will be used.");
+    }
+    if (!approvedScenePlan && latestScenePlanDraft) {
+      warnings.push("Scene Plan draft exists, but no approved Scene Plan will be used.");
+    }
+    if (approvedScenePlan && approvedChapterTask && !scenePlanBoundToApprovedTask) {
+      warnings.push("Approved Scene Plan is not bound to the current approved Chapter Task.");
+    }
+    if (!contextPackWillBeUsed) {
+      warnings.push("Context Pack is not attached to generation.");
+    }
+    return warnings;
+  }, [
+    approvedChapterTask,
+    approvedScenePlan,
+    contextPackWillBeUsed,
+    latestChapterTaskDraft,
+    latestScenePlanDraft,
+    scenePlanBoundToApprovedTask,
+  ]);
+
+  const workflowSteps: WorkflowRailStep[] = useMemo(() => {
+    const taskReady = Boolean(approvedChapterTask);
+    const sceneReady = Boolean(approvedScenePlan);
+    const contextReady = Boolean(contextPackWillBeUsed);
+    const reviewPending = Boolean((chapterStatus?.review?.pending_count ?? 0) > 0);
+    return [
+      {
+        key: "task",
+        label: "Plan Task",
+        status: taskReady ? "done" : latestChapterTaskDraft ? "warning" : "current",
+        description: taskReady ? "Approved Chapter Task is active." : "Approve the chapter task before generation.",
+      },
+      {
+        key: "scene",
+        label: "Plan Scenes",
+        status: sceneReady ? "done" : latestScenePlanDraft ? "warning" : taskReady ? "current" : "pending",
+        description: sceneReady ? "Approved Scene Plan is active." : "Draft scenes do not enter generation.",
+      },
+      {
+        key: "context",
+        label: "Prepare Context",
+        status: contextReady ? "done" : contextPackHasPreview ? "warning" : sceneReady ? "current" : "pending",
+        description: contextReady ? "Context Pack will be attached." : "Preview and attach Context Pack when needed.",
+      },
+      {
+        key: "generate",
+        label: "Generate Draft",
+        status: currentChapterExists ? "done" : contextReady || sceneReady ? "current" : "pending",
+        description: currentChapterExists ? "A chapter file exists for this number." : "Generate only after effective inputs are clear.",
+      },
+      {
+        key: "review",
+        label: "Review Output",
+        status: reviewPending ? "warning" : currentChapterExists ? "current" : "pending",
+        description: reviewPending ? "Review queue has pending items." : "Inspect Story Delta and Knowledge Drafts after generation.",
+      },
+      {
+        key: "memory",
+        label: "Merge Memory",
+        status: chapterStatus?.knowledge_drafts?.status === "accepted" ? "done" : reviewPending ? "current" : "pending",
+        description: "Accepted changes become formal Memory.",
+      },
+    ];
+  }, [
+    approvedChapterTask,
+    approvedScenePlan,
+    chapterStatus,
+    contextPackHasPreview,
+    contextPackWillBeUsed,
+    currentChapterExists,
+    latestChapterTaskDraft,
+    latestScenePlanDraft,
+  ]);
+
+  const nextActions = useMemo(() => {
+    if (chapterStatus?.next_actions && chapterStatus.next_actions.length > 0) {
+      return chapterStatus.next_actions;
+    }
+    if (!approvedChapterTask) {
+      return [latestChapterTaskDraft ? "Approve Chapter Task Sheet." : "Create and approve Chapter Task Sheet."];
+    }
+    if (!approvedScenePlan) {
+      return [latestScenePlanDraft ? "Approve Scene Plan." : "Create and approve Scene Plan."];
+    }
+    if (!contextPackWillBeUsed) {
+      return ["Prepare and attach Context Pack."];
+    }
+    if (!currentChapterExists) {
+      return ["Generate chapter draft."];
+    }
+    return ["Check Review after generation.", "Merge accepted memory changes."];
+  }, [
+    approvedChapterTask,
+    approvedScenePlan,
+    chapterStatus,
+    contextPackWillBeUsed,
+    currentChapterExists,
+    latestChapterTaskDraft,
+    latestScenePlanDraft,
+  ]);
 
   useEffect(() => {
     const parsed = Number.parseInt(chapterNumberInput, 10);
@@ -1596,7 +1728,7 @@ export function App() {
       {!chapterLoading && !chapterError && !selectedProjectRef && (
         <div className="empty-stack reader-empty-stack">
           <p className="empty-state">选择项目和章节后，这里显示正文。没有项目时，请先到创作页创建小说项目。</p>
-          <button className="button secondary-button" type="button" onClick={() => setActivePage("create")}>
+          <button className="button secondary-button" type="button" onClick={() => setActivePage("writing")}>
             前往创作页
           </button>
         </div>
@@ -2054,7 +2186,7 @@ export function App() {
             {chapterStreaming ? "正在流式生成章节..." : "生成章节"}
           </button>
           <button
-            className="button subtle-button"
+            className="button subtle-button debug-only-action"
             type="button"
             onClick={() => void handleGenerateChapter()}
             disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
@@ -2063,7 +2195,7 @@ export function App() {
           </button>
         </div>
         {renderContextPackUsageState()}
-        {scenePlanHasDraft && !approvedScenePlan && (
+        {latestScenePlanDraft && !approvedScenePlan && (
           <p className="state-text warning-text">Scene Plan 未生效：当前只有 draft，生成章节不会注入 Scene Plan。</p>
         )}
         {approvedScenePlan && (
@@ -2136,6 +2268,7 @@ export function App() {
         apiStatus={apiStatus}
         disabled={generationBusy}
         onApprovedTaskChange={setApprovedChapterTask}
+        onTaskStateChange={handleChapterTaskStateChange}
       />
 
       <ScenePlanPanel
@@ -2149,7 +2282,35 @@ export function App() {
 
       {renderContextPackPanel()}
 
-      {renderStoryDeltaPanel()}
+      <DebugDrawer>
+        <div className="debug-action-row">
+          <button
+            className="button subtle-button"
+            type="button"
+            onClick={() => void handleGenerateChapter()}
+            disabled={!selectedProjectRef || apiStatus !== "online" || generationBusy}
+          >
+            {chapterGenerating ? "Running sync generation..." : "Sync generate (debug fallback)"}
+          </button>
+          <button
+            className="button secondary-button compact-button"
+            type="button"
+            onClick={() => void refreshGenerationStatus()}
+            disabled={generationStatusLoading || apiStatus !== "online"}
+          >
+            Refresh generation status
+          </button>
+        </div>
+        <section className="debug-snapshot">
+          <h3>Generation payload preview</h3>
+          <pre className="json-snippet">{jsonPreview(generationRequestWithOptionalContext(validCurrentChapterNumber))}</pre>
+          <h3>Raw Context Pack prompt</h3>
+          <pre className="json-snippet">{contextPackPromptText || "No Context Pack prompt attached."}</pre>
+          <h3>Dry-run state</h3>
+          <pre className="json-snippet">{jsonPreview({ storyDeltaDryRun, storyDeltaIncludeNext, storyDeltaIncludeDraft })}</pre>
+        </section>
+
+        {renderStoryDeltaPanel()}
 
       {apiStatus === "online" && (
         <section className={`panel generation-status-card ${generationStatusClass(generationStatus)}`} aria-live="polite">
@@ -2191,12 +2352,31 @@ export function App() {
           )}
         </section>
       )}
+      </DebugDrawer>
     </aside>
   );
 
+  const renderNextActionsPanel = () => (
+    <section className="panel next-actions-panel" aria-labelledby="next-actions-title">
+      <div className="panel-header">
+        <div>
+          <span className="section-kicker">Next Actions</span>
+          <h2 id="next-actions-title">Recommended next step</h2>
+        </div>
+      </div>
+      <ol className="next-actions-list">
+        {nextActions.map((action) => (
+          <li key={action}>{action}</li>
+        ))}
+      </ol>
+    </section>
+  );
+
   const renderCreatePage = () => (
-    <section className="workspace-layout workspace-page create-layout">
+    <section className="workspace-layout workspace-page writing-cockpit-layout">
       <aside className="sidebar-stack" aria-label="项目导航">
+        <WorkflowRail steps={workflowSteps} />
+        {renderProjectListPanel()}
         <ProjectCreatePanel
           open={newProjectPanelTarget === "sidebar"}
           onToggle={() => setNewProjectPanelTarget((current) => (current === "sidebar" ? "" : "sidebar"))}
@@ -2209,7 +2389,6 @@ export function App() {
           message={createProjectMessage}
           disabled={apiStatus !== "online"}
         />
-        {renderProjectListPanel()}
       </aside>
 
       <section className="main-stack">
@@ -2222,9 +2401,22 @@ export function App() {
           onGenerateAssets={() => void handleGenerateOutlineCharacters()}
           onGenerateChapter={(chapterNumber) => void handleGenerateChapterStream(chapterNumber)}
         />
+        {renderGenerationPanel()}
       </section>
 
-      {renderGenerationPanel()}
+      <aside className="tool-stack cockpit-inspector" aria-label="Effective inputs and next actions">
+        <EffectiveInputsSummary
+          approvedChapterTask={approvedChapterTask}
+          latestChapterTaskDraft={latestChapterTaskDraft}
+          approvedScenePlan={approvedScenePlan}
+          latestScenePlanDraft={latestScenePlanDraft}
+          contextPackState={contextPackState}
+          generationMode="stream"
+          generationRequest={generationRequest}
+          warnings={effectiveInputWarnings}
+        />
+        {renderNextActionsPanel()}
+      </aside>
     </section>
   );
 
@@ -2238,32 +2430,105 @@ export function App() {
     </section>
   );
 
-  const renderActivePage = () => {
-    if (activePage === "home") {
-      return <HomePage apiStatus={apiStatus} selectedProject={selectedProject} onNavigate={setActivePage} />;
-    }
-    if (activePage === "create") {
-      return renderCreatePage();
-    }
-    if (activePage === "read") {
-      return renderReadPage();
-    }
-    if (activePage === "library") {
-      return <LibraryPage selectedProject={selectedProject} apiStatus={apiStatus} />;
-    }
-    if (activePage === "projectSettings") {
-      return (
-        <ProjectSettingsPage
-          selectedProject={selectedProject}
-          projectDetail={projectDetail}
-          projectLoading={projectLoading}
-          projectError={projectError}
-          apiStatus={apiStatus}
-          onSaveGenerationSettings={handleUpdateGenerationSettings}
+  const renderDashboardPage = () => (
+    <section className="workspace-layout workspace-page dashboard-layout">
+      <aside className="sidebar-stack" aria-label="Project navigation">
+        {renderProjectListPanel()}
+        {renderChapterListPanel()}
+      </aside>
+      <section className="main-stack">
+        <section className="panel dashboard-overview-panel">
+          <div className="panel-header">
+            <div>
+              <span className="section-kicker">Dashboard</span>
+              <h1>{selectedProject?.title || "No project selected"}</h1>
+              <p>Current chapter: {validCurrentChapterNumber}</p>
+            </div>
+            <button className="button primary-button" type="button" onClick={() => setActivePage("writing")}>
+              Enter Writing Cockpit
+            </button>
+          </div>
+          <dl className="dashboard-summary-grid">
+            <div>
+              <dt>API</dt>
+              <dd>{apiStatus}</dd>
+            </div>
+            <div>
+              <dt>Chapter file</dt>
+              <dd>{currentChapterExists ? "exists" : "not generated"}</dd>
+            </div>
+            <div>
+              <dt>Generation</dt>
+              <dd>{generationStatusText(generationStatus)}</dd>
+            </div>
+            <div>
+              <dt>Review pending</dt>
+              <dd>{chapterStatus?.review?.pending_count ?? 0}</dd>
+            </div>
+          </dl>
+        </section>
+        <ChapterStatusPanel
+          status={chapterStatus}
+          loading={chapterStatusLoading}
+          error={chapterStatusError}
+          workflowWarnings={workflowGuardWarnings}
         />
-      );
-    }
-    return (
+        {renderNextActionsPanel()}
+      </section>
+      <aside className="tool-stack cockpit-inspector" aria-label="Dashboard effective inputs">
+        <EffectiveInputsSummary
+          approvedChapterTask={approvedChapterTask}
+          latestChapterTaskDraft={latestChapterTaskDraft}
+          approvedScenePlan={approvedScenePlan}
+          latestScenePlanDraft={latestScenePlanDraft}
+          contextPackState={contextPackState}
+          generationMode="stream"
+          generationRequest={generationRequest}
+          warnings={effectiveInputWarnings}
+        />
+      </aside>
+    </section>
+  );
+
+  const renderReviewPage = () => (
+    <section className="workspace-layout workspace-page review-layout">
+      <aside className="sidebar-stack" aria-label="Review navigation">
+        {renderProjectListPanel()}
+        <ChapterStatusPanel
+          status={chapterStatus}
+          loading={chapterStatusLoading}
+          error={chapterStatusError}
+          workflowWarnings={workflowGuardWarnings}
+        />
+      </aside>
+      <section className="main-stack">
+        <section className="panel">
+          <div className="panel-header">
+            <div>
+              <span className="section-kicker">Review</span>
+              <h1>Review & Merge</h1>
+              <p>Story Delta stays here as the first Review entry. Knowledge Draft Review remains in Memory for UI-D integration.</p>
+            </div>
+          </div>
+        </section>
+        {renderStoryDeltaPanel()}
+      </section>
+      <aside className="tool-stack cockpit-inspector" aria-label="Review next actions">
+        {renderNextActionsPanel()}
+      </aside>
+    </section>
+  );
+
+  const renderSettingsPage = () => (
+    <section className="settings-stack">
+      <ProjectSettingsPage
+        selectedProject={selectedProject}
+        projectDetail={projectDetail}
+        projectLoading={projectLoading}
+        projectError={projectError}
+        apiStatus={apiStatus}
+        onSaveGenerationSettings={handleUpdateGenerationSettings}
+      />
       <SystemSettingsPage
         apiStatus={apiStatus}
         apiError={apiError}
@@ -2272,9 +2537,25 @@ export function App() {
         generationStatusLoading={generationStatusLoading}
         generationStatusError={generationStatusError}
         onRefreshGenerationStatus={() => void refreshGenerationStatus()}
-        onOpenCreatePage={() => setActivePage("create")}
+        onOpenCreatePage={() => setActivePage("writing")}
       />
-    );
+    </section>
+  );
+
+  const renderActivePage = () => {
+    if (activePage === "dashboard") {
+      return renderDashboardPage();
+    }
+    if (activePage === "writing") {
+      return renderCreatePage();
+    }
+    if (activePage === "review") {
+      return renderReviewPage();
+    }
+    if (activePage === "memory") {
+      return <LibraryPage selectedProject={selectedProject} apiStatus={apiStatus} />;
+    }
+    return renderSettingsPage();
   };
 
   return (
