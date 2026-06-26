@@ -3,6 +3,8 @@ import type {
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
+  ChapterTaskDraftRequest,
+  ChapterTaskResponse,
   ChapterStatusResponse,
   ChapterStreamDoneEvent,
   ChapterStreamErrorEvent,
@@ -458,6 +460,41 @@ export function getChapter(projectRef: string, chapterNumber: number): Promise<C
 export function getChapterStatus(projectRef: string, chapterNumber: number): Promise<ChapterStatusResponse> {
   return apiFetch<ChapterStatusResponse>(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/status`,
+  );
+}
+
+export function getChapterTask(
+  projectRef: string,
+  chapterNumber: number,
+): Promise<ChapterTaskResponse> {
+  return apiFetch<ChapterTaskResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapter-tasks/${chapterNumber}`,
+  );
+}
+
+export function saveChapterTaskDraft(
+  projectRef: string,
+  chapterNumber: number,
+  request: ChapterTaskDraftRequest,
+): Promise<ChapterTaskResponse> {
+  return postJson<ChapterTaskResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapter-tasks/${chapterNumber}`,
+    request,
+  );
+}
+
+export function approveChapterTask(
+  projectRef: string,
+  chapterNumber: number,
+  taskId: string,
+  revision: number,
+): Promise<ChapterTaskResponse> {
+  return postJson<ChapterTaskResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapter-tasks/${chapterNumber}/approve`,
+    {
+      task_id: taskId,
+      revision,
+    },
   );
 }
 

@@ -159,6 +159,7 @@ export type GenerationRequest = {
   max_tokens: number;
   temperature: number;
   narrative_context_text?: string;
+  chapter_task_id?: string;
 };
 
 export type GenerationSettingsRequest = {
@@ -384,6 +385,74 @@ export type ContextPackPreviewResponse = {
   project_ref: string;
   context_pack: ContextPack;
   prompt_text: string;
+  message: string;
+};
+
+export type ChapterTaskFunction =
+  | "relationship_progress"
+  | "emotional_aftermath"
+  | "action_progress"
+  | "information_reveal"
+  | "foreshadowing_setup"
+  | "foreshadowing_payoff"
+  | "reward_delivery"
+  | "suspense_maintenance"
+  | "transition";
+
+export type ChapterTaskStatus = "draft" | "approved" | "superseded";
+
+export type ChapterTaskSheet = {
+  id: string;
+  chapter_number: number;
+  revision: number;
+  status: ChapterTaskStatus;
+  primary_function: ChapterTaskFunction;
+  secondary_functions: ChapterTaskFunction[];
+  intensity: "low" | "medium" | "high";
+  canon_budget: "none" | "minor" | "normal";
+  must_carry: string[];
+  allowed_advances: string[];
+  forbidden_advances: string[];
+  required_characters: string[];
+  relationship_goal: string;
+  decision_goal: string;
+  allowed_scene_types: string[];
+  forbidden_scene_drivers: string[];
+  ending_state: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  superseded_at: string | null;
+};
+
+export type ChapterTaskDraftRequest = {
+  id?: string;
+  revision?: number;
+  primary_function: ChapterTaskFunction;
+  secondary_functions: ChapterTaskFunction[];
+  intensity: "low" | "medium" | "high";
+  canon_budget: "none" | "minor" | "normal";
+  must_carry: string[];
+  allowed_advances: string[];
+  forbidden_advances: string[];
+  required_characters: string[];
+  relationship_goal: string;
+  decision_goal: string;
+  allowed_scene_types: string[];
+  forbidden_scene_drivers: string[];
+  ending_state: string;
+  notes: string;
+};
+
+export type ChapterTaskResponse = {
+  ok: boolean;
+  project_ref: string;
+  chapter_number: number;
+  task: ChapterTaskSheet | null;
+  approved: ChapterTaskSheet | null;
+  latest_draft: ChapterTaskSheet | null;
+  history: ChapterTaskSheet[];
   message: string;
 };
 

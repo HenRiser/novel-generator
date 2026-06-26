@@ -278,6 +278,43 @@ class ChapterContentResponse(BaseModel):
     content: str
 
 
+class ChapterTaskDraftRequest(BaseModel):
+    id: Any = None
+    chapter_number: Any = None
+    revision: Any = None
+    status: Any = None
+    primary_function: Any = None
+    secondary_functions: Any = None
+    intensity: Any = None
+    canon_budget: Any = None
+    must_carry: Any = None
+    allowed_advances: Any = None
+    forbidden_advances: Any = None
+    required_characters: Any = None
+    relationship_goal: Any = None
+    decision_goal: Any = None
+    allowed_scene_types: Any = None
+    forbidden_scene_drivers: Any = None
+    ending_state: Any = None
+    notes: Any = None
+
+
+class ChapterTaskApproveRequest(BaseModel):
+    task_id: Any = None
+    revision: Any = None
+
+
+class ChapterTaskResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapter_number: int
+    task: dict[str, Any] | None = None
+    approved: dict[str, Any] | None = None
+    latest_draft: dict[str, Any] | None = None
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    message: str = ""
+
+
 class GenerateOutlineCharactersRequest(BaseModel):
     model: str | None = None
     max_tokens: int | None = Field(default=None, ge=512, le=32768)
@@ -290,3 +327,4 @@ class GenerateChapterRequest(BaseModel):
     temperature: float | None = Field(default=None, ge=0, le=2)
     writing_mode: str | None = None
     narrative_context_text: str | None = Field(default=None, max_length=20000)
+    chapter_task_id: str | None = Field(default=None, max_length=120)

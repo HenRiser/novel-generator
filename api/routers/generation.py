@@ -23,6 +23,7 @@ from services.generation_service import (
     generate_single_chapter,
     stream_generate_single_chapter,
 )
+from services.chapter_task_service import resolve_approved_chapter_task
 from services.project_service import load_project_detail, validate_outline_character_ready
 
 
@@ -109,6 +110,24 @@ def _ensure_chapter_assets_ready(project_ref: str) -> None:
             "setting_assets_missing",
             "Outline and characters are missing. Generate outline and characters before chapter generation.",
         )
+
+
+def _resolve_chapter_task_or_error(
+    project_ref: str,
+    chapter_number: int,
+    chapter_task_id: str | None,
+) -> Any:
+    clean_task_id = str(chapter_task_id or "").strip()
+    if not clean_task_id and not str(project_ref or "").startswith("book:"):
+        return None
+    result = resolve_approved_chapter_task(
+        project_ref,
+        chapter_number,
+        task_id=clean_task_id or None,
+    )
+    if not result.ok:
+        _error(result.status_code, result.error_code, result.message)
+    return result
 
 
 def _with_optional_writing_mode(project_config: dict[str, Any], writing_mode: str | None) -> dict[str, Any]:
@@ -276,6 +295,7 @@ def generate_project_chapter(
     project_config = _load_project_config_or_error(project_ref)
     _ensure_outline_character_ready(project_config)
     _ensure_chapter_assets_ready(project_ref)
+    chapter_task_result = _resolve_chapter_task_or_error(project_ref, chapter_number, payload.chapter_task_id)
     _ensure_model_configured()
     project_config = _with_optional_writing_mode(project_config, payload.writing_mode)
 
@@ -292,6 +312,9 @@ def generate_project_chapter(
             max_tokens=_request_max_tokens(payload.max_tokens),
             use_previous_context=True,
             narrative_context_text=payload.narrative_context_text,
+            chapter_task=chapter_task_result.task if chapter_task_result else None,
+            allowed_scene_contract=chapter_task_result.contract if chapter_task_result else None,
+            chapter_task_relative_path=chapter_task_result.relative_path if chapter_task_result else None,
         )
         if not result.ok:
             message = public_message(result.message)
@@ -324,6 +347,7 @@ def generate_project_chapter_stream(
     project_config = _load_project_config_or_error(project_ref)
     _ensure_outline_character_ready(project_config)
     _ensure_chapter_assets_ready(project_ref)
+    chapter_task_result = _resolve_chapter_task_or_error(project_ref, chapter_number, payload.chapter_task_id)
     _ensure_model_configured()
     project_config = _with_optional_writing_mode(project_config, payload.writing_mode)
 
@@ -347,6 +371,9 @@ def generate_project_chapter_stream(
                 max_tokens=max_tokens,
                 use_previous_context=True,
                 narrative_context_text=payload.narrative_context_text,
+                chapter_task=chapter_task_result.task if chapter_task_result else None,
+                allowed_scene_contract=chapter_task_result.contract if chapter_task_result else None,
+                chapter_task_relative_path=chapter_task_result.relative_path if chapter_task_result else None,
             ):
                 public_event = _public_stream_event(event)
                 if public_event["type"] == "delta":
