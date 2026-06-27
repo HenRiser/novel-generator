@@ -718,6 +718,14 @@ button {
   padding: var(--space-5);
 }
 
+.debug-drawer:not([open]) .debug-drawer-body {
+  display: none;
+}
+
+.debug-drawer[open] .debug-drawer-body {
+  display: grid;
+}
+
 .debug-action-row {
   display: flex;
   flex-wrap: wrap;
