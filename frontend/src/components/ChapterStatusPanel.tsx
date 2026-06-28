@@ -15,6 +15,20 @@ function countLabel(value: number): string {
   return Number.isFinite(value) ? String(value) : "0";
 }
 
+function reviewClass(verdict: string | undefined): string {
+  const normalized = String(verdict || "none").toLowerCase();
+  if (normalized === "fail") {
+    return "function-review-summary function-review-summary-fail";
+  }
+  if (normalized === "warn") {
+    return "function-review-summary function-review-summary-warn";
+  }
+  if (normalized === "pass") {
+    return "function-review-summary function-review-summary-pass";
+  }
+  return "function-review-summary";
+}
+
 export function ChapterStatusPanel({
   status,
   loading,
@@ -22,6 +36,8 @@ export function ChapterStatusPanel({
   workflowWarnings,
 }: ChapterStatusPanelProps) {
   const counts = status?.knowledge_drafts.counts;
+  const latestFunctionReview = status?.latest_function_review ?? null;
+  const latestReviewVerdict = String(latestFunctionReview?.verdict || "none").toUpperCase();
   return (
     <section className="chapter-status-panel" aria-live="polite">
       <div className="chapter-status-header">
@@ -59,6 +75,39 @@ export function ChapterStatusPanel({
               <strong>{statusLabel(status.context_pack.status)}</strong>
               <small>{status.context_pack.message}</small>
             </div>
+          </div>
+
+          <div className={reviewClass(latestFunctionReview?.verdict)}>
+            <div>
+              <span>No-Reveal Review</span>
+              <strong>{latestReviewVerdict}</strong>
+              <small>
+                {latestFunctionReview
+                  ? `score ${latestFunctionReview.score}/5 · ${latestFunctionReview.categories.length} categories`
+                  : "No function review for this chapter"}
+              </small>
+            </div>
+            {latestFunctionReview && (
+              <dl>
+                <div>
+                  <dt>review_id</dt>
+                  <dd>{latestFunctionReview.id || "-"}</dd>
+                </div>
+                <div>
+                  <dt>ai_run_id</dt>
+                  <dd>{latestFunctionReview.ai_run_id || "-"}</dd>
+                </div>
+                <div>
+                  <dt>categories</dt>
+                  <dd>{latestFunctionReview.categories.length ? latestFunctionReview.categories.join(", ") : "-"}</dd>
+                </div>
+              </dl>
+            )}
+            {String(latestFunctionReview?.verdict || "").toLowerCase() === "fail" && (
+              <p className="state-text error-text">
+                该章违反 No-Reveal / Scene Plan 禁止项，需要人工复核；不建议直接进入下一章。
+              </p>
+            )}
           </div>
 
           <div className="chapter-status-counts" aria-label="Knowledge Draft counts">

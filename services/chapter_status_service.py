@@ -16,6 +16,8 @@ from .event_log_service import list_events
 MEMORY_DIR_NAME = "memory"
 STORY_DELTAS_NAME = "story_deltas.json"
 KNOWLEDGE_DRAFTS_NAME = "knowledge_drafts.json"
+CHAPTER_FUNCTION_REVIEWS_DIR_NAME = "chapter_function_reviews"
+NO_REVEAL_REVIEW_TYPE = "no_reveal_compliance"
 SUPPORTED_GUARD_ACTIONS = {"generate_chapter"}
 REVIEWABLE_OPERATIONS = {"create_node", "create_edge"}
 CHANGE_STATUSES = ("pending_review", "accepted", "rejected", "failed", "superseded")
@@ -130,6 +132,49 @@ def _as_chapter_number(value: Any) -> int | None:
     return number if number > 0 else None
 
 
+def _function_review_items(ctx: Any) -> list[dict[str, Any]]:
+    root = ctx.logs_dir / CHAPTER_FUNCTION_REVIEWS_DIR_NAME
+    if not root.exists():
+        return []
+    items: list[dict[str, Any]] = []
+    for path in root.glob("*.json"):
+        data = _read_json(path) or {}
+        if data.get("type") == NO_REVEAL_REVIEW_TYPE:
+            items.append(data)
+    return items
+
+
+def _function_review_summary(review: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(review, dict):
+        return None
+    categories = review.get("categories")
+    if not isinstance(categories, list):
+        categories = []
+    try:
+        score = int(review.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    return {
+        "id": _clean_text(review.get("id")),
+        "type": _clean_text(review.get("type")),
+        "verdict": _clean_text(review.get("verdict")),
+        "score": score,
+        "categories": [_clean_text(item) for item in categories if _clean_text(item)],
+        "created_at": _clean_text(review.get("created_at")),
+        "ai_run_id": _clean_text(review.get("ai_run_id")),
+    }
+
+
+def _latest_function_review(reviews: list[dict[str, Any]], chapter_number: int) -> dict[str, Any] | None:
+    candidates = [
+        item
+        for item in reviews
+        if _as_chapter_number(item.get("chapter_number")) == chapter_number
+    ]
+    candidates.sort(key=lambda item: (_clean_text(item.get("created_at")), _clean_text(item.get("id"))), reverse=True)
+    return _function_review_summary(candidates[0]) if candidates else None
+
+
 def _items_for_chapter(items: list[dict[str, Any]], chapter_number: int) -> list[dict[str, Any]]:
     return [item for item in items if _as_chapter_number(item.get("chapter_number")) == chapter_number]
 
@@ -210,6 +255,7 @@ def _chapter_status(
     drafts: list[dict[str, Any]],
     events: list[dict[str, Any]],
     ai_runs: list[dict[str, Any]],
+    function_reviews: list[dict[str, Any]],
 ) -> dict[str, Any]:
     chapter_path = chapter_files.get(chapter_number)
     chapter_exists = chapter_path is not None
@@ -224,9 +270,29 @@ def _chapter_status(
     rejected_events = _events_for_chapter(events, chapter_number, "knowledge_draft_change_rejected")
     chapter_generation_runs = _runs_for_chapter(ai_runs, chapter_number, "chapter_generation")
     story_delta_runs = _runs_for_chapter(ai_runs, chapter_number, "story_delta_analysis")
+    latest_function_review = _latest_function_review(function_reviews, chapter_number)
+    latest_review_verdict = _clean_text(latest_function_review.get("verdict") if latest_function_review else "").casefold()
 
     warnings: list[dict[str, str]] = []
     next_actions: list[str] = []
+    if latest_review_verdict == "fail":
+        warnings.append(_warning(
+            "no_reveal_review_failed",
+            "warning",
+            "The latest No-Reveal review failed. This chapter needs manual review before being treated as trusted context.",
+        ))
+        next_actions.extend([
+            "当前章节 No-Reveal 审核失败，请人工复核。",
+            "不建议直接进入下一章。",
+            "不建议将本章作为可信上下文继续推进，除非你确认接受风险。",
+        ])
+    elif latest_review_verdict == "warn":
+        warnings.append(_warning(
+            "no_reveal_review_warn",
+            "warning",
+            "The latest No-Reveal review has warnings.",
+        ))
+        next_actions.append("当前章节存在 No-Reveal 风险，请快速复核 evidence。")
     if chapter_exists and not chapter_deltas:
         warnings.append(_warning(
             "story_delta_missing",
@@ -291,6 +357,7 @@ def _chapter_status(
             "status": "unknown",
             "message": "No persisted context pack freshness metadata is available.",
         },
+        "latest_function_review": latest_function_review,
         "warnings": warnings,
         "next_actions": next_actions,
     }
@@ -309,6 +376,7 @@ def _load_sources(project_ref: str) -> tuple[Any | None, dict[str, Any], str]:
             "drafts": _knowledge_drafts(ctx),
             "events": events_result.events if events_result.ok else [],
             "ai_runs": runs_result.runs if runs_result.ok else [],
+            "function_reviews": _function_review_items(ctx),
         }
     except (OSError, ValueError) as exc:
         return ctx, {}, f"Chapter status read failed: {exc}"
@@ -362,6 +430,10 @@ def list_chapter_statuses(project_ref: str) -> ChapterStatusResult:
         number = _as_chapter_number(run.get("chapter_number"))
         if number:
             chapter_numbers.add(number)
+    for review in sources["function_reviews"]:
+        number = _as_chapter_number(review.get("chapter_number"))
+        if number:
+            chapter_numbers.add(number)
 
     chapters = [
         _chapter_status(project_ref, ctx, number, **sources)
@@ -371,6 +443,11 @@ def list_chapter_statuses(project_ref: str) -> ChapterStatusResult:
         "generated_chapters": sum(1 for chapter in chapters if chapter["chapter"]["exists"]),
         "chapters_with_story_delta": sum(1 for chapter in chapters if chapter["story_delta"]["status"] == "analyzed"),
         "chapters_with_pending_drafts": sum(1 for chapter in chapters if chapter["knowledge_drafts"]["counts"]["pending_review"] > 0),
+        "chapters_with_failed_function_review": sum(
+            1
+            for chapter in chapters
+            if (chapter.get("latest_function_review") or {}).get("verdict") == "fail"
+        ),
         "total_pending_draft_changes": sum(chapter["knowledge_drafts"]["counts"]["pending_review"] for chapter in chapters),
     }
     return ChapterStatusResult(True, project_ref=project_ref, chapters=chapters, summary=summary)
@@ -423,6 +500,14 @@ def check_workflow_guard(project_ref: str, request: dict[str, Any]) -> ChapterSt
                     "warning",
                     "The previous chapter has Story Delta data but no story_delta_analysis AI Run provenance.",
                 ))
+            previous_review = previous.get("latest_function_review") or {}
+            if previous_review.get("verdict") == "fail":
+                warnings.append(_warning(
+                    "previous_no_reveal_review_failed",
+                    "warning",
+                    "The previous chapter failed No-Reveal review. Do not treat it as trusted context without manual review.",
+                ))
+                suggested_actions.append("Manually review the previous chapter No-Reveal evidence before generating the next chapter.")
 
     warnings.append(_warning(
         "context_pack_freshness_unknown",

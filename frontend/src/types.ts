@@ -76,6 +76,16 @@ export type ChapterStatusCounts = {
   total: number;
 };
 
+export type FunctionReviewSummary = {
+  id: string;
+  type: string;
+  verdict: NoRevealReviewVerdict;
+  score: number;
+  categories: string[];
+  created_at: string;
+  ai_run_id: string;
+};
+
 export type ChapterStatus = {
   chapter_number: number;
   chapter: {
@@ -114,6 +124,7 @@ export type ChapterStatus = {
     status: string;
     message: string;
   };
+  latest_function_review: FunctionReviewSummary | null;
   warnings: WorkflowGuardWarning[];
   next_actions: string[];
 };
