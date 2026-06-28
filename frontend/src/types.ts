@@ -506,6 +506,52 @@ export type ScenePlanResponse = {
   message: string;
 };
 
+export type NoRevealReviewVerdict = "pass" | "warn" | "fail" | "not_applicable" | string;
+
+export type NoRevealViolation = {
+  category: string;
+  severity: string;
+  matched_terms: string[];
+  evidence: string;
+  source_rule: string;
+};
+
+export type NoRevealReview = {
+  id?: string;
+  type: string;
+  project_id?: string;
+  project_ref?: string;
+  chapter_number: number;
+  chapter_path?: string;
+  ai_run_id?: string | null;
+  chapter_task?: {
+    id?: string | null;
+    revision?: number | null;
+    status?: string | null;
+    canon_budget?: string | null;
+  };
+  scene_plan?: {
+    id?: string | null;
+    revision?: number | null;
+    status?: string | null;
+  };
+  verdict: NoRevealReviewVerdict;
+  score: number;
+  categories: string[];
+  violations: NoRevealViolation[];
+  summary: string;
+  created_at?: string;
+};
+
+export type ChapterFunctionReviewResponse = {
+  ok: boolean;
+  project_ref: string;
+  chapter_number: number;
+  latest: NoRevealReview | null;
+  history: NoRevealReview[];
+  message: string;
+};
+
 export type StoryDelta = {
   new_characters: Array<Record<string, unknown>>;
   character_updates: Array<Record<string, unknown>>;
@@ -637,6 +683,7 @@ export type ChapterGenerationResponse = {
   index_file?: string;
   message: string;
   consistency_warnings: ConsistencyWarning[];
+  function_review?: NoRevealReview;
 };
 
 export type ChapterStreamDeltaEvent = {
@@ -655,6 +702,7 @@ export type ChapterStreamDoneEvent = {
   message: string;
   summary_error?: string;
   consistency_warnings: ConsistencyWarning[];
+  function_review?: NoRevealReview;
 };
 
 export type ChapterStreamErrorEvent = {

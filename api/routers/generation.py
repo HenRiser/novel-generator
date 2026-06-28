@@ -207,6 +207,9 @@ def _chapter_response(result: Any) -> dict[str, Any]:
         "message": "Chapter generated.",
         "consistency_warnings": _public_consistency_warnings(getattr(result, "consistency_warnings", [])),
     }
+    function_review = getattr(result, "function_review", None)
+    if isinstance(function_review, dict):
+        response["function_review"] = function_review
     if result.summary_error:
         response["summary_error"] = public_message(result.summary_error)
     return response
@@ -236,6 +239,8 @@ def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
             "message": public_message(str(event.get("message") or "Chapter generated.")),
             "consistency_warnings": _public_consistency_warnings(event.get("consistency_warnings")),
         }
+        if isinstance(event.get("function_review"), dict):
+            response["function_review"] = event["function_review"]
         if event.get("summary_error"):
             response["summary_error"] = public_message(str(event["summary_error"]))
         return response

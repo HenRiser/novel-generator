@@ -27,6 +27,7 @@ from .chapter_service import extract_chapter_title
 from .chapter_task_service import format_approved_task_for_prompt
 from .scene_plan_service import format_approved_scene_plan_for_prompt
 from .ai_run_service import create_ai_run_record_best_effort
+from .chapter_function_review_service import create_no_reveal_compliance_review
 from .consistency_check_service import check_generated_chapter_consistency
 from .event_log_service import append_event_best_effort
 from .prompt_profile_service import build_prompt_profile
@@ -360,6 +361,9 @@ def _finalize_generated_chapter(
     notices: list[str] | None = None,
     ai_run_metadata: dict[str, Any] | None = None,
     narrative_context_text: str | None = None,
+    chapter_task: dict[str, Any] | None = None,
+    allowed_scene_contract: str | None = None,
+    scene_plan: dict[str, Any] | None = None,
 ) -> ChapterGenerationResult:
     notices = list(notices or [])
     chapter_model = _model(task_models, "chapter")
@@ -471,6 +475,18 @@ def _finalize_generated_chapter(
         if ai_run_result.ok:
             ai_run_id = ai_run_result.run_id
 
+    review_result = create_no_reveal_compliance_review(
+        project_ref=project_ref,
+        chapter_number=chapter_number,
+        chapter_text=chapter_content,
+        chapter_path=chapter_path,
+        ai_run_id=ai_run_id,
+        chapter_task=chapter_task,
+        allowed_scene_contract=allowed_scene_contract,
+        scene_plan=scene_plan,
+    )
+    function_review = review_result.review if review_result.ok else None
+
     changed_targets = [f"chapters/{Path(chapter_path).name}", Path(index_path).name]
     if summary_path:
         changed_targets.insert(1, f"summaries/{Path(summary_path).name}")
@@ -485,6 +501,7 @@ def _finalize_generated_chapter(
             "index_file": Path(index_path).name,
             "summary_error": summary_error,
             "ai_run_id": ai_run_id,
+            "function_review_id": function_review.get("id") if isinstance(function_review, dict) else None,
         },
         changed_targets=changed_targets,
     )
@@ -509,6 +526,7 @@ def _finalize_generated_chapter(
         chapter_title_model=chapter_title_model,
         summary_model=summary_model,
         consistency_warnings=consistency_warnings,
+        function_review=function_review,
     )
 
 
@@ -543,6 +561,8 @@ def _stream_done_event(result: ChapterGenerationResult) -> dict[str, Any]:
         event["summary_error"] = result.summary_error
     if result.consistency_warnings:
         event["consistency_warnings"] = list(result.consistency_warnings)
+    if result.function_review:
+        event["function_review"] = dict(result.function_review)
     return event
 
 
@@ -609,6 +629,9 @@ def generate_single_chapter(
         notices,
         ai_run_metadata,
         narrative_context_text,
+        chapter_task,
+        allowed_scene_contract,
+        scene_plan,
     )
 
 
@@ -690,6 +713,9 @@ def stream_generate_single_chapter(
         notices,
         ai_run_metadata,
         narrative_context_text,
+        chapter_task,
+        allowed_scene_contract,
+        scene_plan,
     )
     if not result.ok:
         yield _stream_error_event(result.message, number, partial_length=len(chapter_content))
