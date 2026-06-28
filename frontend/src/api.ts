@@ -10,6 +10,7 @@ import type {
   ChapterStreamErrorEvent,
   ChapterStreamEvent,
   ChapterStreamHandlers,
+  ChapterFunctionReviewResponse,
   ContextPackPreviewRequest,
   ContextPackPreviewResponse,
   CreateProjectRequest,
@@ -462,6 +463,15 @@ export function getChapter(projectRef: string, chapterNumber: number): Promise<C
 export function getChapterStatus(projectRef: string, chapterNumber: number): Promise<ChapterStatusResponse> {
   return apiFetch<ChapterStatusResponse>(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/status`,
+  );
+}
+
+export function getChapterFunctionReview(
+  projectRef: string,
+  chapterNumber: number,
+): Promise<ChapterFunctionReviewResponse> {
+  return apiFetch<ChapterFunctionReviewResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/function-review`,
   );
 }
 

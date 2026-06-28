@@ -342,6 +342,15 @@ class ScenePlanResponse(BaseModel):
     message: str = ""
 
 
+class ChapterFunctionReviewResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapter_number: int
+    latest: dict[str, Any] | None = None
+    history: list[dict[str, Any]] = Field(default_factory=list)
+    message: str = ""
+
+
 class GenerateOutlineCharactersRequest(BaseModel):
     model: str | None = None
     max_tokens: int | None = Field(default=None, ge=512, le=32768)

@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from api.routers import (
     audit,
+    chapter_function_reviews,
     chapter_status,
     chapter_tasks,
     context_pack,
@@ -37,6 +38,7 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(projects.router)
 app.include_router(audit.router)
+app.include_router(chapter_function_reviews.router)
 app.include_router(chapter_status.router)
 app.include_router(chapter_tasks.router)
 app.include_router(scene_plans.router)

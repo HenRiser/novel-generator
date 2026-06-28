@@ -11,6 +11,7 @@ import {
   generateChapterStream,
   generateOutlineCharacters,
   getChapter,
+  getChapterFunctionReview,
   getChapters,
   getChapterStatus,
   getGenerationStatus,
@@ -29,6 +30,7 @@ import { ContextPackCreatorPreview } from "./components/ContextPackCreatorPrevie
 import { DebugDrawer } from "./components/DebugDrawer";
 import { EffectiveInputsSummary } from "./components/EffectiveInputsSummary";
 import { LibraryPage } from "./components/LibraryPage";
+import { NoRevealReviewPanel } from "./components/NoRevealReviewPanel";
 import { ProjectSettingsPage } from "./components/ProjectSettingsPage";
 import { ScenePlanPanel } from "./components/ScenePlanPanel";
 import { SystemSettingsPage } from "./components/SystemSettingsPage";
@@ -37,6 +39,7 @@ import type {
   ApiStatus,
   ChapterContent,
   ChapterGenerationResponse,
+  ChapterFunctionReviewResponse,
   ChapterSummary,
   ChapterStatus,
   ChapterTaskSheet,
@@ -669,6 +672,9 @@ export function App() {
   const [chapterStatus, setChapterStatus] = useState<ChapterStatus | null>(null);
   const [chapterStatusLoading, setChapterStatusLoading] = useState(false);
   const [chapterStatusError, setChapterStatusError] = useState("");
+  const [noRevealReview, setNoRevealReview] = useState<ChapterFunctionReviewResponse | null>(null);
+  const [noRevealReviewLoading, setNoRevealReviewLoading] = useState(false);
+  const [noRevealReviewError, setNoRevealReviewError] = useState("");
   const [workflowGuardWarnings, setWorkflowGuardWarnings] = useState<WorkflowGuardWarning[]>([]);
   const [consistencyWarnings, setConsistencyWarnings] = useState<ConsistencyWarning[]>([]);
   const [outlineGenerating, setOutlineGenerating] = useState(false);
@@ -945,12 +951,50 @@ export function App() {
     [chapterNumberInput, selectedProjectRef],
   );
 
+  const refreshNoRevealReview = useCallback(
+    async (chapterNumber?: number) => {
+      if (!selectedProjectRef) {
+        setNoRevealReview(null);
+        setNoRevealReviewError("");
+        return null;
+      }
+      const number = chapterNumber ?? Number.parseInt(chapterNumberInput, 10);
+      if (!Number.isInteger(number) || number < 1) {
+        setNoRevealReview(null);
+        setNoRevealReviewError("");
+        return null;
+      }
+      setNoRevealReviewLoading(true);
+      setNoRevealReviewError("");
+      try {
+        const result = await getChapterFunctionReview(selectedProjectRef, number);
+        setNoRevealReview(result);
+        return result;
+      } catch (error) {
+        setNoRevealReview(null);
+        setNoRevealReviewError(publicErrorMessage(error, "No-Reveal review load failed."));
+        return null;
+      } finally {
+        setNoRevealReviewLoading(false);
+      }
+    },
+    [chapterNumberInput, selectedProjectRef],
+  );
+
   useEffect(() => {
     setWorkflowGuardWarnings([]);
     if (apiStatus === "online") {
       void refreshChapterStatus();
+      void refreshNoRevealReview();
     }
-  }, [apiStatus, chapterNumberInput, refreshChapterStatus]);
+  }, [apiStatus, chapterNumberInput, refreshChapterStatus, refreshNoRevealReview]);
+
+  useEffect(() => {
+    if (apiStatus !== "online" || !selectedProjectRef) {
+      setNoRevealReview(null);
+      setNoRevealReviewError("");
+    }
+  }, [apiStatus, selectedProjectRef]);
 
   const loadProjects = useCallback(async () => {
     setProjectsLoading(true);
@@ -1477,6 +1521,7 @@ export function App() {
       }
       await refreshGenerationStatus();
       await refreshChapterStatus(result.chapter_number || chapterNumber);
+      await refreshNoRevealReview(result.chapter_number || chapterNumber);
     } catch (error) {
       const message = publicErrorMessage(error, "章节流式生成失败。");
       setStreamingPreviewStatus("failed_unsaved");
@@ -1493,6 +1538,7 @@ export function App() {
     loadChapterAfterGeneration,
     refreshGenerationStatus,
     refreshChapterStatus,
+    refreshNoRevealReview,
     refreshProjectAndChapters,
     runGenerateChapterGuard,
     selectedProjectRef,
@@ -1537,6 +1583,7 @@ export function App() {
       }
       await refreshGenerationStatus();
       await refreshChapterStatus(result.chapter_number || chapterNumber);
+      await refreshNoRevealReview(result.chapter_number || chapterNumber);
     } catch (error) {
       setGenerationError(publicErrorMessage(error, "章节生成失败。"));
       await refreshGenerationStatus();
@@ -1550,6 +1597,7 @@ export function App() {
     loadChapterAfterGeneration,
     refreshGenerationStatus,
     refreshChapterStatus,
+    refreshNoRevealReview,
     refreshProjectAndChapters,
     runGenerateChapterGuard,
     selectedProjectRef,
@@ -2216,6 +2264,13 @@ export function App() {
           loading={chapterStatusLoading}
           error={chapterStatusError}
           workflowWarnings={workflowGuardWarnings}
+        />
+        <NoRevealReviewPanel
+          review={noRevealReview?.latest ?? null}
+          loading={noRevealReviewLoading}
+          error={noRevealReviewError}
+          onRefresh={() => void refreshNoRevealReview()}
+          disabled={!selectedProjectRef || apiStatus !== "online"}
         />
         {generationMessage && <p className="state-text success-text">{generationMessage}</p>}
         {renderConsistencyWarnings()}
