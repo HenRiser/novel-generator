@@ -142,10 +142,20 @@ export function ScenePlanPanel({
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [showValidationErrors, setShowValidationErrors] = useState(false);
 
   const isWorkspaceProject = projectRef.startsWith("book:");
   const canUseApi = Boolean(projectRef && isWorkspaceProject && apiStatus === "online");
   const currentApprovedTask = data?.current_approved_chapter_task ?? approvedChapterTask;
+  const hasApprovedPlan = Boolean(data?.approved);
+  const hasServerDraft = Boolean(data?.latest_draft);
+  const scenePlanStatusLabel = loading
+    ? "Loading"
+    : data?.approved
+      ? `Approved revision ${data.approved.revision}`
+      : data?.latest_draft
+        ? `Draft revision ${data.latest_draft.revision}`
+        : "Not created";
   const validationErrors = useMemo(
     () => localValidationErrors(form, currentApprovedTask),
     [currentApprovedTask, form],
@@ -168,6 +178,7 @@ export function ScenePlanPanel({
     setForm(emptyForm(approvedChapterTask));
     setError("");
     setMessage("");
+    setShowValidationErrors(false);
 
     if (!canUseApi || !Number.isInteger(chapterNumber) || chapterNumber < 1) {
       return () => {
@@ -283,8 +294,9 @@ export function ScenePlanPanel({
     if (!canUseApi) {
       return;
     }
+    setShowValidationErrors(true);
     if (validationErrors.length > 0) {
-      setError(validationErrors[0]);
+      setError("");
       return;
     }
     setSaving(true);
@@ -295,6 +307,7 @@ export function ScenePlanPanel({
       setData(result);
       setForm(toForm(result.latest_draft, result.current_approved_chapter_task ?? approvedChapterTask));
       onScenePlanStateChange(result.approved, result.latest_draft);
+      setShowValidationErrors(false);
       setMessage("Scene Plan draft 已保存。draft 不会进入正文生成。");
     } catch (saveError) {
       setError(safePublicMessage(saveError instanceof Error ? saveError.message : "", "Scene Plan draft 保存失败。"));
@@ -316,6 +329,7 @@ export function ScenePlanPanel({
       setData(result);
       setForm(toForm(result.latest_draft ?? result.approved, result.current_approved_chapter_task ?? approvedChapterTask));
       onScenePlanStateChange(result.approved, result.latest_draft);
+      setShowValidationErrors(false);
       setMessage("Scene Plan draft 已批准。approved revision 将用于正文生成。");
     } catch (approveError) {
       setError(safePublicMessage(approveError instanceof Error ? approveError.message : "", "Scene Plan 批准失败。"));
@@ -336,7 +350,7 @@ export function ScenePlanPanel({
           <h2>Scene Plan Foundation</h2>
           <p>把任务单拆成 2–4 个 approved 场景。只有 approved Scene Plan 会进入正文生成。</p>
         </div>
-        <span className="status-badge">{loading ? "Loading" : data?.approved ? "Approved" : "Draft only"}</span>
+        <span className="status-badge">{scenePlanStatusLabel}</span>
       </div>
 
       <div className="chapter-task-version-status">
@@ -344,7 +358,7 @@ export function ScenePlanPanel({
         <span>编辑中：{data?.latest_draft ? `draft revision ${data.latest_draft.revision}` : "无"}</span>
       </div>
       {historySummary && <p className="muted-text">History: {historySummary}</p>}
-      {data?.latest_draft && !data.approved && (
+      {hasServerDraft && !hasApprovedPlan && (
         <p className="state-text warning-text">Scene Plan 只有 draft，当前不会进入正文生成。</p>
       )}
       {unboundTaskWarning && (
@@ -448,7 +462,7 @@ export function ScenePlanPanel({
         </button>
       </div>
 
-      {validationErrors.length > 0 && <p className="state-text warning-text">{validationErrors[0]}</p>}
+      {showValidationErrors && validationErrors.length > 0 && <p className="state-text warning-text">{validationErrors[0]}</p>}
       {message && <p className="state-text success-text">{message}</p>}
       {error && <p className="state-text error-text">{error}</p>}
     </section>

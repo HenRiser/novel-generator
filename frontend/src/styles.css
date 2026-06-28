@@ -537,6 +537,31 @@ button {
   min-width: 0;
 }
 
+.writing-cockpit-layout {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr) minmax(300px, 380px);
+}
+
+.dashboard-layout,
+.review-layout {
+  grid-template-columns: minmax(270px, 340px) minmax(0, 1fr) minmax(300px, 380px);
+}
+
+.settings-stack {
+  display: grid;
+  gap: var(--space-5);
+  margin: 0 auto;
+  max-width: 1280px;
+}
+
+.cockpit-inspector {
+  position: sticky;
+  top: var(--space-5);
+}
+
+.debug-only-action {
+  display: none;
+}
+
 .panel,
 .new-project-placeholder {
   background: var(--color-surface);
@@ -567,6 +592,149 @@ button {
   color: var(--color-text-muted);
   margin: var(--space-1) 0 0;
   overflow-wrap: anywhere;
+}
+
+.workflow-rail-list,
+.next-actions-list {
+  display: grid;
+  gap: var(--space-3);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.workflow-rail-step {
+  align-items: start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: var(--space-3);
+}
+
+.workflow-rail-index,
+.workflow-rail-status {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.workflow-rail-step p {
+  color: var(--color-text-muted);
+  margin: var(--space-1) 0 0;
+}
+
+.workflow-rail-step-done {
+  border-color: #9bd3af;
+}
+
+.workflow-rail-step-current {
+  border-color: var(--color-accent);
+}
+
+.workflow-rail-step-warning {
+  border-color: #e2c17c;
+}
+
+.effective-input-grid,
+.dashboard-summary-grid {
+  display: grid;
+  gap: var(--space-3);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+
+.effective-input-grid div,
+.dashboard-summary-grid div {
+  background: var(--color-surface-quiet);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+}
+
+.effective-input-grid dt,
+.dashboard-summary-grid dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  margin-bottom: var(--space-1);
+}
+
+.effective-input-grid dd,
+.dashboard-summary-grid dd {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.effective-input-grid small,
+.effective-input-grid span {
+  color: var(--color-text-muted);
+}
+
+.effective-input-warnings {
+  background: var(--color-warning-soft);
+  border: 1px solid #e2c17c;
+  border-radius: var(--radius-md);
+  margin-top: var(--space-4);
+  padding: var(--space-3);
+}
+
+.effective-input-warnings ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+
+.next-actions-list {
+  list-style: decimal;
+  padding-left: var(--space-5);
+}
+
+.next-actions-list li {
+  padding-left: var(--space-1);
+}
+
+.debug-drawer {
+  padding: 0;
+}
+
+.debug-drawer > summary {
+  cursor: pointer;
+  display: flex;
+  padding: var(--space-5);
+}
+
+.debug-drawer > summary strong {
+  display: block;
+  margin-top: 2px;
+}
+
+.debug-drawer-body {
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.debug-drawer:not([open]) .debug-drawer-body {
+  display: none;
+}
+
+.debug-drawer[open] .debug-drawer-body {
+  display: grid;
+}
+
+.debug-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.debug-snapshot {
+  display: grid;
+  gap: var(--space-2);
 }
 
 .button {
