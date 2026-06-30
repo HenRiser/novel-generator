@@ -785,6 +785,10 @@ export function App() {
       approvedScenePlan.source_chapter_task_id === approvedChapterTask.id &&
       approvedScenePlan.source_chapter_task_revision === approvedChapterTask.revision,
   );
+  const latestWorkflowReview = chapterStatus?.latest_function_review ?? noRevealReview?.latest ?? null;
+  const latestWorkflowReviewVerdict = String(latestWorkflowReview?.verdict || "").toLowerCase();
+  const noRevealReviewFailed = latestWorkflowReviewVerdict === "fail";
+  const noRevealReviewWarn = latestWorkflowReviewVerdict === "warn";
 
   const effectiveInputWarnings = useMemo(() => {
     const warnings: string[] = [];
@@ -815,6 +819,27 @@ export function App() {
     const sceneReady = Boolean(approvedScenePlan);
     const contextReady = Boolean(contextPackWillBeUsed);
     const reviewPending = Boolean((chapterStatus?.review?.pending_count ?? 0) > 0);
+    const reviewFailed = latestWorkflowReviewVerdict === "fail";
+    const reviewWarned = latestWorkflowReviewVerdict === "warn";
+    const reviewPassed = latestWorkflowReviewVerdict === "pass";
+    const reviewStatus: WorkflowRailStep["status"] = reviewFailed || reviewWarned
+      ? "warning"
+      : reviewPending
+        ? "warning"
+        : reviewPassed && currentChapterExists
+          ? "done"
+          : currentChapterExists
+            ? "current"
+            : "pending";
+    const reviewDescription = reviewFailed
+      ? "No-Reveal review failed. Manual review is required before treating this chapter as trusted context."
+      : reviewWarned
+        ? "No-Reveal review has warnings. Review evidence before continuing."
+        : reviewPending
+          ? "Review queue has pending items."
+          : reviewPassed
+            ? "No-Reveal review passed. Continue Review / Merge as appropriate."
+            : "Inspect Story Delta and Knowledge Drafts after generation.";
     return [
       {
         key: "task",
@@ -843,8 +868,8 @@ export function App() {
       {
         key: "review",
         label: "Review Output",
-        status: reviewPending ? "warning" : currentChapterExists ? "current" : "pending",
-        description: reviewPending ? "Review queue has pending items." : "Inspect Story Delta and Knowledge Drafts after generation.",
+        status: reviewStatus,
+        description: reviewDescription,
       },
       {
         key: "memory",
@@ -862,11 +887,22 @@ export function App() {
     currentChapterExists,
     latestChapterTaskDraft,
     latestScenePlanDraft,
+    latestWorkflowReviewVerdict,
   ]);
 
   const nextActions = useMemo(() => {
     if (chapterStatus?.next_actions && chapterStatus.next_actions.length > 0) {
       return chapterStatus.next_actions;
+    }
+    if (noRevealReviewFailed) {
+      return [
+        "当前章节 No-Reveal 审核失败，请人工复核。",
+        "不建议直接进入下一章。",
+        "不建议将本章作为可信上下文继续推进，除非你确认接受风险。",
+      ];
+    }
+    if (noRevealReviewWarn) {
+      return ["当前章节存在 No-Reveal 风险，请快速复核 evidence。"];
     }
     if (!approvedChapterTask) {
       return [latestChapterTaskDraft ? "Approve Chapter Task Sheet." : "Create and approve Chapter Task Sheet."];
@@ -889,6 +925,8 @@ export function App() {
     currentChapterExists,
     latestChapterTaskDraft,
     latestScenePlanDraft,
+    noRevealReviewFailed,
+    noRevealReviewWarn,
   ]);
 
   useEffect(() => {
@@ -2205,6 +2243,17 @@ export function App() {
           </button>
         </div>
 
+        {noRevealReviewFailed && (
+          <section className="no-reveal-fail-banner" aria-live="polite">
+            <strong>No-Reveal FAIL</strong>
+            <p>该章违反 No-Reveal / Scene Plan 禁止项，需要人工复核。</p>
+            <p>不建议直接进入下一章，也不建议将本章作为可信上下文继续推进。</p>
+            <small>
+              review_id: {latestWorkflowReview?.id || "-"} · score: {latestWorkflowReview?.score ?? "-"}/5
+            </small>
+          </section>
+        )}
+
         <div className="generation-actions">
           <button
             className="button secondary-button"
@@ -2521,6 +2570,12 @@ export function App() {
               <dd>{chapterStatus?.review?.pending_count ?? 0}</dd>
             </div>
           </dl>
+          {noRevealReviewFailed && (
+            <div className="dashboard-review-alert">
+              <strong>当前章节需要人工复核</strong>
+              <p>No-Reveal Review 判定 FAIL。请先复核 evidence，不建议直接进入下一章。</p>
+            </div>
+          )}
         </section>
         <ChapterStatusPanel
           status={chapterStatus}

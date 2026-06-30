@@ -712,6 +712,44 @@ button {
   border-left-color: var(--color-danger);
 }
 
+.no-reveal-fail-banner,
+.dashboard-review-alert {
+  background: #fff1f2;
+  border: 1px solid #f0a6b0;
+  border-left: 4px solid var(--color-danger);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-1);
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+}
+
+.no-reveal-fail-banner strong,
+.dashboard-review-alert strong {
+  color: var(--color-danger);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.no-reveal-fail-banner p,
+.dashboard-review-alert p {
+  margin: 0;
+}
+
+.no-reveal-fail-banner small {
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.review-next-action {
+  background: #fff1f2;
+  border: 1px solid #f0a6b0;
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+}
+
 .review-summary-grid {
   display: grid;
   gap: var(--space-3);
@@ -1768,6 +1806,57 @@ code {
   color: var(--color-text-soft);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.function-review-summary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.function-review-summary > div {
+  display: grid;
+  gap: 3px;
+}
+
+.function-review-summary dl {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.function-review-summary dl div {
+  min-width: 0;
+}
+
+.function-review-summary dt {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.function-review-summary dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.function-review-summary-fail {
+  border-color: #f0a6b0;
+  box-shadow: inset 3px 0 0 var(--color-danger);
+}
+
+.function-review-summary-warn {
+  border-color: #d7c38e;
+  box-shadow: inset 3px 0 0 var(--color-warning);
+}
+
+.function-review-summary-pass {
+  border-color: #9bd3af;
+  box-shadow: inset 3px 0 0 var(--color-success);
 }
 
 .chapter-status-counts {

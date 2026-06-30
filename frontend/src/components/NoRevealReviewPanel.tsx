@@ -52,9 +52,14 @@ export function NoRevealReviewPanel({
       </div>
 
       {isFail && (
-        <p className="state-text error-text">
-          该章违反 No-Reveal / Scene Plan 禁止项，需要人工复核。
-        </p>
+        <div className="review-next-action">
+          <p className="state-text error-text">
+            该章违反 No-Reveal / Scene Plan 禁止项，需要人工复核。
+          </p>
+          <p className="state-text">
+            建议：先人工复核 evidence，再决定是否保留该章、重写、或继续。
+          </p>
+        </div>
       )}
 
       {!loading && !review && !error && (
