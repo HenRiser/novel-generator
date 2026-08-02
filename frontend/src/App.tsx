@@ -7,11 +7,14 @@ import DashboardPage from "./pages/DashboardPage";
 import WritingCockpitPage from "./pages/WritingCockpitPage";
 import ReaderPage from "./pages/ReaderPage";
 import GraphPage from "./pages/GraphPage";
+import { shouldShowIntro } from "./appConfig";
 
 export default function App() {
   useApiHealth();
   const { refresh } = useProjects();
-  const [introDone, setIntroDone] = useState(false);
+  const showIntro = shouldShowIntro();
+  // 开屏动画关闭时 introDone 直接置 true，跳过动画阶段
+  const [introDone, setIntroDone] = useState(!showIntro);
 
   useEffect(() => {
     void refresh();
