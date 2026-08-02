@@ -19,6 +19,7 @@ from api.routers import (
     narrative_graph,
     projects,
     scene_plans,
+    settings,
     story_delta,
 )
 
@@ -38,6 +39,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(projects.router)
+app.include_router(settings.router)
 app.include_router(audit.router)
 app.include_router(chapter_function_reviews.router)
 app.include_router(chapter_status.router)

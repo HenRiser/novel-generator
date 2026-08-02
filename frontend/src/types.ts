@@ -762,3 +762,39 @@ export type ContinueSaveResponse = {
   chapter_file: string;
   message: string;
 };
+
+export type ApiConfigStatusResponse = {
+  ok: boolean;
+  configured: boolean;
+  source: string;
+  placeholder: boolean;
+  env_exists: boolean;
+  env_path: string;
+  default_model: string;
+  base_url: string;
+  message: string;
+};
+
+export type SaveApiConfigRequest = {
+  api_key?: string;
+  default_model?: string;
+  custom_model?: string;
+  base_url?: string;
+  require_api_key?: boolean;
+};
+
+export type SaveApiConfigResponse = {
+  ok: boolean;
+  default_model: string;
+  message: string;
+};
+
+export type ApiConfigTestRequest = {
+  api_key?: string;
+  model?: string;
+};
+
+export type ApiConfigTestResponse = {
+  ok: boolean;
+  message: string;
+};

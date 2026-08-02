@@ -17,6 +17,8 @@ DEFAULT_ENV_LINES = [
     f"DEFAULT_MODEL={DEFAULT_MODEL}",
 ]
 _ENV_KEY_PATTERN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+# DeepSeek API Key 真实格式：sk- 前缀 + 较长随机串（常见 32+ 字符）
+_API_KEY_PATTERN = re.compile(r"^sk-[A-Za-z0-9_\-]{16,}$")
 
 
 def get_project_root() -> Path:
@@ -33,7 +35,10 @@ def _get_env_example_path() -> Path:
 
 def _is_real_api_key(value: str | None) -> bool:
     api_key = (value or "").strip()
-    return bool(api_key and api_key != API_KEY_PLACEHOLDER)
+    if not api_key or api_key == API_KEY_PLACEHOLDER:
+        return False
+    # 严格校验 DeepSeek 真实 Key 格式（sk- 前缀），防止弱 Key 覆盖有效配置
+    return bool(_API_KEY_PATTERN.match(api_key))
 
 
 def _read_env_values() -> dict[str, str]:

@@ -7,6 +7,7 @@ import {
   Card,
   Descriptions,
   Form,
+  Input,
   InputNumber,
   Select,
   Space,
@@ -15,8 +16,15 @@ import {
   Typography,
   message,
 } from "antd";
-import { ApiOutlined, ReloadOutlined, SaveOutlined, SettingOutlined } from "@ant-design/icons";
-import { getGenerationStatus, updateGenerationSettings } from "../api";
+import {
+  ApiOutlined,
+  KeyOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  SettingOutlined,
+  ThunderboltOutlined,
+} from "@ant-design/icons";
+import { getApiConfigStatus, getGenerationStatus, saveApiConfig, testApiConnection, updateGenerationSettings } from "../api";
 import { useAppStore } from "../store/useAppStore";
 import { API_BASE_URL } from "../api";
 
@@ -51,6 +59,89 @@ export default function SettingsPage() {
   } = useAppStore();
   const [form] = Form.useForm<GenerationSettingsForm>();
   const [saving, setSaving] = useState(false);
+
+  // API 密钥配置
+  const [apiConfigForm] = Form.useForm();
+  const [apiConfigStatus, setApiConfigStatus] = useState<{
+    configured: boolean;
+    source: string;
+    default_model: string;
+    base_url: string;
+  } | null>(null);
+  const [apiConfigLoading, setApiConfigLoading] = useState(false);
+  const [savingApiConfig, setSavingApiConfig] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+
+  const loadApiConfigStatus = useCallback(async () => {
+    if (apiStatus !== "online") {
+      return;
+    }
+    setApiConfigLoading(true);
+    try {
+      const result = await getApiConfigStatus();
+      setApiConfigStatus({
+        configured: result.configured,
+        source: result.source,
+        default_model: result.default_model,
+        base_url: result.base_url,
+      });
+      apiConfigForm.setFieldsValue({
+        default_model: result.default_model || "deepseek-v4-flash",
+        base_url: result.base_url || "",
+      });
+    } catch {
+      // 状态读取失败不打断页面
+    } finally {
+      setApiConfigLoading(false);
+    }
+  }, [apiConfigForm, apiStatus]);
+
+  useEffect(() => {
+    void loadApiConfigStatus();
+  }, [loadApiConfigStatus]);
+
+  const handleSaveApiConfig = useCallback(async () => {
+    setSavingApiConfig(true);
+    try {
+      const values = await apiConfigForm.validateFields();
+      const hasNewKey = Boolean(values.api_key && values.api_key.trim());
+      const result = await saveApiConfig({
+        api_key: values.api_key || "",
+        default_model: values.default_model || "deepseek-v4-flash",
+        base_url: values.base_url || "",
+        // 留空 Key 时允许仅更新模型/Base URL（保留现有 Key）
+        require_api_key: hasNewKey,
+      });
+      message.success(result.message || "API 配置已保存。");
+      apiConfigForm.setFieldValue("api_key", "");
+      void loadApiConfigStatus();
+    } catch (e) {
+      if (e instanceof Error && "errorFields" in e) {
+        return;
+      }
+      message.error(e instanceof Error ? e.message : "保存失败。");
+    } finally {
+      setSavingApiConfig(false);
+    }
+  }, [apiConfigForm, loadApiConfigStatus]);
+
+  const handleTestConnection = useCallback(async () => {
+    setTestingConnection(true);
+    try {
+      const apiKey = apiConfigForm.getFieldValue("api_key") || "";
+      const model = apiConfigForm.getFieldValue("default_model") || "deepseek-v4-flash";
+      const result = await testApiConnection({ api_key: apiKey, model });
+      if (result.ok) {
+        message.success(result.message || "连接成功。");
+      } else {
+        message.error(result.message || "连接失败。");
+      }
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "测试失败。");
+    } finally {
+      setTestingConnection(false);
+    }
+  }, [apiConfigForm]);
 
   const config = selectedProject?.config ?? {};
   const configModel = typeof config.model === "string" ? config.model : "";
@@ -101,6 +192,91 @@ export default function SettingsPage() {
       setSaving(false);
     }
   }, [form, selectedProjectRef]);
+
+  const apiKeyTab = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <Card
+        size="small"
+        title={
+          <Space>
+            <KeyOutlined style={{ color: "#5f4b32" }} />
+            <span>API 密钥</span>
+          </Space>
+        }
+      >
+        {apiConfigLoading ? (
+          <Spin />
+        ) : (
+          <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
+            <Descriptions.Item label="当前状态">
+              {apiConfigStatus?.configured ? (
+                <Badge status="success" text={`已配置（来源：${apiConfigStatus.source === "environment" ? "环境变量" : ".env" }）`} />
+              ) : (
+                <Badge status="warning" text="未配置" />
+              )}
+            </Descriptions.Item>
+            {apiConfigStatus?.configured && (
+              <>
+                <Descriptions.Item label="默认模型">{apiConfigStatus.default_model}</Descriptions.Item>
+                <Descriptions.Item label="Base URL">
+                  <code>{apiConfigStatus.base_url}</code>
+                </Descriptions.Item>
+              </>
+            )}
+          </Descriptions>
+        )}
+
+        <Form form={apiConfigForm} layout="vertical">
+          <Form.Item
+            name="api_key"
+            label="DeepSeek API Key（留空表示保留现有 Key，仅修改下方选项）"
+            rules={[{ max: 300 }]}
+          >
+            <Input.Password
+              placeholder="sk-..."
+              autoComplete="new-password"
+              style={{ maxWidth: 480 }}
+            />
+          </Form.Item>
+          <Form.Item name="default_model" label="默认模型" rules={[{ required: true }]}>
+            <Select
+              options={[
+                { value: "deepseek-v4-flash", label: "deepseek-v4-flash（默认，快速）" },
+                { value: "deepseek-v4-pro", label: "deepseek-v4-pro（更高质量）" },
+              ]}
+              style={{ maxWidth: 480 }}
+            />
+          </Form.Item>
+          <Form.Item name="base_url" label="Base URL">
+            <Input placeholder="https://api.deepseek.com" style={{ maxWidth: 480 }} />
+          </Form.Item>
+          <Space>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={() => void handleSaveApiConfig()}
+              loading={savingApiConfig}
+            >
+              保存配置
+            </Button>
+            <Button
+              icon={<ThunderboltOutlined />}
+              onClick={() => void handleTestConnection()}
+              loading={testingConnection}
+            >
+              测试连接
+            </Button>
+          </Space>
+          <Alert
+            type="info"
+            showIcon
+            message="API Key 只写入本地 .env 文件，不会显示明文，也不会提交到代码仓库。"
+            style={{ marginTop: 12 }}
+          />
+        </Form>
+      </Card>
+    </div>
+  );
 
   const systemTab = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -228,6 +404,7 @@ export default function SettingsPage() {
       >
         <Tabs
           items={[
+            { key: "api", label: "API 密钥", children: apiKeyTab },
             { key: "system", label: "系统设置", children: systemTab },
             { key: "project", label: "项目设置", children: projectTab },
           ]}

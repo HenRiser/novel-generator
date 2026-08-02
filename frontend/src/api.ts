@@ -13,12 +13,17 @@ import type {
   ChapterFunctionReviewResponse,
   ContextPackPreviewRequest,
   ContextPackPreviewResponse,
+  ApiConfigStatusResponse,
+  ApiConfigTestRequest,
+  ApiConfigTestResponse,
   ContinueSaveRequest,
   ContinueSaveResponse,
   CreateProjectRequest,
   CreateProjectResponse,
   DeleteProjectResponse,
   GenerationSettingsRequest,
+  SaveApiConfigRequest,
+  SaveApiConfigResponse,
   GenerationSettingsResponse,
   GenerationRequest,
   GenerationStatus,
@@ -712,4 +717,16 @@ export function saveContinueResult(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/continue/save`,
     request,
   );
+}
+
+export function getApiConfigStatus(): Promise<ApiConfigStatusResponse> {
+  return apiFetch<ApiConfigStatusResponse>("/api/settings/api-config");
+}
+
+export function saveApiConfig(request: SaveApiConfigRequest): Promise<SaveApiConfigResponse> {
+  return postJson<SaveApiConfigResponse>("/api/settings/api-config", request);
+}
+
+export function testApiConnection(request: ApiConfigTestRequest): Promise<ApiConfigTestResponse> {
+  return postJson<ApiConfigTestResponse>("/api/settings/api-config/test", request);
 }

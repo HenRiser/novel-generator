@@ -406,3 +406,44 @@ class ContinueSaveResponse(BaseModel):
     chapter_number: int
     chapter_file: str
     message: str = ""
+
+
+class ApiConfigStatusResponse(BaseModel):
+    """API 配置状态（不包含明文 Key）。"""
+    ok: bool
+    configured: bool
+    source: str = ""          # .env / environment / missing
+    placeholder: bool = False
+    env_exists: bool = False
+    env_path: str = ""
+    default_model: str = ""
+    base_url: str = ""
+    message: str = ""
+
+
+class SaveApiConfigRequest(BaseModel):
+    """保存 API Key / 默认模型 / Base URL。
+
+    - api_key 为空表示保留现有 Key（只改模型或 Base URL）。
+    """
+    api_key: str = Field(default="", max_length=300)
+    default_model: str = Field(default="deepseek-v4-flash", max_length=100)
+    custom_model: str = Field(default="", max_length=100)
+    base_url: str = Field(default="", max_length=300)
+    require_api_key: bool = True
+
+
+class SaveApiConfigResponse(BaseModel):
+    ok: bool
+    default_model: str = ""
+    message: str = ""
+
+
+class ApiConfigTestRequest(BaseModel):
+    api_key: str = Field(default="", max_length=300)
+    model: str = Field(default="deepseek-v4-flash", max_length=100)
+
+
+class ApiConfigTestResponse(BaseModel):
+    ok: bool
+    message: str = ""
