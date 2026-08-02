@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Button, Empty, List, Popconfirm, Spin, Typography } from "antd";
 import { ClockCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { deleteProject } from "../../api";
 import { useProjects } from "../../hooks/useProjectData";
 import { useAppStore } from "../../store/useAppStore";
 import ProjectCreateModal from "./ProjectCreateModal";
@@ -25,7 +26,7 @@ function formatUpdatedAt(value: string): string {
 
 export default function ProjectListPanel() {
   const navigate = useNavigate();
-  const { projects, projectsLoading, selectedProjectRef, selectProject, setProjects } =
+  const { projects, projectsLoading, selectedProjectRef, selectProject, setProjects, clearProjectState } =
     useAppStore();
   const { error, refresh } = useProjects();
   const [createOpen, setCreateOpen] = useState(false);
@@ -48,15 +49,10 @@ export default function ProjectListPanel() {
     setDeleting(true);
     setDeleteError("");
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000"}/api/projects/${encodeURIComponent(ref)}`,
-        { method: "DELETE" },
-      );
-      if (!response.ok) {
-        throw new Error(`删除失败：${response.status}`);
-      }
+      await deleteProject(ref);
       if (selectedProjectRef === ref) {
-        selectProject(null);
+        // 删除的是当前项目：清空全部相关状态
+        clearProjectState();
       }
       setProjects(projects.filter((project) => project.project_ref !== ref));
     } catch (e) {

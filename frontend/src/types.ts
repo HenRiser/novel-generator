@@ -33,6 +33,12 @@ export type CreateProjectResponse = {
   message: string;
 };
 
+export type DeleteProjectResponse = {
+  ok: boolean;
+  project_ref: string;
+  message: string;
+};
+
 export type ProjectOnboardingState = "empty" | "needs_assets" | "ready_for_first_chapter" | "chapters_ready";
 
 export type ChapterSummary = {

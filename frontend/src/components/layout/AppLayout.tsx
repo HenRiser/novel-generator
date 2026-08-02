@@ -7,6 +7,9 @@ import {
   EditOutlined,
   NodeIndexOutlined,
   ReadOutlined,
+  SafetyCertificateOutlined,
+  SettingOutlined,
+  DatabaseOutlined,
 } from "@ant-design/icons";
 import { useAppStore } from "../../store/useAppStore";
 
@@ -17,6 +20,9 @@ const NAV_ITEMS = [
   { key: "/writing", icon: <EditOutlined />, label: "创作驾驶舱" },
   { key: "/reader", icon: <ReadOutlined />, label: "阅读器" },
   { key: "/graph", icon: <NodeIndexOutlined />, label: "叙事图谱" },
+  { key: "/review", icon: <SafetyCertificateOutlined />, label: "章节审查" },
+  { key: "/library", icon: <DatabaseOutlined />, label: "资料库" },
+  { key: "/settings", icon: <SettingOutlined />, label: "设置" },
 ];
 
 const apiStatusConfig = {

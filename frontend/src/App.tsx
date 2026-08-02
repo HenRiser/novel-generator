@@ -7,6 +7,9 @@ import DashboardPage from "./pages/DashboardPage";
 import WritingCockpitPage from "./pages/WritingCockpitPage";
 import ReaderPage from "./pages/ReaderPage";
 import GraphPage from "./pages/GraphPage";
+import SettingsPage from "./pages/SettingsPage";
+import ReviewPage from "./pages/ReviewPage";
+import LibraryPage from "./pages/LibraryPage";
 import { shouldShowIntro } from "./appConfig";
 
 export default function App() {
@@ -30,6 +33,9 @@ export default function App() {
           <Route path="/writing" element={<WritingCockpitPage />} />
           <Route path="/reader" element={<ReaderPage />} />
           <Route path="/graph" element={<GraphPage />} />
+          <Route path="/review" element={<ReviewPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/library" element={<LibraryPage />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>

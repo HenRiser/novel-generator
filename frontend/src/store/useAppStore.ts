@@ -44,6 +44,8 @@ type AppActions = {
   setChapterStatus: (status: ChapterStatusResponse | null) => void;
   setChapterStatusLoading: (loading: boolean) => void;
   setBusy: (patch: Partial<GenerationBusyState>) => void;
+  /** 删除当前项目后清空所有与该项目相关的状态 */
+  clearProjectState: () => void;
 };
 
 const initialBusy: GenerationBusyState = {
@@ -80,6 +82,19 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   setChapterStatus: (chapterStatus) => set({ chapterStatus }),
   setChapterStatusLoading: (chapterStatusLoading) => set({ chapterStatusLoading }),
   setBusy: (patch) => set((state) => ({ generationBusy: { ...state.generationBusy, ...patch } })),
+  clearProjectState: () =>
+    set({
+      selectedProjectRef: null,
+      selectedProject: null,
+      projectLoading: false,
+      chapters: [],
+      chaptersLoading: false,
+      generationStatus: null,
+      generationStatusLoading: false,
+      chapterStatus: null,
+      chapterStatusLoading: false,
+      generationBusy: { ...initialBusy },
+    }),
 }));
 
 /** 便捷选择器：任意生成任务是否进行中 */

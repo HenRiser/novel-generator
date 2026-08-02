@@ -17,6 +17,7 @@ import type {
   ContinueSaveResponse,
   CreateProjectRequest,
   CreateProjectResponse,
+  DeleteProjectResponse,
   GenerationSettingsRequest,
   GenerationSettingsResponse,
   GenerationRequest,
@@ -278,6 +279,10 @@ export function getProjects(): Promise<ProjectSummary[]> {
   return apiFetch<ProjectSummary[]>("/api/projects");
 }
 
+export function deleteProject(projectRef: string): Promise<DeleteProjectResponse> {
+  return deleteJson<DeleteProjectResponse>(`/api/projects/${projectPath(projectRef)}`);
+}
+
 export function createProject(request: CreateProjectRequest): Promise<CreateProjectResponse> {
   return postJson<CreateProjectResponse>("/api/projects", {
     title: request.title,
@@ -306,6 +311,13 @@ export function updateGenerationSettings(
 
 export function getNarrativeGraph(projectRef: string): Promise<NarrativeGraphResponse> {
   return apiFetch<NarrativeGraphResponse>(`/api/projects/${projectPath(projectRef)}/narrative-graph`);
+}
+
+export function importNarrativeGraphAssets(projectRef: string): Promise<NarrativeGraphResponse> {
+  return postJson<NarrativeGraphResponse>(
+    `/api/projects/${projectPath(projectRef)}/narrative-graph/import-assets`,
+    {},
+  );
 }
 
 export function createNarrativeGraphTag(

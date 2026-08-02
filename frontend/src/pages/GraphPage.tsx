@@ -24,6 +24,7 @@ import {
   NodeIndexOutlined,
   PlusOutlined,
   ReloadOutlined,
+  DownloadOutlined,
 } from "@ant-design/icons";
 import type {
   NarrativeGraphDocument,
@@ -37,6 +38,7 @@ import {
   deleteNarrativeGraphEdge,
   deleteNarrativeGraphNode,
   getNarrativeGraph,
+  importNarrativeGraphAssets,
   updateNarrativeGraphEdge,
   updateNarrativeGraphNode,
 } from "../api";
@@ -197,6 +199,24 @@ export default function GraphPage() {
     }
   }, [closeNodeModal, loadGraph, nodeForm, nodeModal, selectedProjectRef]);
 
+  const [importing, setImporting] = useState(false);
+
+  const handleImportAssets = useCallback(async () => {
+    if (!selectedProjectRef || importing) {
+      return;
+    }
+    setImporting(true);
+    try {
+      const result = await importNarrativeGraphAssets(selectedProjectRef);
+      message.success(result.message || "已从大纲导入图谱节点。");
+      setGraph(result.graph ?? null);
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : "导入失败。");
+    } finally {
+      setImporting(false);
+    }
+  }, [importing, selectedProjectRef]);
+
   const handleNodeDelete = useCallback(
     async (nodeId: string) => {
       if (!selectedProjectRef) {
@@ -296,6 +316,14 @@ export default function GraphPage() {
             }
             extra={
               <Space>
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={() => void handleImportAssets()}
+                  loading={importing}
+                  disabled={!selectedProjectRef}
+                >
+                  从大纲导入
+                </Button>
                 <Button icon={<PlusOutlined />} onClick={openCreateNode} disabled={!selectedProjectRef}>
                   新建节点
                 </Button>
