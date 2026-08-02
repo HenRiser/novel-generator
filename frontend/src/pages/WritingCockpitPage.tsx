@@ -7,6 +7,7 @@ import ProjectListPanel from "../components/project/ProjectListPanel";
 import ChapterListPanel from "../components/chapter/ChapterListPanel";
 import ChapterReader from "../components/chapter/ChapterReader";
 import GenerationPanel from "../components/generation/GenerationPanel";
+import AssetsPanel from "../components/AssetsPanel";
 
 export default function WritingCockpitPage() {
   const {
@@ -104,6 +105,7 @@ export default function WritingCockpitPage() {
                 size="small"
                 items={[
                   { key: "reader", label: "章节阅读", children: readerTabContent },
+                  { key: "assets", label: "设定资产", children: <AssetsPanel /> },
                   {
                     key: "status",
                     label: `章节状态${chapterStatus ? "" : ""}`,

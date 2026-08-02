@@ -1,4 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Divider,
+  Input,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from "antd";
 
 import {
   approveScenePlan,
@@ -343,48 +355,72 @@ export function ScenePlanPanel({
   }
 
   return (
-    <section className="panel scene-plan-panel">
-      <div className="panel-header">
-        <div>
-          <span className="section-kicker">Scene Plan</span>
-          <h2>Scene Plan Foundation</h2>
-          <p>把任务单拆成 2–4 个 approved 场景。只有 approved Scene Plan 会进入正文生成。</p>
-        </div>
-        <span className="status-badge">{scenePlanStatusLabel}</span>
-      </div>
+    <Card
+      size="small"
+      title={
+        <Space>
+          <Typography.Text strong>场景计划</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            把任务单拆成 2–4 个场景，仅已批准的场景计划会进入正文生成
+          </Typography.Text>
+        </Space>
+      }
+      extra={
+        <Space>
+          {data?.approved ? (
+            <Tag color="green">已生效 revision {data.approved.revision}</Tag>
+          ) : data?.latest_draft ? (
+            <Tag color="orange">仅草稿</Tag>
+          ) : (
+            <Tag>未创建</Tag>
+          )}
+          {loading && <Spin size="small" />}
+        </Space>
+      }
+    >
+      <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
+        <Descriptions.Item label="生成生效">{data?.approved ? `revision ${data.approved.revision}` : "无"}</Descriptions.Item>
+        <Descriptions.Item label="编辑中">{data?.latest_draft ? `revision ${data.latest_draft.revision}` : "无"}</Descriptions.Item>
+      </Descriptions>
 
-      <div className="chapter-task-version-status">
-        <span>生成生效：{data?.approved ? `approved revision ${data.approved.revision}` : "无"}</span>
-        <span>编辑中：{data?.latest_draft ? `draft revision ${data.latest_draft.revision}` : "无"}</span>
-      </div>
-      {historySummary && <p className="muted-text">History: {historySummary}</p>}
+      {historySummary && (
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 8 }}>
+          历史：{historySummary}
+        </Typography.Text>
+      )}
       {hasServerDraft && !hasApprovedPlan && (
-        <p className="state-text warning-text">Scene Plan 只有 draft，当前不会进入正文生成。</p>
+        <Alert type="warning" showIcon message="场景计划只有草稿，当前不会进入正文生成。" style={{ marginBottom: 12 }} />
       )}
       {unboundTaskWarning && (
-        <div className="hint-box warning-box">
-          <p>当前 Scene Plan 未绑定当前 approved Chapter Task Sheet。</p>
-          <button className="button subtle-button compact-button" type="button" onClick={bindCurrentTask} disabled={disabled}>
-            绑定当前任务单
-          </button>
-        </div>
+        <Alert
+          type="warning"
+          showIcon
+          message="当前场景计划未绑定当前已生效的任务单。"
+          action={<Button size="small" onClick={bindCurrentTask} disabled={disabled}>绑定当前任务单</Button>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      {message && <Alert type="success" showIcon message={message} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon message={error} closable onClose={() => setError("")} style={{ marginBottom: 12 }} />}
+      {showValidationErrors && validationErrors.length > 0 && (
+        <Alert type="warning" showIcon message={validationErrors[0]} style={{ marginBottom: 12 }} />
       )}
 
-      <div className="task-form-grid">
-        <label>
-          <span>source_chapter_task_id</span>
-          <input
+      <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+          <span style={{ fontWeight: 500 }}>来源任务单 ID</span>
+          <Input
             value={form.source_chapter_task_id ?? ""}
             onChange={(event) => setForm((current) => ({ ...current, source_chapter_task_id: event.target.value || null }))}
             disabled={disabled}
           />
-        </label>
-        <label>
-          <span>source_chapter_task_revision</span>
-          <input
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+          <span style={{ fontWeight: 500 }}>来源任务单修订号</span>
+          <Input
             type="number"
-            min="1"
-            step="1"
+            min={1}
+            step={1}
             value={form.source_chapter_task_revision ?? ""}
             onChange={(event) =>
               setForm((current) => ({
@@ -394,77 +430,89 @@ export function ScenePlanPanel({
             }
             disabled={disabled}
           />
-        </label>
+        </div>
       </div>
 
-      <div className="scene-plan-scenes">
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {form.scenes.map((scene, index) => (
-          <fieldset className="scene-plan-scene" key={scene.scene_no}>
-            <legend>Scene {scene.scene_no}</legend>
-            <div className="scene-plan-scene-actions">
-              <button className="button subtle-button compact-button" type="button" onClick={() => moveScene(index, -1)} disabled={disabled || index === 0}>
-                上移
-              </button>
-              <button className="button subtle-button compact-button" type="button" onClick={() => moveScene(index, 1)} disabled={disabled || index === form.scenes.length - 1}>
-                下移
-              </button>
-              <button className="button subtle-button compact-button" type="button" onClick={() => deleteScene(index)} disabled={disabled || form.scenes.length <= 2}>
-                删除
-              </button>
+          <Card
+            key={scene.scene_no}
+            size="small"
+            title={`场景 ${scene.scene_no}`}
+            extra={
+              <Space>
+                <Button size="small" onClick={() => moveScene(index, -1)} disabled={disabled || index === 0}>上移</Button>
+                <Button size="small" onClick={() => moveScene(index, 1)} disabled={disabled || index === form.scenes.length - 1}>下移</Button>
+                <Button size="small" danger onClick={() => deleteScene(index)} disabled={disabled || form.scenes.length <= 2}>删除</Button>
+              </Space>
+            }
+          >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>场景标题</span>
+                <Input value={scene.title} onChange={(event) => updateScene(index, { title: event.target.value })} disabled={disabled} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>场景地点</span>
+                <Input value={scene.location} onChange={(event) => updateScene(index, { location: event.target.value })} disabled={disabled} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>场景功能</span>
+                <Input value={scene.scene_function} onChange={(event) => updateScene(index, { scene_function: event.target.value })} disabled={disabled} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>情绪转折</span>
+                <Input value={scene.emotional_shift} onChange={(event) => updateScene(index, { emotional_shift: event.target.value })} disabled={disabled} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>出场人物（每行一个）</span>
+                <Input.TextArea
+                  value={listValue(scene.participants)}
+                  onChange={(event) => updateScene(index, { participants: splitLines(event.target.value) })}
+                  disabled={disabled}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>允许信息（每行一条）</span>
+                <Input.TextArea
+                  value={listValue(scene.allowed_information)}
+                  onChange={(event) => updateScene(index, { allowed_information: splitLines(event.target.value) })}
+                  disabled={disabled}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>禁止信息（每行一条）</span>
+                <Input.TextArea
+                  value={listValue(scene.forbidden_information)}
+                  onChange={(event) => updateScene(index, { forbidden_information: splitLines(event.target.value) })}
+                  disabled={disabled}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <span style={{ fontWeight: 500 }}>结尾状态</span>
+                <Input.TextArea
+                  value={scene.ending_state}
+                  onChange={(event) => updateScene(index, { ending_state: event.target.value })}
+                  disabled={disabled}
+                  autoSize={{ minRows: 2, maxRows: 4 }}
+                />
+              </div>
             </div>
-            <div className="task-form-grid">
-              <label>
-                <span>title</span>
-                <input value={scene.title} onChange={(event) => updateScene(index, { title: event.target.value })} disabled={disabled} />
-              </label>
-              <label>
-                <span>location</span>
-                <input value={scene.location} onChange={(event) => updateScene(index, { location: event.target.value })} disabled={disabled} />
-              </label>
-              <label>
-                <span>scene_function</span>
-                <input value={scene.scene_function} onChange={(event) => updateScene(index, { scene_function: event.target.value })} disabled={disabled} />
-              </label>
-              <label>
-                <span>emotional_shift</span>
-                <input value={scene.emotional_shift} onChange={(event) => updateScene(index, { emotional_shift: event.target.value })} disabled={disabled} />
-              </label>
-              <label className="wide-field">
-                <span>participants（每行一个）</span>
-                <textarea value={listValue(scene.participants)} onChange={(event) => updateScene(index, { participants: splitLines(event.target.value) })} disabled={disabled} />
-              </label>
-              <label className="wide-field">
-                <span>allowed_information（每行一条）</span>
-                <textarea value={listValue(scene.allowed_information)} onChange={(event) => updateScene(index, { allowed_information: splitLines(event.target.value) })} disabled={disabled} />
-              </label>
-              <label className="wide-field">
-                <span>forbidden_information（每行一条）</span>
-                <textarea value={listValue(scene.forbidden_information)} onChange={(event) => updateScene(index, { forbidden_information: splitLines(event.target.value) })} disabled={disabled} />
-              </label>
-              <label className="wide-field">
-                <span>ending_state</span>
-                <textarea value={scene.ending_state} onChange={(event) => updateScene(index, { ending_state: event.target.value })} disabled={disabled} />
-              </label>
-            </div>
-          </fieldset>
+          </Card>
         ))}
       </div>
 
-      <div className="chapter-task-actions">
-        <button className="button subtle-button" type="button" onClick={addScene} disabled={disabled || form.scenes.length >= 4}>
-          添加 scene
-        </button>
-        <button className="button secondary-button" type="button" onClick={() => void saveDraft()} disabled={disabled || saving}>
-          {saving ? "保存中..." : "保存草稿"}
-        </button>
-        <button className="button primary-button" type="button" onClick={() => void approveDraft()} disabled={disabled || approving || !data?.latest_draft}>
-          {approving ? "批准中..." : "批准草稿"}
-        </button>
-      </div>
-
-      {showValidationErrors && validationErrors.length > 0 && <p className="state-text warning-text">{validationErrors[0]}</p>}
-      {message && <p className="state-text success-text">{message}</p>}
-      {error && <p className="state-text error-text">{error}</p>}
-    </section>
+      <Divider style={{ margin: "16px 0" }} />
+      <Space>
+        <Button onClick={addScene} disabled={disabled || form.scenes.length >= 4}>添加场景</Button>
+        <Button onClick={() => void saveDraft()} disabled={disabled || saving} loading={saving}>保存草稿</Button>
+        <Button type="primary" onClick={() => void approveDraft()} disabled={disabled || approving || !data?.latest_draft} loading={approving}>
+          批准草稿
+        </Button>
+      </Space>
+    </Card>
   );
 }

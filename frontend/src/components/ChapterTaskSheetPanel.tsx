@@ -1,4 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Checkbox,
+  Descriptions,
+  Divider,
+  Input,
+  Select,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+  message,
+} from "antd";
 
 import {
   approveChapterTask,
@@ -286,122 +302,124 @@ export function ChapterTaskSheetPanel({
 
   const fieldsDisabled = !canUseApi || disabled || loading || saving || approving;
 
-  return (
-    <section className="panel chapter-task-panel">
-      <div className="panel-header">
-        <div>
-          <span className="section-kicker">Chapter Task Sheet</span>
-          <h2>章节任务单</h2>
-        </div>
-        <span className={`status-badge ${data?.approved ? "status-badge-online" : ""}`}>
-          {loading ? "Loading" : data?.approved ? "Approved active" : data?.latest_draft ? "Draft only" : "Not created"}
-        </span>
-      </div>
+  const statusTag =
+    data?.approved ? <Tag color="green">已生效（revision {data.approved.revision}）</Tag>
+    : data?.latest_draft ? <Tag color="orange">仅草稿</Tag>
+    : <Tag>未创建</Tag>;
 
-      {!projectRef && <p className="empty-state">选择 workspace 项目后创建章节任务单。</p>}
+  return (
+    <Card
+      size="small"
+      title={
+        <Space>
+          <Typography.Text strong>章节任务单</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            明确本章功能与约束，正文生成前可反复修订
+          </Typography.Text>
+        </Space>
+      }
+      extra={
+        <Space>
+          {statusTag}
+          {loading && <Spin size="small" />}
+        </Space>
+      }
+    >
+      {!projectRef && <Alert type="info" showIcon message="选择 workspace 项目后创建章节任务单。" />}
       {projectRef && !isWorkspaceProject && (
-        <p className="state-text warning-text">Chapter Task Sheet v1 仅支持 workspace book 项目。</p>
+        <Alert type="warning" showIcon message="章节任务单 v1 仅支持 workspace book 项目。" />
       )}
 
-      <dl className="chapter-task-version-status" aria-label="章节任务单版本状态">
-        <div>
-          <dt>生成生效</dt>
-          <dd>{data?.approved ? `approved revision ${data.approved.revision}` : "无"}</dd>
-        </div>
-        <div>
-          <dt>编辑中</dt>
-          <dd>{data?.latest_draft ? `draft revision ${data.latest_draft.revision}` : "无"}</dd>
-        </div>
-      </dl>
+      <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
+        <Descriptions.Item label="生成生效">{data?.approved ? `revision ${data.approved.revision}` : "无"}</Descriptions.Item>
+        <Descriptions.Item label="编辑中">{data?.latest_draft ? `revision ${data.latest_draft.revision}` : "无"}</Descriptions.Item>
+      </Descriptions>
 
-      <div className="chapter-task-form">
-        <label className="field-stack">
-          <span>章节号</span>
-          <input type="number" value={chapterNumber} readOnly disabled />
-        </label>
-        <label className="field-stack">
-          <span>主要功能</span>
-          <select
+      {editableSource?.status === "draft" && (
+        <Alert type="warning" showIcon message={`当前是草稿 revision ${editableSource.revision}：草稿不会进入正文生成。`} style={{ marginBottom: 12 }} />
+      )}
+      {data?.approved && (
+        <Alert type="success" showIcon message={`正文生成将使用已生效 revision ${data.approved.revision}（${data.approved.id}）。`} style={{ marginBottom: 12 }} />
+      )}
+      {historySummary && (
+        <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
+          历史：{historySummary}
+        </Typography.Text>
+      )}
+      {message && <Alert type="success" showIcon message={message} style={{ marginBottom: 12 }} />}
+      {error && <Alert type="error" showIcon message={error} closable onClose={() => setError("")} style={{ marginBottom: 12 }} />}
+      {consistencyErrors.length > 0 && (
+        <Alert
+          type="error"
+          showIcon
+          message="请先修正任务单冲突："
+          description={<ul style={{ margin: 0, paddingLeft: 18 }}>{consistencyErrors.map((item) => <li key={item}>{item}</li>)}</ul>}
+          style={{ marginBottom: 12 }}
+        />
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontWeight: 500 }}>章节号</span>
+          <Input value={chapterNumber} readOnly disabled />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontWeight: 500 }}>主要功能</span>
+          <Select
             value={form.primary_function}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                primary_function: event.target.value as ChapterTaskFunction,
-              }))
-            }
+            onChange={(value) => setForm((current) => ({ ...current, primary_function: value as ChapterTaskFunction }))}
+            options={FUNCTION_OPTIONS}
             disabled={fieldsDisabled}
-          >
+          />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontWeight: 500 }}>强度</span>
+          <Select
+            value={form.intensity}
+            onChange={(value) => setForm((current) => ({ ...current, intensity: value as ChapterTaskDraftRequest["intensity"] }))}
+            options={[
+              { value: "low", label: "低" },
+              { value: "medium", label: "中" },
+              { value: "high", label: "高" },
+            ]}
+            disabled={fieldsDisabled}
+          />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontWeight: 500 }}>新正典预算</span>
+          <Select
+            value={form.canon_budget}
+            onChange={(value) => setForm((current) => ({ ...current, canon_budget: value as ChapterTaskDraftRequest["canon_budget"] }))}
+            options={[
+              { value: "none", label: "无" },
+              { value: "minor", label: "少量" },
+              { value: "normal", label: "正常" },
+            ]}
+            disabled={fieldsDisabled}
+          />
+        </div>
+
+        <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontWeight: 500 }}>次要功能（可多选）</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
             {FUNCTION_OPTIONS.map((option) => (
-              <option
+              <Checkbox
                 key={option.value}
-                value={option.value}
+                checked={form.secondary_functions.includes(option.value)}
+                onChange={() => toggleSecondary(option.value)}
                 disabled={
-                  form.canon_budget === "none" &&
-                  NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(option.value)
+                  fieldsDisabled ||
+                  (!form.secondary_functions.includes(option.value) &&
+                    (option.value === form.primary_function ||
+                      (form.canon_budget === "none" &&
+                        NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(option.value))))
                 }
               >
                 {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field-stack">
-          <span>强度</span>
-          <select
-            value={form.intensity}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                intensity: event.target.value as ChapterTaskDraftRequest["intensity"],
-              }))
-            }
-            disabled={fieldsDisabled}
-          >
-            <option value="low">低</option>
-            <option value="medium">中</option>
-            <option value="high">高</option>
-          </select>
-        </label>
-        <label className="field-stack">
-          <span>新正典预算</span>
-          <select
-            value={form.canon_budget}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                canon_budget: event.target.value as ChapterTaskDraftRequest["canon_budget"],
-              }))
-            }
-            disabled={fieldsDisabled}
-          >
-            <option value="none">无</option>
-            <option value="minor">少量</option>
-            <option value="normal">正常</option>
-          </select>
-        </label>
-
-        <fieldset className="chapter-task-secondary field-stack-wide" disabled={fieldsDisabled}>
-          <legend>次要功能</legend>
-          <div>
-            {FUNCTION_OPTIONS.map((option) => (
-              <label className="checkbox-row" key={option.value}>
-                <input
-                  type="checkbox"
-                  checked={form.secondary_functions.includes(option.value)}
-                  onChange={() => toggleSecondary(option.value)}
-                  disabled={
-                    fieldsDisabled ||
-                    (!form.secondary_functions.includes(option.value) &&
-                      (option.value === form.primary_function ||
-                        (form.canon_budget === "none" &&
-                          NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(option.value))))
-                  }
-                />
-                <span>{option.label}</span>
-              </label>
+              </Checkbox>
             ))}
           </div>
-        </fieldset>
+        </div>
 
         {(
           [
@@ -413,14 +431,15 @@ export function ChapterTaskSheetPanel({
             ["forbidden_scene_drivers", "禁止场景驱动力"],
           ] as Array<[ListField, string]>
         ).map(([field, label]) => (
-          <label className="field-stack" key={field}>
-            <span>{label}（每行一项）</span>
-            <textarea
+          <div key={field} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ fontWeight: 500 }}>{label}（每行一项）</span>
+            <Input.TextArea
               value={listValue(form[field])}
               onChange={(event) => updateList(field, event.target.value)}
               disabled={fieldsDisabled}
+              autoSize={{ minRows: 2, maxRows: 4 }}
             />
-          </label>
+          </div>
         ))}
 
         {(
@@ -431,63 +450,37 @@ export function ChapterTaskSheetPanel({
             ["notes", "备注"],
           ] as Array<[TextField, string]>
         ).map(([field, label]) => (
-          <label className={`field-stack ${field === "notes" ? "field-stack-wide" : ""}`} key={field}>
-            <span>{label}</span>
-            <textarea
+          <div key={field} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ fontWeight: 500 }}>{label}</span>
+            <Input.TextArea
               value={form[field]}
               onChange={(event) => updateText(field, event.target.value)}
               disabled={fieldsDisabled}
+              autoSize={{ minRows: 2, maxRows: 4 }}
             />
-          </label>
+          </div>
         ))}
       </div>
 
-      <div className="chapter-task-actions">
-        <button
-          className="button secondary-button"
-          type="button"
+      <Divider style={{ margin: "16px 0" }} />
+      <Space>
+        <Button
+          type="default"
           onClick={() => void saveDraft()}
           disabled={fieldsDisabled || consistencyErrors.length > 0}
+          loading={saving}
         >
-          {saving
-            ? "保存中..."
-            : data?.latest_draft
-              ? "保存草稿"
-              : data?.approved
-                ? "创建新草稿修订"
-                : "保存草稿"}
-        </button>
-        <button
-          className="button primary-button"
-          type="button"
+          {data?.latest_draft ? "保存草稿" : data?.approved ? "创建新草稿修订" : "保存草稿"}
+        </Button>
+        <Button
+          type="primary"
           onClick={() => void approveDraft()}
           disabled={fieldsDisabled || consistencyErrors.length > 0 || !data?.latest_draft}
+          loading={approving}
         >
-          {approving ? "批准中..." : "批准草稿"}
-        </button>
-      </div>
-
-      {editableSource?.status === "draft" && (
-        <p className="state-text warning-text">当前是 draft revision {editableSource.revision}：草稿不会进入正文生成。</p>
-      )}
-      {consistencyErrors.length > 0 && (
-        <div className="chapter-task-conflicts" role="alert">
-          <strong>请先修正任务单冲突：</strong>
-          <ul>
-            {consistencyErrors.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {data?.approved && (
-        <p className="state-text success-text">
-          正文生成将使用 approved revision {data.approved.revision}（{data.approved.id}）。
-        </p>
-      )}
-      {historySummary && <p className="chapter-task-history">历史：{historySummary}</p>}
-      {message && <p className="state-text success-text">{message}</p>}
-      {error && <p className="state-text error-text">{error}</p>}
-    </section>
+          批准草稿
+        </Button>
+      </Space>
+    </Card>
   );
 }

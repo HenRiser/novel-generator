@@ -16,6 +16,12 @@ export type ProjectDetail = {
   config: Record<string, unknown>;
 };
 
+export type ProjectAssetsResponse = {
+  ok: boolean;
+  project_ref: string;
+  content: string;
+};
+
 export type CreateProjectRequest = {
   title: string;
   seedPrompt: string;

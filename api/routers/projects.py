@@ -12,12 +12,14 @@ from api.schemas import (
     CreateProjectRequest,
     CreateProjectResponse,
     DeleteProjectResponse,
+    ProjectAssetsResponse,
     ProjectDetailResponse,
     ProjectSummaryResponse,
     UpdateGenerationSettingsRequest,
     UpdateGenerationSettingsResponse,
 )
 from config import PROJECT_ROOT
+from file_manager import read_latest_characters, read_latest_outline
 from services.project_service import (
     create_workspace_project,
     delete_workspace_project,
@@ -195,6 +197,24 @@ def get_chapter(project_ref: str, chapter_number: ChapterNumber) -> ChapterConte
         filename=chapter.filename,
         content=chapter.content,
     )
+
+
+@router.get("/{project_ref}/assets/outline", response_model=ProjectAssetsResponse)
+def get_project_outline(project_ref: str) -> ProjectAssetsResponse:
+    """读取项目大纲（novel_outline.md 最新版本）。"""
+    content, _path = read_latest_outline(project_ref)
+    if content is None:
+        _error(404, "outline_not_found", "Outline not found. Generate outline first.")
+    return ProjectAssetsResponse(ok=True, project_ref=project_ref, content=content)
+
+
+@router.get("/{project_ref}/assets/characters", response_model=ProjectAssetsResponse)
+def get_project_characters(project_ref: str) -> ProjectAssetsResponse:
+    """读取项目人物卡（characters.md 最新版本）。"""
+    content, _path = read_latest_characters(project_ref)
+    if content is None:
+        _error(404, "characters_not_found", "Characters not found. Generate characters first.")
+    return ProjectAssetsResponse(ok=True, project_ref=project_ref, content=content)
 
 
 @router.get("/{project_ref}/exports/full.txt", response_class=PlainTextResponse)

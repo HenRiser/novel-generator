@@ -1,3 +1,5 @@
+import { Alert, Button, Card, Descriptions, Space, Spin, Tag, Typography } from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 import type { NoRevealReview } from "../types";
 
 type NoRevealReviewPanelProps = {
@@ -8,25 +10,19 @@ type NoRevealReviewPanelProps = {
   disabled?: boolean;
 };
 
-function verdictLabel(review: NoRevealReview | null): string {
-  if (!review) {
-    return "NONE";
-  }
-  return String(review.verdict || "unknown").toUpperCase();
-}
+const VERDICT_MAP: Record<string, { color: string; text: string }> = {
+  pass: { color: "green", text: "通过" },
+  warn: { color: "orange", text: "警告" },
+  fail: { color: "red", text: "未通过" },
+  not_applicable: { color: "default", text: "不适用" },
+};
 
-function verdictClass(review: NoRevealReview | null): string {
-  const verdict = String(review?.verdict || "none").toLowerCase();
-  if (verdict === "fail") {
-    return "review-verdict-fail";
+function verdictDisplay(review: NoRevealReview | null): { color: string; text: string } {
+  if (!review) {
+    return { color: "default", text: "无记录" };
   }
-  if (verdict === "warn") {
-    return "review-verdict-warn";
-  }
-  if (verdict === "pass") {
-    return "review-verdict-pass";
-  }
-  return "review-verdict-none";
+  const verdict = String(review.verdict || "unknown").toLowerCase();
+  return VERDICT_MAP[verdict] ?? { color: "default", text: String(review.verdict || "未知") };
 }
 
 export function NoRevealReviewPanel({
@@ -39,79 +35,88 @@ export function NoRevealReviewPanel({
   const violations = review?.violations ?? [];
   const categories = review?.categories ?? [];
   const isFail = String(review?.verdict || "").toLowerCase() === "fail";
+  const verdict = verdictDisplay(review);
 
   return (
-    <section className={`panel no-reveal-review-panel ${verdictClass(review)}`} aria-live="polite">
-      <div className="panel-header">
-        <div>
-          <span className="section-kicker">No-Reveal Review</span>
-          <h2>No-Reveal Compliance Gate</h2>
-          <p>Deterministic post-generation check for no-reveal and Scene Plan forbidden information.</p>
-        </div>
-        <span className="status-badge">{loading ? "Loading" : verdictLabel(review)}</span>
-      </div>
-
+    <Card
+      size="small"
+      title={
+        <Space>
+          <Typography.Text strong>合规审查（No-Reveal）</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            检查正文是否泄漏了未到揭示时机的关键信息
+          </Typography.Text>
+        </Space>
+      }
+      extra={
+        <Space>
+          <Tag color={verdict.color}>{verdict.text}</Tag>
+          {loading && <Spin size="small" />}
+        </Space>
+      }
+    >
       {isFail && (
-        <div className="review-next-action">
-          <p className="state-text error-text">
-            该章违反 No-Reveal / Scene Plan 禁止项，需要人工复核。
-          </p>
-          <p className="state-text">
-            建议：先人工复核 evidence，再决定是否保留该章、重写、或继续。
-          </p>
-        </div>
+        <Alert
+          type="error"
+          showIcon
+          message="该章违反 No-Reveal / 场景计划禁止项，需要人工复核。"
+          description="建议：先人工复核证据，再决定是否保留该章、重写或继续。"
+          style={{ marginBottom: 12 }}
+        />
       )}
-
       {!loading && !review && !error && (
-        <p className="empty-state">暂无 No-Reveal 审核记录。触发条件满足并生成章节后会显示结果。</p>
+        <Alert type="info" showIcon message="暂无合规审查记录。生成章节后会自动检查并显示结果。" />
       )}
+      {error && <Alert type="error" showIcon message={error} closable onClose={() => undefined} style={{ marginBottom: 12 }} />}
 
       {review && (
         <>
-          <dl className="review-summary-grid">
-            <div>
-              <dt>verdict</dt>
-              <dd>{review.verdict}</dd>
-            </div>
-            <div>
-              <dt>score</dt>
-              <dd>{review.score}/5</dd>
-            </div>
-            <div>
-              <dt>review_id</dt>
-              <dd>{review.id || "-"}</dd>
-            </div>
-            <div>
-              <dt>ai_run_id</dt>
-              <dd>{review.ai_run_id || "-"}</dd>
-            </div>
-          </dl>
-          {review.summary && <p className="state-text">{review.summary}</p>}
+          <Descriptions size="small" column={2} bordered style={{ marginBottom: 12 }}>
+            <Descriptions.Item label="结论">{review.verdict ?? "-"}</Descriptions.Item>
+            <Descriptions.Item label="评分">{review.score != null ? `${review.score}/5` : "-"}</Descriptions.Item>
+            <Descriptions.Item label="审查记录 ID">{review.id || "-"}</Descriptions.Item>
+            <Descriptions.Item label="AI 运行 ID">{review.ai_run_id || "-"}</Descriptions.Item>
+          </Descriptions>
+
+          {review.summary && (
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+              {review.summary}
+            </Typography.Paragraph>
+          )}
+
           {categories.length > 0 && (
-            <div className="tag-list" aria-label="No-Reveal categories">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
               {categories.map((category) => (
-                <span className="tag-pill" key={category}>{category}</span>
+                <Tag key={category} color="blue">{category}</Tag>
               ))}
             </div>
           )}
+
           {violations.length > 0 && (
-            <div className="review-evidence-list">
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {violations.slice(0, 5).map((violation, index) => (
-                <article className="review-evidence-item" key={`${violation.category}-${index}`}>
-                  <strong>{violation.category} · {violation.severity}</strong>
-                  <p>{violation.evidence}</p>
-                  <small>{violation.source_rule}</small>
-                </article>
+                <Card key={`${violation.category}-${index}`} size="small" type="inner">
+                  <Space direction="vertical" size={4} style={{ width: "100%" }}>
+                    <Typography.Text strong>
+                      {violation.category} · {violation.severity}
+                    </Typography.Text>
+                    <Typography.Text>{violation.evidence}</Typography.Text>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      {violation.source_rule}
+                    </Typography.Text>
+                  </Space>
+                </Card>
               ))}
             </div>
           )}
         </>
       )}
 
-      {error && <p className="state-text error-text">{error}</p>}
-      <button className="button subtle-button compact-button" type="button" onClick={onRefresh} disabled={disabled || loading}>
-        Refresh review
-      </button>
-    </section>
+      <div style={{ marginTop: 12 }}>
+        <Button size="small" icon={<ReloadOutlined />} onClick={onRefresh} disabled={disabled || loading}>
+          刷新审查
+        </Button>
+      </div>
+    </Card>
   );
 }

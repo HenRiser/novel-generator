@@ -75,6 +75,19 @@ export default function GraphCanvas({
     const graph = new Graph({
       container: containerRef.current,
       autoFit: "view",
+      // 力导向布局：初始加载时把节点分散开，避免全部重叠在画布原点
+      layout: {
+        type: "d3-force",
+        manyBody: {
+          strength: -240,
+        },
+        link: {
+          distance: 140,
+        },
+        collide: {
+          radius: 40,
+        },
+      },
       behaviors: ["drag-canvas", "zoom-canvas", "drag-element", "click-select"],
       node: {
         style: {

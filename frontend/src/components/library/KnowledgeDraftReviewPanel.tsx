@@ -1,4 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Input,
+  List,
+  Space,
+  Spin,
+  Tag,
+  Typography,
+} from "antd";
+import { ReloadOutlined } from "@ant-design/icons";
 
 import {
   acceptKnowledgeDraftChange,
@@ -473,104 +487,101 @@ export function KnowledgeDraftReviewPanel({
   }
 
   return (
-    <section className="knowledge-draft-panel" aria-label="Knowledge Draft Review">
-      <section className="panel knowledge-draft-summary">
-        <div className="panel-header">
-          <div>
-            <span className="section-kicker">Review & Merge</span>
-            <h2>草稿审核 / Knowledge Drafts</h2>
-          </div>
-          <button
-            className="button subtle-button compact-button"
-            type="button"
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <Card
+        size="small"
+        title={
+          <Space>
+            <Typography.Text strong>知识草稿审核</Typography.Text>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              接受会写入正式叙事图谱，拒绝仅更新审核状态
+            </Typography.Text>
+          </Space>
+        }
+        extra={
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
             onClick={() => setReloadToken((value) => value + 1)}
             disabled={apiStatus !== "online" || loadingDrafts || Boolean(busyChangeId)}
           >
             刷新
-          </button>
-        </div>
-        <p className="review-notice">
-          Accepting supported create_node / create_edge changes writes them into the formal Narrative Graph. Rejecting a change only updates the draft review state.
-        </p>
-        {selectionHint && <p className="draft-selection-hint">{selectionHint}</p>}
-        {message && <p className="state-text success-text">{message}</p>}
-        {error && <p className="state-text error-text">{error}</p>}
-      </section>
+          </Button>
+        }
+      >
+        {selectionHint && <Alert type="info" showIcon message={selectionHint} style={{ marginBottom: 8 }} />}
+        {message && <Alert type="success" showIcon message={message} style={{ marginBottom: 8 }} />}
+        {error && <Alert type="error" showIcon message={error} closable onClose={() => setError("")} style={{ marginBottom: 8 }} />}
+      </Card>
 
-      <section className="knowledge-draft-grid">
-        <section className="panel graph-list-panel">
-          <div className="panel-header">
-            <div>
-              <span className="section-kicker">Drafts</span>
-              <h2>Draft 列表</h2>
-            </div>
-          </div>
-          {loadingDrafts && <p className="state-text loading-text">正在加载 Knowledge Drafts...</p>}
-          {!loadingDrafts && sortedDrafts.length === 0 && <p className="empty-state">当前项目暂无 Knowledge Draft。</p>}
-          <div className="graph-list">
-            {sortedDrafts.map((item) => {
-              const pendingDraft = isPendingDraft(item);
-              const recommendedDraft = recommendedDraftId === item.id;
-              return (
-              <button
-                className={`graph-list-item draft-list-item ${selectedDraftId === item.id ? "selected" : ""} ${
-                  pendingDraft ? "draft-list-item-pending" : "draft-list-item-reviewed"
-                }`}
-                key={item.id}
-                type="button"
-                onClick={() => {
-                  setSelectionHint("");
-                  setSelectedDraftId(item.id);
-                }}
-              >
-                <span className="draft-list-heading">
-                  <strong>Chapter {item.chapter_number || "-"}</strong>
-                  <span className={`draft-status-pill ${pendingDraft ? "draft-status-pending" : "draft-status-reviewed"}`}>
-                    {pendingDraft ? "待审核" : statusLabel(item.status || "")}
-                  </span>
-                  {recommendedDraft && <span className="draft-status-pill draft-status-recommended">推荐审核</span>}
-                </span>
-                <span>{item.id}</span>
-                <small>{summarizeDraft(item)}</small>
-              </button>
-              );
-            })}
-          </div>
-        </section>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.42fr) minmax(0, 1fr)", gap: 12, alignItems: "start" }}>
+        <Card
+          size="small"
+          title="草稿列表"
+          styles={{ body: { maxHeight: "calc(100vh - 360px)", overflowY: "auto" } }}
+        >
+          {loadingDrafts ? (
+            <div style={{ textAlign: "center", padding: 24 }}><Spin /></div>
+          ) : sortedDrafts.length === 0 ? (
+            <Empty description="当前项目暂无知识草稿。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <List
+              size="small"
+              dataSource={sortedDrafts}
+              renderItem={(item) => {
+                const pendingDraft = isPendingDraft(item);
+                const recommendedDraft = recommendedDraftId === item.id;
+                const selected = selectedDraftId === item.id;
+                return (
+                  <List.Item
+                    style={{
+                      cursor: "pointer",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: selected ? "1px solid #d8a24a" : "1px solid transparent",
+                      background: selected ? "#faf3e3" : "transparent",
+                    }}
+                    onClick={() => {
+                      setSelectionHint("");
+                      setSelectedDraftId(item.id);
+                    }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <Typography.Text strong>第 {item.chapter_number || "-"} 章</Typography.Text>
+                        <Space size={4}>
+                          {pendingDraft ? <Tag color="orange">待审核</Tag> : <Tag color="default">{statusLabel(item.status || "")}</Tag>}
+                          {recommendedDraft && <Tag color="blue">推荐审核</Tag>}
+                        </Space>
+                      </div>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.id}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>{summarizeDraft(item)}</Typography.Text>
+                    </div>
+                  </List.Item>
+                );
+              }}
+            />
+          )}
+        </Card>
 
-        <section className="panel knowledge-draft-detail">
-          <div className="panel-header">
-            <div>
-              <span className="section-kicker">Candidate Changes</span>
-              <h2>{draft ? `Draft ${draft.chapter_number || "-"}` : "Draft 详情"}</h2>
-            </div>
-          </div>
-
-          {loadingDraft && <p className="state-text loading-text">正在加载 draft 详情...</p>}
-          {!loadingDraft && !draft && <p className="empty-state">请选择一个 Knowledge Draft。</p>}
+        <Card
+          size="small"
+          title={draft ? `草稿详情 · 第 ${draft.chapter_number || "-"} 章` : "草稿详情"}
+          styles={{ body: { maxHeight: "calc(100vh - 360px)", overflowY: "auto" } }}
+        >
+          {loadingDraft && <div style={{ textAlign: "center", padding: 24 }}><Spin /></div>}
+          {!loadingDraft && !draft && <Empty description="请选择一个知识草稿。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
 
           {draft && (
             <>
-              <dl className="draft-meta-grid">
-                <div>
-                  <dt>draft_id</dt>
-                  <dd>{draft.id}</dd>
-                </div>
-                <div>
-                  <dt>source_delta_id</dt>
-                  <dd>{draft.source_delta_id || "-"}</dd>
-                </div>
-                <div>
-                  <dt>status</dt>
-                  <dd>{draft.status || "pending_review"}</dd>
-                </div>
-                <div>
-                  <dt>created_at</dt>
-                  <dd>{draft.created_at || "-"}</dd>
-                </div>
-              </dl>
+              <Descriptions size="small" column={2} bordered style={{ marginBottom: 12 }}>
+                <Descriptions.Item label="草稿 ID">{draft.id}</Descriptions.Item>
+                <Descriptions.Item label="来源分析 ID">{draft.source_delta_id || "-"}</Descriptions.Item>
+                <Descriptions.Item label="状态">{draft.status || "待审核"}</Descriptions.Item>
+                <Descriptions.Item label="创建时间">{draft.created_at || "-"}</Descriptions.Item>
+              </Descriptions>
 
-              <div className="candidate-review-list">
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {(draft.candidate_changes ?? []).map((change) => {
                   const status = changeStatus(change);
                   const supported = SUPPORTED_ACCEPT_OPERATIONS.has(change.operation);
@@ -587,161 +598,118 @@ export function KnowledgeDraftReviewPanel({
                       : change.operation === "create_edge"
                         ? "新增叙事关系"
                         : "暂不能直接合并的候选";
+
+                  const statusTagColor =
+                    status === "accepted" ? "green" : status === "rejected" ? "red" : status === "pending" || status === "pending_review" ? "orange" : "default";
+
                   return (
-                    <article className="candidate-review-card" key={change.id}>
-                      <div className="candidate-review-header">
-                        <div>
-                          <span className={`review-status review-status-${status.replace(/[^a-z0-9_-]/gi, "-")}`}>
-                            {statusLabel(status)}
-                          </span>
-                          {!supported && <span className="review-status review-status-unsupported">暂不支持合并</span>}
-                        </div>
-                        <strong>{cardTitle}</strong>
+                    <Card key={change.id} size="small" type="inner">
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <Tag color={statusTagColor}>{statusLabel(status)}</Tag>
+                        {!supported && <Tag color="purple">暂不支持合并</Tag>}
+                        <Typography.Text strong>{cardTitle}</Typography.Text>
                       </div>
 
                       {change.operation === "create_node" && (
-                        <section className="semantic-change-body">
-                          <p>{payloadSummary(change)}</p>
-                          <dl className="draft-meta-grid compact">
-                            <div>
-                              <dt>类型</dt>
-                              <dd>{nodeType}</dd>
-                            </div>
-                            <div>
-                              <dt>重要度</dt>
-                              <dd>{numberValue(change.payload.importance)}</dd>
-                            </div>
-                            <div>
-                              <dt>状态</dt>
-                              <dd>{payloadStatus(change)}</dd>
-                            </div>
-                            <div>
-                              <dt>置信度</dt>
-                              <dd>{confidenceLabel(change.confidence)}</dd>
-                            </div>
-                          </dl>
-                        </section>
+                        <div style={{ marginBottom: 8 }}>
+                          <Typography.Paragraph style={{ marginBottom: 8 }}>{payloadSummary(change)}</Typography.Paragraph>
+                          <Descriptions size="small" column={2}>
+                            <Descriptions.Item label="类型">{nodeType}</Descriptions.Item>
+                            <Descriptions.Item label="重要度">{numberValue(change.payload.importance)}</Descriptions.Item>
+                            <Descriptions.Item label="状态">{payloadStatus(change)}</Descriptions.Item>
+                            <Descriptions.Item label="置信度">{confidenceLabel(change.confidence)}</Descriptions.Item>
+                          </Descriptions>
+                        </div>
                       )}
 
                       {change.operation === "create_edge" && (
-                        <section className="semantic-change-body">
-                          <p className="semantic-relation-line">
-                            <strong>{sourceLabel}</strong>
-                            <span>--{textValue(change.payload.label) || edgeType}--&gt;</span>
-                            <strong>{targetLabel}</strong>
-                          </p>
-                          <p>{payloadSummary(change)}</p>
-                          <dl className="draft-meta-grid compact">
-                            <div>
-                              <dt>关系</dt>
-                              <dd>{edgeType}</dd>
-                            </div>
-                            <div>
-                              <dt>重要度</dt>
-                              <dd>{numberValue(change.payload.importance)}</dd>
-                            </div>
-                            <div>
-                              <dt>状态</dt>
-                              <dd>{payloadStatus(change)}</dd>
-                            </div>
-                            <div>
-                              <dt>置信度</dt>
-                              <dd>{confidenceLabel(change.confidence)}</dd>
-                            </div>
-                          </dl>
-                        </section>
+                        <div style={{ marginBottom: 8 }}>
+                          <Typography.Paragraph style={{ marginBottom: 8 }}>
+                            <Typography.Text strong>{sourceLabel}</Typography.Text>
+                            <Typography.Text type="secondary"> ──{textValue(change.payload.label) || edgeType}──&gt; </Typography.Text>
+                            <Typography.Text strong>{targetLabel}</Typography.Text>
+                          </Typography.Paragraph>
+                          <Typography.Paragraph style={{ marginBottom: 8 }}>{payloadSummary(change)}</Typography.Paragraph>
+                          <Descriptions size="small" column={2}>
+                            <Descriptions.Item label="关系">{edgeType}</Descriptions.Item>
+                            <Descriptions.Item label="重要度">{numberValue(change.payload.importance)}</Descriptions.Item>
+                            <Descriptions.Item label="状态">{payloadStatus(change)}</Descriptions.Item>
+                            <Descriptions.Item label="置信度">{confidenceLabel(change.confidence)}</Descriptions.Item>
+                          </Descriptions>
+                        </div>
                       )}
 
                       {!supported && (
-                        <section className="semantic-change-body">
-                          <p>系统当前还不支持自动合并这种变更类型。你可以拒绝它，或等待后续版本支持。</p>
-                          <dl className="draft-meta-grid compact">
-                            <div>
-                              <dt>候选类型</dt>
-                              <dd>{change.operation}</dd>
-                            </div>
-                            <div>
-                              <dt>置信度</dt>
-                              <dd>{confidenceLabel(change.confidence)}</dd>
-                            </div>
-                          </dl>
-                        </section>
+                        <div style={{ marginBottom: 8 }}>
+                          <Typography.Paragraph>系统当前还不支持自动合并这种变更类型。你可以拒绝它，或等待后续版本支持。</Typography.Paragraph>
+                          <Descriptions size="small" column={2}>
+                            <Descriptions.Item label="候选类型">{change.operation}</Descriptions.Item>
+                            <Descriptions.Item label="置信度">{confidenceLabel(change.confidence)}</Descriptions.Item>
+                          </Descriptions>
+                        </div>
                       )}
 
                       {change.evidence && (
-                        <p className="candidate-review-text">
-                          <strong>evidence</strong>
-                          <span>{change.evidence}</span>
-                        </p>
+                        <div style={{ marginBottom: 8 }}>
+                          <Typography.Text strong>证据：</Typography.Text>
+                          <Typography.Text>{change.evidence}</Typography.Text>
+                        </div>
                       )}
                       {change.rationale && (
-                        <p className="candidate-review-text">
-                          <strong>rationale</strong>
-                          <span>{change.rationale}</span>
-                        </p>
+                        <div style={{ marginBottom: 8 }}>
+                          <Typography.Text strong>理由：</Typography.Text>
+                          <Typography.Text>{change.rationale}</Typography.Text>
+                        </div>
                       )}
-                      {resultText && <p className="candidate-review-result">{resultText}</p>}
+                      {resultText && <Alert type="info" showIcon message={resultText} style={{ marginBottom: 8 }} />}
 
-                      <details className="debug-details">
-                        <summary>技术细节 / Debug</summary>
-                        <dl className="draft-meta-grid compact">
-                          <div>
-                            <dt>operation</dt>
-                            <dd>{change.operation}</dd>
-                          </div>
-                          <div>
-                            <dt>target</dt>
-                            <dd>{change.target || "-"}</dd>
-                          </div>
-                          <div>
-                            <dt>source</dt>
-                            <dd>{change.source || "-"}</dd>
-                          </div>
-                          <div>
-                            <dt>change_id</dt>
-                            <dd>{change.id}</dd>
-                          </div>
-                        </dl>
-                        <pre className="json-snippet">{formatJson(change.payload)}</pre>
+                      <details style={{ marginBottom: 8 }}>
+                        <summary style={{ cursor: "pointer", color: "#8a7a63" }}>技术细节 / 调试信息</summary>
+                        <Descriptions size="small" column={2} style={{ marginTop: 8 }}>
+                          <Descriptions.Item label="操作">{change.operation}</Descriptions.Item>
+                          <Descriptions.Item label="目标">{change.target || "-"}</Descriptions.Item>
+                          <Descriptions.Item label="来源">{change.source || "-"}</Descriptions.Item>
+                          <Descriptions.Item label="变更 ID">{change.id}</Descriptions.Item>
+                        </Descriptions>
+                        <pre style={{ background: "#faf6ee", padding: 8, borderRadius: 6, fontSize: 12, overflow: "auto" }}>
+                          {formatJson(change.payload)}
+                        </pre>
                       </details>
 
-                      <label className="form-field">
-                        <span>review_note</span>
-                        <textarea
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <Input.TextArea
+                          placeholder="审核备注（可选）"
                           value={reviewNotes[change.id] || ""}
-                          onChange={(event) =>
-                            setReviewNotes((current) => ({ ...current, [change.id]: event.target.value }))
-                          }
+                          onChange={(event) => setReviewNotes((current) => ({ ...current, [change.id]: event.target.value }))}
                           disabled={!pendingReview || Boolean(busyChangeId)}
+                          autoSize={{ minRows: 2, maxRows: 4 }}
                         />
-                      </label>
-
-                      <div className="form-actions">
-                        <button
-                          className="button primary-button"
-                          type="button"
-                          onClick={() => void handleAccept(change)}
-                          disabled={!canAccept(change) || Boolean(busyChangeId)}
-                        >
-                          {busy ? "处理中..." : "接受"}
-                        </button>
-                        <button
-                          className="button danger-button"
-                          type="button"
-                          onClick={() => void handleReject(change)}
-                          disabled={!pendingReview || Boolean(busyChangeId)}
-                        >
-                          拒绝
-                        </button>
+                        <Space>
+                          <Button
+                            type="primary"
+                            onClick={() => void handleAccept(change)}
+                            disabled={!canAccept(change) || Boolean(busyChangeId)}
+                            loading={busy}
+                          >
+                            接受
+                          </Button>
+                          <Button
+                            danger
+                            onClick={() => void handleReject(change)}
+                            disabled={!pendingReview || Boolean(busyChangeId)}
+                          >
+                            拒绝
+                          </Button>
+                        </Space>
                       </div>
-                    </article>
+                    </Card>
                   );
                 })}
               </div>
             </>
           )}
-        </section>
-      </section>
-    </section>
+        </Card>
+      </div>
+    </div>
   );
 }

@@ -41,6 +41,7 @@ import type {
   NarrativeGraphTagResponse,
   NarrativeGraphTagUpdateRequest,
   OutlineCharactersGenerationResponse,
+  ProjectAssetsResponse,
   ProjectDetail,
   ProjectSummary,
   RejectKnowledgeDraftChangeRequest,
@@ -302,6 +303,14 @@ export function createProject(request: CreateProjectRequest): Promise<CreateProj
 
 export function getProject(projectRef: string): Promise<ProjectDetail> {
   return apiFetch<ProjectDetail>(`/api/projects/${projectPath(projectRef)}`);
+}
+
+export function getProjectOutline(projectRef: string): Promise<ProjectAssetsResponse> {
+  return apiFetch<ProjectAssetsResponse>(`/api/projects/${projectPath(projectRef)}/assets/outline`);
+}
+
+export function getProjectCharacters(projectRef: string): Promise<ProjectAssetsResponse> {
+  return apiFetch<ProjectAssetsResponse>(`/api/projects/${projectPath(projectRef)}/assets/characters`);
 }
 
 export function updateGenerationSettings(

@@ -284,6 +284,12 @@ class ChapterContentResponse(BaseModel):
     content: str
 
 
+class ProjectAssetsResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    content: str = ""
+
+
 class ChapterTaskDraftRequest(BaseModel):
     id: Any = None
     chapter_number: Any = None
