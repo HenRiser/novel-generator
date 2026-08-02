@@ -1,0 +1,101 @@
+/* Braipen 全局基础样式（少量）—— 大部分样式交给 AntD 组件 + theme.ts 主题 */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ant-color-bg-layout, #f4efe6);
+  color: var(--ant-color-text, #26221c);
+  font-family:
+    "Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* 章节正文阅读区：保留舒适行宽与纸张质感 */
+.chapter-prose {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.9;
+  font-size: 15px;
+  color: #2b251d;
+  background: #fffdf8;
+  border: 1px solid #e6dccb;
+  border-radius: 10px;
+  padding: 24px 28px;
+  max-height: calc(100vh - 220px);
+  overflow-y: auto;
+}
+
+.chapter-prose-streaming {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.9;
+  font-size: 15px;
+  color: #2b251d;
+  background: #fffdf8;
+  border: 1px solid #e6dccb;
+  border-radius: 10px;
+  padding: 24px 28px;
+}
+
+/* 流式光标 */
+.stream-cursor::after {
+  content: "▍";
+  color: #a6534e;
+  animation: stream-blink 1s step-end infinite;
+}
+
+@keyframes stream-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* 页面通用排版 */
+.page-container {
+  padding: 16px 24px 32px;
+  max-width: 1680px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.page-subtitle {
+  color: #746b5f;
+  margin: 0 0 20px;
+  font-size: 13px;
+}
+
+/* 编辑器外观统一 */
+.ant-input,
+.ant-input-number,
+.ant-select-selector,
+.ant-textarea {
+  background: #fffdf8 !important;
+}
+
+/* 滚动条微调 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d3c7b4;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

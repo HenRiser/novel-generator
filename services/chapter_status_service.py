@@ -11,6 +11,7 @@ from project_context import WORKSPACE_STORAGE_KIND
 
 from .ai_run_service import list_ai_runs
 from .event_log_service import list_events
+from .common import resolve_workspace_context
 
 
 MEMORY_DIR_NAME = "memory"
@@ -41,18 +42,12 @@ def _clean_text(value: Any) -> str:
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except FileNotFoundError:
-        return None, "Project not found."
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "Chapter Status is only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='Chapter Status is only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
 def _error_result(project_ref: str, message: str, code: str, status_code: int = 400) -> ChapterStatusResult:

@@ -13,6 +13,7 @@ from project_context import WORKSPACE_STORAGE_KIND
 from .event_log_service import append_event_best_effort
 from .schemas import NarrativeGraphResult
 from .safety_snapshot_service import SafetySnapshotResult, create_safety_snapshot
+from .common import clean_text, read_json, resolve_workspace_context, timestamp, write_json_atomic
 
 
 GRAPH_VERSION = 1
@@ -46,8 +47,6 @@ DEFAULT_NODE_IMPORTANCE = {
 GRAPH_CHANGED_TARGETS = ["memory/narrative_graph.json"]
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def _memory_dir(ctx: Any) -> Path:
@@ -63,39 +62,20 @@ def _views_path(ctx: Any) -> Path:
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = str(project_ref or "").strip()
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except (FileNotFoundError, ValueError) as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "Narrative graph is only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='Narrative graph is only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name} is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object.")
-    return data
 
 
-def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _empty_graph(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
-    now = _timestamp()
+    now = timestamp()
     return {
         "version": GRAPH_VERSION,
         "metadata": {
@@ -112,7 +92,7 @@ def _empty_graph(project_ref: str, created_at: str | None = None) -> dict[str, A
 
 
 def _default_views(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
-    now = _timestamp()
+    now = timestamp()
     return {
         "version": GRAPH_VERSION,
         "metadata": {
@@ -144,7 +124,7 @@ def _normalize_graph_document(data: dict[str, Any] | None, project_ref: str) -> 
     metadata = document.get("metadata")
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata["project_ref"] = project_ref
-    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("created_at", timestamp())
     metadata.setdefault("updated_at", metadata["created_at"])
     document["metadata"] = metadata
 
@@ -170,7 +150,7 @@ def _normalize_views_document(data: dict[str, Any] | None, project_ref: str) -> 
     metadata = document.get("metadata")
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata["project_ref"] = project_ref
-    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("created_at", timestamp())
     metadata.setdefault("updated_at", metadata["created_at"])
     document["metadata"] = metadata
     views = document.get("views")
@@ -182,29 +162,27 @@ def _load_documents(project_ref: str) -> tuple[dict[str, Any], dict[str, Any]]:
     ctx, message = _workspace_context(project_ref)
     if ctx is None:
         raise ValueError(message)
-    graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-    views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+    graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+    views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     return graph, views
 
 
 def _save_documents(ctx: Any, graph: dict[str, Any], views: dict[str, Any] | None = None) -> None:
-    now = _timestamp()
+    now = timestamp()
     graph_metadata = dict(graph.get("metadata") if isinstance(graph.get("metadata"), dict) else {})
     graph_metadata.setdefault("created_at", now)
     graph_metadata["updated_at"] = now
     graph["metadata"] = graph_metadata
-    _write_json_atomic(_graph_path(ctx), graph)
+    write_json_atomic(_graph_path(ctx), graph)
 
     if views is not None:
         views_metadata = dict(views.get("metadata") if isinstance(views.get("metadata"), dict) else {})
         views_metadata.setdefault("created_at", now)
         views_metadata["updated_at"] = now
         views["metadata"] = views_metadata
-        _write_json_atomic(_views_path(ctx), views)
+        write_json_atomic(_views_path(ctx), views)
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _create_graph_snapshot(
@@ -249,7 +227,7 @@ def _string_list(value: Any) -> list[str] | None:
     result: list[str] = []
     seen: set[str] = set()
     for item in raw_items:
-        text = _clean_text(item)
+        text = clean_text(item)
         if text and text not in seen:
             seen.add(text)
             result.append(text)
@@ -271,7 +249,7 @@ def _importance(value: Any, default: int) -> int | None:
 
 
 def _layer(value: Any) -> str | None:
-    layer = _clean_text(value) or "detail"
+    layer = clean_text(value) or "detail"
     return layer if layer in LAYERS else None
 
 
@@ -358,19 +336,19 @@ def _validate_tag_update(
 
     tag = dict(current)
     if "category" in tag_payload:
-        category = _clean_text(tag_payload.get("category")) or "custom"
+        category = clean_text(tag_payload.get("category")) or "custom"
         if category not in TAG_CATEGORIES:
             return None, "Tag category is invalid."
         tag["category"] = category
     if "description" in tag_payload:
-        tag["description"] = _clean_text(tag_payload.get("description"))
+        tag["description"] = clean_text(tag_payload.get("description"))
     if "aliases" in tag_payload:
         aliases = _string_list(tag_payload.get("aliases"))
         if aliases is None:
             return None, "Tag aliases must be a string array."
         tag["aliases"] = aliases
     if "status" in tag_payload:
-        tag["status"] = _clean_text(tag_payload.get("status")) or "active"
+        tag["status"] = clean_text(tag_payload.get("status")) or "active"
     return tag, ""
 
 
@@ -380,11 +358,11 @@ def _validate_node_update(
     current: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     current_node = dict(current or {})
-    node_type = _clean_text(node_payload.get("type", current_node.get("type"))) or "character"
+    node_type = clean_text(node_payload.get("type", current_node.get("type"))) or "character"
     if node_type not in NODE_TYPES:
         return None, "Node type is invalid."
 
-    label = _clean_text(node_payload.get("label", current_node.get("label")))
+    label = clean_text(node_payload.get("label", current_node.get("label")))
     if not label:
         return None, "Node label cannot be empty."
 
@@ -427,7 +405,7 @@ def _validate_node_update(
         return None, "properties must be a JSON object."
 
     parent_id_value = node_payload.get("parent_id", current_node.get("parent_id"))
-    parent_id = _clean_text(parent_id_value) or None
+    parent_id = clean_text(parent_id_value) or None
     if parent_id is not None and parent_id not in _node_ids(graph):
         return None, "parent_id node does not exist."
     if current_node.get("id") and parent_id == current_node.get("id"):
@@ -439,14 +417,14 @@ def _validate_node_update(
             "type": node_type,
             "label": label,
             "aliases": aliases,
-            "summary": _clean_text(node_payload.get("summary", current_node.get("summary"))),
+            "summary": clean_text(node_payload.get("summary", current_node.get("summary"))),
             "importance": importance,
             "layer": layer,
             "parent_id": parent_id,
-            "status": _clean_text(node_payload.get("status", current_node.get("status"))) or "active",
+            "status": clean_text(node_payload.get("status", current_node.get("status"))) or "active",
             "tags": tags,
             "properties": properties,
-            "notes": _clean_text(node_payload.get("notes", current_node.get("notes"))),
+            "notes": clean_text(node_payload.get("notes", current_node.get("notes"))),
         }
     )
     return node, ""
@@ -459,8 +437,8 @@ def _validate_edge_update(
 ) -> tuple[dict[str, Any] | None, str]:
     current_edge = dict(current or {})
     node_ids = _node_ids(graph)
-    source = _clean_text(edge_payload.get("source", current_edge.get("source")))
-    target = _clean_text(edge_payload.get("target", current_edge.get("target")))
+    source = clean_text(edge_payload.get("source", current_edge.get("source")))
+    target = clean_text(edge_payload.get("target", current_edge.get("target")))
     if source not in node_ids:
         return None, "Source node does not exist."
     if target not in node_ids:
@@ -468,11 +446,11 @@ def _validate_edge_update(
     if source == target:
         return None, "Edge source and target cannot be the same node."
 
-    edge_type = _clean_text(edge_payload.get("type", current_edge.get("type")))
+    edge_type = clean_text(edge_payload.get("type", current_edge.get("type")))
     if not edge_type or len(edge_type) > 80:
         return None, "Edge type must be 1 to 80 characters."
 
-    label = _clean_text(edge_payload.get("label", current_edge.get("label")))
+    label = clean_text(edge_payload.get("label", current_edge.get("label")))
     if not label:
         return None, "Edge label cannot be empty."
 
@@ -502,12 +480,12 @@ def _validate_edge_update(
             "target": target,
             "type": edge_type,
             "label": label,
-            "summary": _clean_text(edge_payload.get("summary", current_edge.get("summary"))),
+            "summary": clean_text(edge_payload.get("summary", current_edge.get("summary"))),
             "importance": importance,
             "layer": layer,
-            "status": _clean_text(edge_payload.get("status", current_edge.get("status"))) or "active",
+            "status": clean_text(edge_payload.get("status", current_edge.get("status"))) or "active",
             "properties": properties,
-            "notes": _clean_text(edge_payload.get("notes", current_edge.get("notes"))),
+            "notes": clean_text(edge_payload.get("notes", current_edge.get("notes"))),
         }
     )
     return edge, ""
@@ -530,7 +508,7 @@ def save_narrative_graph(project_ref: str, graph: dict[str, Any]) -> NarrativeGr
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
         document = _normalize_graph_document(graph, project_ref)
         _save_documents(ctx, document, views)
     except (OSError, ValueError) as exc:
@@ -543,7 +521,7 @@ def save_graph_views(project_ref: str, views: dict[str, Any]) -> NarrativeGraphR
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
         document = _normalize_views_document(views, project_ref)
         _save_documents(ctx, graph, document)
     except (OSError, ValueError) as exc:
@@ -572,7 +550,7 @@ def save_graph_documents_for_review(
         views_document = (
             _normalize_views_document(views, project_ref)
             if views is not None
-            else _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+            else _normalize_views_document(read_json(_views_path(ctx)), project_ref)
         )
         _save_documents(ctx, document, views_document)
     except (OSError, ValueError) as exc:
@@ -594,7 +572,7 @@ def build_graph_node_for_create(
     node_id: str,
     source: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
-    clean_id = _clean_text(node_id)
+    clean_id = clean_text(node_id)
     if not clean_id:
         return None, "Node id cannot be empty."
     if clean_id in _node_ids(graph):
@@ -622,7 +600,7 @@ def build_graph_edge_for_create(
     edge_id: str,
     source_info: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
-    clean_id = _clean_text(edge_id)
+    clean_id = clean_text(edge_id)
     if not clean_id:
         return None, "Edge id cannot be empty."
     if clean_id in _edge_ids(graph):
@@ -649,19 +627,19 @@ def add_graph_tag(project_ref: str, tag_payload: dict[str, Any]) -> NarrativeGra
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
-    name = _clean_text(tag_payload.get("name"))
+    name = clean_text(tag_payload.get("name"))
     if not name:
         return NarrativeGraphResult(False, project_ref=project_ref, message="Tag name cannot be empty.")
     registry = graph["tag_registry"]
     if name in registry:
         return NarrativeGraphResult(False, project_ref=project_ref, message="Tag already exists in tag_registry.")
 
-    category = _clean_text(tag_payload.get("category")) or "custom"
+    category = clean_text(tag_payload.get("category")) or "custom"
     if category not in TAG_CATEGORIES:
         return NarrativeGraphResult(False, project_ref=project_ref, message="Tag category is invalid.")
 
@@ -671,7 +649,7 @@ def add_graph_tag(project_ref: str, tag_payload: dict[str, Any]) -> NarrativeGra
 
     tag = {
         "category": category,
-        "description": _clean_text(tag_payload.get("description")),
+        "description": clean_text(tag_payload.get("description")),
         "aliases": aliases,
         "status": "active",
     }
@@ -696,13 +674,13 @@ def add_graph_node(project_ref: str, node_payload: dict[str, Any]) -> NarrativeG
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
     existing_ids = _node_ids(graph)
-    node_type = _clean_text(node_payload.get("type")) or "character"
+    node_type = clean_text(node_payload.get("type")) or "character"
     base_node = {
         "id": _generate_id(f"node_{node_type}", existing_ids),
         "source": {
@@ -724,7 +702,7 @@ def add_graph_node(project_ref: str, node_payload: dict[str, Any]) -> NarrativeG
     _record_graph_event(
         project_ref,
         "narrative_graph_node_created",
-        f"Created graph node: {_clean_text(node.get('label')) or node.get('id')}",
+        f"Created graph node: {clean_text(node.get('label')) or node.get('id')}",
         {"node_id": node.get("id"), "label": node.get("label"), "type": node.get("type")},
     )
     return NarrativeGraphResult(True, project_ref=project_ref, graph=graph, views=views, node=node, message="Node saved.")
@@ -735,12 +713,12 @@ def add_graph_edge(project_ref: str, edge_payload: dict[str, Any]) -> NarrativeG
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
-    edge_type = _clean_text(edge_payload.get("type"))
+    edge_type = clean_text(edge_payload.get("type"))
     base_edge = {
         "id": _generate_id(f"edge_{edge_type}", _edge_ids(graph)),
         "source_info": {
@@ -762,7 +740,7 @@ def add_graph_edge(project_ref: str, edge_payload: dict[str, Any]) -> NarrativeG
     _record_graph_event(
         project_ref,
         "narrative_graph_edge_created",
-        f"Created graph edge: {_clean_text(edge.get('label')) or edge.get('id')}",
+        f"Created graph edge: {clean_text(edge.get('label')) or edge.get('id')}",
         {
             "edge_id": edge.get("id"),
             "source": edge.get("source"),
@@ -778,12 +756,12 @@ def update_graph_tag(project_ref: str, tag_name: str, tag_payload: dict[str, Any
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
-    name = _clean_text(tag_name)
+    name = clean_text(tag_name)
     tag, error = _validate_tag_update(graph, name, tag_payload)
     if tag is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=error)
@@ -812,12 +790,12 @@ def delete_graph_tag(project_ref: str, tag_name: str) -> NarrativeGraphResult:
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
-    name = _clean_text(tag_name)
+    name = clean_text(tag_name)
     registry = graph["tag_registry"]
     if name not in registry:
         return NarrativeGraphResult(False, project_ref=project_ref, message="Tag not found.")
@@ -854,8 +832,8 @@ def update_graph_node(project_ref: str, node_id: str, node_payload: dict[str, An
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
@@ -883,7 +861,7 @@ def update_graph_node(project_ref: str, node_id: str, node_payload: dict[str, An
     _record_graph_event(
         project_ref,
         "narrative_graph_node_updated",
-        f"Updated graph node: {_clean_text(node.get('label')) or node_id}",
+        f"Updated graph node: {clean_text(node.get('label')) or node_id}",
         {"node_id": node_id, "label": node.get("label"), "type": node.get("type")},
         snapshot.snapshot_id,
     )
@@ -895,8 +873,8 @@ def delete_graph_node(project_ref: str, node_id: str, delete_edges: bool = False
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
@@ -916,7 +894,7 @@ def delete_graph_node(project_ref: str, node_id: str, delete_edges: bool = False
             message="Node has connected edges. Confirm delete_edges=true to delete the node and its connected edges.",
         )
 
-    connected_edge_ids = [_clean_text(edge.get("id")) for edge in connected_edges if _clean_text(edge.get("id"))]
+    connected_edge_ids = [clean_text(edge.get("id")) for edge in connected_edges if clean_text(edge.get("id"))]
     snapshot = _create_graph_snapshot(
         project_ref,
         "before_narrative_graph_node_delete",
@@ -941,7 +919,7 @@ def delete_graph_node(project_ref: str, node_id: str, delete_edges: bool = False
     _record_graph_event(
         project_ref,
         "narrative_graph_node_deleted",
-        f"Deleted graph node: {_clean_text(deleted.get('label')) or node_id}",
+        f"Deleted graph node: {clean_text(deleted.get('label')) or node_id}",
         {"node_id": node_id, "label": deleted.get("label"), "connected_edge_ids": connected_edge_ids},
         snapshot.snapshot_id,
     )
@@ -953,8 +931,8 @@ def update_graph_edge(project_ref: str, edge_id: str, edge_payload: dict[str, An
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
@@ -982,7 +960,7 @@ def update_graph_edge(project_ref: str, edge_id: str, edge_payload: dict[str, An
     _record_graph_event(
         project_ref,
         "narrative_graph_edge_updated",
-        f"Updated graph edge: {_clean_text(edge.get('label')) or edge_id}",
+        f"Updated graph edge: {clean_text(edge.get('label')) or edge_id}",
         {"edge_id": edge_id, "source": edge.get("source"), "target": edge.get("target"), "type": edge.get("type")},
         snapshot.snapshot_id,
     )
@@ -994,8 +972,8 @@ def delete_graph_edge(project_ref: str, edge_id: str) -> NarrativeGraphResult:
     if ctx is None:
         return NarrativeGraphResult(False, project_ref=project_ref, message=message)
     try:
-        graph = _normalize_graph_document(_read_json(_graph_path(ctx)), project_ref)
-        views = _normalize_views_document(_read_json(_views_path(ctx)), project_ref)
+        graph = _normalize_graph_document(read_json(_graph_path(ctx)), project_ref)
+        views = _normalize_views_document(read_json(_views_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return NarrativeGraphResult(False, project_ref=project_ref, message=str(exc))
 
@@ -1015,7 +993,7 @@ def delete_graph_edge(project_ref: str, edge_id: str) -> NarrativeGraphResult:
     _record_graph_event(
         project_ref,
         "narrative_graph_edge_deleted",
-        f"Deleted graph edge: {_clean_text(deleted.get('label')) or edge_id}",
+        f"Deleted graph edge: {clean_text(deleted.get('label')) or edge_id}",
         {"edge_id": edge_id, "source": deleted.get("source"), "target": deleted.get("target"), "type": deleted.get("type")},
         snapshot.snapshot_id,
     )

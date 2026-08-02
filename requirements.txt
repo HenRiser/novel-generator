@@ -1,5 +1,6 @@
-streamlit
-openai
-python-dotenv
-fastapi
-uvicorn
+# Braipen 运行时依赖（版本已锁定，2026-08-02 校验于 Python 3.10）
+fastapi==0.136.3
+openai==2.36.0
+pydantic==2.13.4
+python-dotenv==1.2.2
+uvicorn==0.46.0

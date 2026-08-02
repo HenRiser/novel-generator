@@ -212,13 +212,20 @@ def generate_text(
     return content
 
 
-def stream_generate_text(
+def stream_generate_text_events(
     messages: list[dict[str, str]],
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4000,
-) -> Iterator[str]:
-    """Stream DeepSeek text deltas through the OpenAI-compatible Chat Completions API."""
+) -> Iterator[dict[str, str]]:
+    """流式生成，产出结构化事件（不直接透出底层 chunk）。
+
+    yield 事件：
+      {"kind": "reasoning", "text": str}  —— 模型推理过程（仅展示用，不落盘）
+      {"kind": "content",   "text": str}  —— 最终正文（唯一应写入文件的文本）
+
+    reasoning 事件始终产出（不论正文是否开始），由调用方决定是否透传给用户。
+    """
     if not messages:
         raise DeepSeekClientError("Prompt is empty; cannot generate content.")
 
@@ -242,12 +249,13 @@ def stream_generate_text(
                 if not seen_content:
                     seen_content = True
                     reasoning_fallback_chunks.clear()
-                yield content
+                yield {"kind": "content", "text": content}
                 continue
 
             reasoning_content = _extract_delta_field_text(delta, "reasoning_content")
-            if reasoning_content and not seen_content:
+            if reasoning_content:
                 reasoning_fallback_chunks.append(reasoning_content)
+                yield {"kind": "reasoning", "text": reasoning_content}
 
         if not seen_content and reasoning_fallback_chunks:
             raise DeepSeekClientError(
@@ -279,3 +287,23 @@ def stream_generate_text(
     except Exception as exc:
         safe_message = _sanitize_error_message(exc, api_key)
         raise DeepSeekClientError(f"Generation failed: {safe_message}") from exc
+
+
+def stream_generate_text(
+    messages: list[dict[str, str]],
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 4000,
+) -> Iterator[str]:
+    """流式生成正文文本（不含推理过程）。
+
+    仅产出 content；需要推理事件的调用方请使用 stream_generate_text_events。
+    """
+    for event in stream_generate_text_events(
+        messages=messages,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    ):
+        if event["kind"] == "content":
+            yield event["text"]

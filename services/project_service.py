@@ -235,6 +235,43 @@ def list_project_summaries(
     ]
 
 
+def delete_workspace_project(
+    project_ref: str,
+    books_root: Path | None = None,
+) -> tuple[bool, str]:
+    """删除 workspace 项目（含全部章节与设定文件）。
+
+    安全检查：
+    - 仅允许 workspace 存储类型（legacy 项目不支持删除，避免误删旧版数据）；
+    - 目标目录必须是 books_root 的直接子目录，防止路径越界。
+    返回 (ok, message)。
+    """
+    try:
+        ctx = resolve_project_context(project_ref, books_root=books_root)
+    except (FileNotFoundError, ValueError) as exc:
+        return False, str(exc) or "Project not found."
+
+    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
+        return False, "Only workspace book projects can be deleted."
+
+    project_dir = ctx.project_dir
+    root = Path(books_root) if books_root is not None else project_dir.parent
+    try:
+        project_dir.relative_to(root)
+    except ValueError:
+        return False, "Project directory is outside the books root."
+
+    if not project_dir.exists():
+        return False, "Project directory does not exist."
+
+    try:
+        shutil.rmtree(project_dir, ignore_errors=False)
+    except OSError as exc:
+        # 某些受保护/占用的目录可能删除失败，返回明确错误而非 500
+        return False, f"Project directory could not be removed: {exc}"
+    return True, "Project deleted."
+
+
 def create_workspace_project(
     title: Any,
     seed_prompt: Any,

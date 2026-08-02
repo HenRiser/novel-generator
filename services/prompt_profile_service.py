@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from typing import Any
+from .common import clean_text
 
 
 PROMPT_PREVIEW_LIMIT = 800
@@ -27,16 +28,14 @@ SENSITIVE_LINE_PATTERN = re.compile(
 )
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def get_prompt_profile(run_type: str) -> dict[str, Any]:
-    profile = PROMPT_PROFILES.get(_clean_text(run_type))
+    profile = PROMPT_PROFILES.get(clean_text(run_type))
     if profile is None:
         return {
-            "profile_id": f"{_clean_text(run_type) or 'unknown'}_v1",
-            "template_name": _clean_text(run_type) or "unknown",
+            "profile_id": f"{clean_text(run_type) or 'unknown'}_v1",
+            "template_name": clean_text(run_type) or "unknown",
             "template_version": "v1",
             "description": "",
         }
@@ -50,8 +49,8 @@ def _messages_to_text(messages: Any) -> str:
     for message in messages:
         if not isinstance(message, dict):
             continue
-        role = _clean_text(message.get("role")) or "message"
-        content = _clean_text(message.get("content"))
+        role = clean_text(message.get("role")) or "message"
+        content = clean_text(message.get("content"))
         if content:
             parts.append(f"{role}: {content}")
     return "\n\n".join(parts).strip()

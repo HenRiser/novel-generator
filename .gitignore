@@ -13,3 +13,11 @@ workspace/
 reports/
 frontend/node_modules/
 frontend/dist/
+
+# 前端重写前的旧代码残留
+frontend/src_legacy/
+
+# 一次性诊断/复现脚本（非正式代码）
+diag_stream.py
+compare_tokens.py
+repro_service.py

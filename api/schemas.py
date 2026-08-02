@@ -49,6 +49,12 @@ class CreateProjectResponse(BaseModel):
     message: str = ""
 
 
+class DeleteProjectResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    message: str = ""
+
+
 class UpdateGenerationSettingsRequest(BaseModel):
     model: str | None = None
     max_tokens: Any = None
@@ -365,3 +371,38 @@ class GenerateChapterRequest(BaseModel):
     narrative_context_text: str | None = Field(default=None, max_length=20000)
     chapter_task_id: str | None = Field(default=None, max_length=120)
     scene_plan_id: str | None = Field(default=None, max_length=140)
+
+
+class ContinueWritingRequest(BaseModel):
+    """对话式续写：在章节末尾或选中文本之后继续生成。
+
+    - context_text: 当前章节正文（或选中文本的上下文）
+    - instruction: 用户对续写的指示（如“用悬疑的笔调继续”）
+    - anchor_text: 可选，用户选中的文本（续写紧跟其后）
+    """
+    context_text: str = Field(default="", max_length=60000)
+    instruction: str = Field(default="", max_length=4000)
+    anchor_text: str | None = Field(default=None, max_length=12000)
+    model: str | None = None
+    max_tokens: int | None = Field(default=None, ge=256, le=32768)
+    temperature: float | None = Field(default=None, ge=0, le=2)
+
+
+class ContinueSaveRequest(BaseModel):
+    """把续写结果保存回章节文件。
+
+    - content: 续写生成的正文
+    - mode: append 追加到章节末尾（默认）；replace 用续写结果替换整个章节
+    - chapter_title: 可选，章节标题（用于更新章节索引）
+    """
+    content: str = Field(min_length=1, max_length=60000)
+    mode: str = Field(default="append", pattern="^(append|replace)$")
+    chapter_title: str | None = Field(default=None, max_length=200)
+
+
+class ContinueSaveResponse(BaseModel):
+    ok: bool
+    project_ref: str
+    chapter_number: int
+    chapter_file: str
+    message: str = ""

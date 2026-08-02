@@ -32,7 +32,10 @@ router = APIRouter(prefix="/api", tags=["generation"])
 ChapterNumber = Annotated[int, Path(gt=0)]
 
 DEFAULT_TEMPERATURE = 0.7
-DEFAULT_MAX_TOKENS = 4000
+# 推理模型（deepseek-v4-flash）流式生成正文时，推理阶段会先消耗 token，
+# 且推理长度随 prompt 波动（实测 8192 时好时坏：有时推理占满导致无正文）。
+# 16384 为实测稳定值（多次 8192/16384 对比：8192 偶发失败，16384 均成功）。
+DEFAULT_MAX_TOKENS = 16384
 TASK_MODEL_KEYS = ("outline", "character", "chapter", "chapter_title", "summary")
 PROJECT_ROOT_TEXT = str(PROJECT_ROOT)
 
@@ -224,6 +227,13 @@ def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
     if event_type == "delta":
         return {
             "type": "delta",
+            "text": str(event.get("text") or ""),
+        }
+
+    if event_type == "reasoning":
+        # 推理过程：仅用于前端展示，不进入正文/文件
+        return {
+            "type": "reasoning",
             "text": str(event.get("text") or ""),
         }
 

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .narrative_graph_service import load_narrative_graph
+from .common import clean_text
 
 
 DEFAULT_MIN_IMPORTANCE = 5
@@ -45,8 +46,6 @@ class ContextPackResult:
     message: str = ""
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _as_int(value: Any, default: int) -> int | None:
@@ -91,7 +90,7 @@ def _validate_request(request: dict[str, Any]) -> tuple[dict[str, Any] | None, s
 
     return {
         "chapter_number": chapter_number,
-        "chapter_goal": _clean_text(request.get("chapter_goal")),
+        "chapter_goal": clean_text(request.get("chapter_goal")),
         "min_importance": min_importance,
         "max_nodes": max_nodes,
         "max_edges": max_edges,
@@ -149,7 +148,7 @@ def _string_values(value: Any) -> list[str]:
 def _tag_text(tag_name: str, tag_entry: Any) -> str:
     entry = _dict(tag_entry)
     aliases = " ".join(str(item) for item in _list(entry.get("aliases")))
-    return " ".join([tag_name, aliases, _clean_text(entry.get("description"))]).lower()
+    return " ".join([tag_name, aliases, clean_text(entry.get("description"))]).lower()
 
 
 def _match_score(
@@ -161,7 +160,7 @@ def _match_score(
 ) -> int:
     if not tokens:
         return 0
-    haystack = " ".join(_clean_text(value).lower() for value in values if _clean_text(value))
+    haystack = " ".join(clean_text(value).lower() for value in values if clean_text(value))
     if not haystack:
         return 0
     matched = [token for token in tokens if token in haystack]
@@ -179,8 +178,8 @@ def _score_node(
 ) -> tuple[int, list[str]]:
     reasons: set[str] = set()
     importance = _importance(node.get("importance"))
-    node_type = _clean_text(node.get("type"))
-    status = _clean_text(node.get("status")).lower()
+    node_type = clean_text(node.get("type"))
+    status = clean_text(node.get("status")).lower()
 
     score = importance * 4
     if importance >= 8:
@@ -198,10 +197,10 @@ def _score_node(
     tags = [str(item) for item in _list(node.get("tags"))]
     tag_values = [_tag_text(tag, tag_registry.get(tag)) for tag in tags]
 
-    score += _match_score(tokens, [_clean_text(node.get("label"))], 45, "label", reasons)
+    score += _match_score(tokens, [clean_text(node.get("label"))], 45, "label", reasons)
     score += _match_score(tokens, [str(item) for item in _list(node.get("aliases"))], 40, "alias", reasons)
     score += _match_score(tokens, tags + tag_values, 32, "tag", reasons)
-    score += _match_score(tokens, [_clean_text(node.get("summary")), _clean_text(node.get("notes"))], 22, "summary_or_note", reasons)
+    score += _match_score(tokens, [clean_text(node.get("summary")), clean_text(node.get("notes"))], 22, "summary_or_note", reasons)
     score += _match_score(tokens, _string_values(node.get("properties")), 12, "property", reasons)
     return score, sorted(reasons)
 
@@ -213,26 +212,26 @@ def _score_edge(edge: dict[str, Any], tokens: list[str]) -> tuple[int, list[str]
     if importance >= 8:
         score += 20
         reasons.add("high_importance")
-    score += _match_score(tokens, [_clean_text(edge.get("label")), _clean_text(edge.get("type"))], 35, "label_or_type", reasons)
-    score += _match_score(tokens, [_clean_text(edge.get("summary")), _clean_text(edge.get("notes"))], 18, "summary_or_note", reasons)
+    score += _match_score(tokens, [clean_text(edge.get("label")), clean_text(edge.get("type"))], 35, "label_or_type", reasons)
+    score += _match_score(tokens, [clean_text(edge.get("summary")), clean_text(edge.get("notes"))], 18, "summary_or_note", reasons)
     score += _match_score(tokens, _string_values(edge.get("properties")), 10, "property", reasons)
     return score, sorted(reasons)
 
 
 def _node_payload(node: dict[str, Any], score: int, reasons: list[str]) -> dict[str, Any]:
     return {
-        "id": _clean_text(node.get("id")),
-        "type": _clean_text(node.get("type")),
-        "label": _clean_text(node.get("label")),
+        "id": clean_text(node.get("id")),
+        "type": clean_text(node.get("type")),
+        "label": clean_text(node.get("label")),
         "aliases": [str(item) for item in _list(node.get("aliases"))],
-        "summary": _clean_text(node.get("summary")),
+        "summary": clean_text(node.get("summary")),
         "importance": _importance(node.get("importance")),
-        "layer": _clean_text(node.get("layer")) or "detail",
+        "layer": clean_text(node.get("layer")) or "detail",
         "parent_id": node.get("parent_id") if node.get("parent_id") else None,
-        "status": _clean_text(node.get("status")) or "active",
+        "status": clean_text(node.get("status")) or "active",
         "tags": [str(item) for item in _list(node.get("tags"))],
         "properties": _dict(node.get("properties")),
-        "notes": _clean_text(node.get("notes")),
+        "notes": clean_text(node.get("notes")),
         "score": int(score),
         "reasons": list(reasons),
     }
@@ -244,22 +243,22 @@ def _edge_payload(
     reasons: list[str],
     node_labels: dict[str, str],
 ) -> dict[str, Any]:
-    source = _clean_text(edge.get("source"))
-    target = _clean_text(edge.get("target"))
+    source = clean_text(edge.get("source"))
+    target = clean_text(edge.get("target"))
     return {
-        "id": _clean_text(edge.get("id")),
+        "id": clean_text(edge.get("id")),
         "source": source,
         "target": target,
         "source_label": node_labels.get(source, source),
         "target_label": node_labels.get(target, target),
-        "type": _clean_text(edge.get("type")),
-        "label": _clean_text(edge.get("label")),
-        "summary": _clean_text(edge.get("summary")),
+        "type": clean_text(edge.get("type")),
+        "label": clean_text(edge.get("label")),
+        "summary": clean_text(edge.get("summary")),
         "importance": _importance(edge.get("importance")),
-        "layer": _clean_text(edge.get("layer")) or "detail",
-        "status": _clean_text(edge.get("status")) or "active",
+        "layer": clean_text(edge.get("layer")) or "detail",
+        "status": clean_text(edge.get("status")) or "active",
         "properties": _dict(edge.get("properties")),
-        "notes": _clean_text(edge.get("notes")),
+        "notes": clean_text(edge.get("notes")),
         "score": int(score),
         "reasons": list(reasons),
     }
@@ -285,7 +284,7 @@ def _build_sections(nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) ->
     for node in nodes:
         if node.get("layer") == "core":
             sections["core_facts"].append(node)
-        section = SECTION_BY_TYPE.get(_clean_text(node.get("type")))
+        section = SECTION_BY_TYPE.get(clean_text(node.get("type")))
         if section:
             sections[section].append(node)
     sections["relationships"] = list(edges)
@@ -298,7 +297,7 @@ def _sort_scored(items: list[tuple[dict[str, Any], int, list[str]]]) -> list[tup
         key=lambda item: (
             int(item[1]),
             _importance(item[0].get("importance")),
-            _clean_text(item[0].get("label")),
+            clean_text(item[0].get("label")),
         ),
         reverse=True,
     )
@@ -317,8 +316,8 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
     nodes = [node for node in _list(graph.get("nodes")) if isinstance(node, dict)]
     edges = [edge for edge in _list(graph.get("edges")) if isinstance(edge, dict)]
     tag_registry = _dict(graph_result.graph.get("tag_registry"))
-    node_by_id = {_clean_text(node.get("id")): node for node in nodes if _clean_text(node.get("id"))}
-    node_labels = {node_id: _clean_text(node.get("label")) or node_id for node_id, node in node_by_id.items()}
+    node_by_id = {clean_text(node.get("id")): node for node in nodes if clean_text(node.get("id"))}
+    node_labels = {node_id: clean_text(node.get("label")) or node_id for node_id, node in node_by_id.items()}
     tokens = _tokenize(options["chapter_goal"])
     warnings: list[str] = []
 
@@ -332,7 +331,7 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
     min_importance = int(options["min_importance"])
 
     for node in nodes:
-        node_id = _clean_text(node.get("id"))
+        node_id = clean_text(node.get("id"))
         if not node_id or _importance(node.get("importance")) < min_importance:
             continue
         score, reasons = _score_node(
@@ -349,8 +348,8 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
 
     if options["include_neighbors"] and seed_ids:
         for edge in edges:
-            source = _clean_text(edge.get("source"))
-            target = _clean_text(edge.get("target"))
+            source = clean_text(edge.get("source"))
+            target = clean_text(edge.get("target"))
             if source not in seed_ids and target not in seed_ids:
                 continue
             for neighbor_id in (source, target):
@@ -366,12 +365,12 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
     scored_nodes = _sort_scored(list(node_scores.values()))
     truncated_nodes = max(0, len(scored_nodes) - int(options["max_nodes"]))
     selected_node_tuples = scored_nodes[: int(options["max_nodes"])]
-    selected_ids = {_clean_text(item[0].get("id")) for item in selected_node_tuples}
+    selected_ids = {clean_text(item[0].get("id")) for item in selected_node_tuples}
 
     edge_scores: list[tuple[dict[str, Any], int, list[str]]] = []
     for edge in edges:
-        source = _clean_text(edge.get("source"))
-        target = _clean_text(edge.get("target"))
+        source = clean_text(edge.get("source"))
+        target = clean_text(edge.get("target"))
         if not source or not target or source not in selected_ids or target not in selected_ids:
             continue
         score, reasons = _score_edge(edge, tokens)
@@ -441,48 +440,48 @@ def _compact_properties(node_type: str, properties: dict[str, Any]) -> list[str]
         if value in (None, "", [], {}):
             continue
         if isinstance(value, list):
-            text = ", ".join(_clean_text(item) for item in value if _clean_text(item))
+            text = ", ".join(clean_text(item) for item in value if clean_text(item))
         else:
-            text = _clean_text(value)
+            text = clean_text(value)
         if text:
             lines.append(f"{key}: {text}")
     return lines
 
 
 def _render_node_line(node: dict[str, Any]) -> list[str]:
-    label = _clean_text(node.get("label")) or _clean_text(node.get("id"))
+    label = clean_text(node.get("label")) or clean_text(node.get("id"))
     header = f"- {label} | importance {node.get('importance')} | status {node.get('status')}"
     lines = [header]
-    summary = _clean_text(node.get("summary"))
+    summary = clean_text(node.get("summary"))
     if summary:
         lines.append(f"  Summary: {summary}")
     tags = [str(item) for item in _list(node.get("tags"))]
     if tags:
         lines.append(f"  Tags: {', '.join(tags)}")
-    for item in _compact_properties(_clean_text(node.get("type")), _dict(node.get("properties"))):
+    for item in _compact_properties(clean_text(node.get("type")), _dict(node.get("properties"))):
         lines.append(f"  {item}")
-    notes = _clean_text(node.get("notes"))
+    notes = clean_text(node.get("notes"))
     if notes:
         lines.append(f"  Notes: {notes}")
     return lines
 
 
 def _render_edge_line(edge: dict[str, Any]) -> list[str]:
-    source = _clean_text(edge.get("source_label")) or _clean_text(edge.get("source"))
-    target = _clean_text(edge.get("target_label")) or _clean_text(edge.get("target"))
-    label = _clean_text(edge.get("label")) or _clean_text(edge.get("type")) or "related_to"
+    source = clean_text(edge.get("source_label")) or clean_text(edge.get("source"))
+    target = clean_text(edge.get("target_label")) or clean_text(edge.get("target"))
+    label = clean_text(edge.get("label")) or clean_text(edge.get("type")) or "related_to"
     lines = [f"- {source} --{label}--> {target} | importance {edge.get('importance')} | status {edge.get('status')}"]
-    summary = _clean_text(edge.get("summary"))
+    summary = clean_text(edge.get("summary"))
     if summary:
         lines.append(f"  Summary: {summary}")
-    notes = _clean_text(edge.get("notes"))
+    notes = clean_text(edge.get("notes"))
     if notes:
         lines.append(f"  Notes: {notes}")
     return lines
 
 
 def _is_confirmed_item(item: dict[str, Any]) -> bool:
-    return _clean_text(item.get("status")).lower() == "confirmed"
+    return clean_text(item.get("status")).lower() == "confirmed"
 
 
 def _is_hard_constraint_item(item: dict[str, Any]) -> bool:
@@ -561,7 +560,7 @@ def render_context_pack_for_prompt(context_pack: dict[str, Any]) -> str:
         "These structured notes are selected from the user's story graph. Use them to preserve continuity.",
         "Priority order: Hard Continuity Constraints > Confirmed Facts > Background Context.",
     ]
-    chapter_goal = _clean_text(context_pack.get("chapter_goal"))
+    chapter_goal = clean_text(context_pack.get("chapter_goal"))
     if chapter_goal:
         lines.extend(["", f"Chapter goal: {chapter_goal}"])
 

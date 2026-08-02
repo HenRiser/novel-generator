@@ -1,0 +1,5 @@
+# Braipen 开发 / 测试依赖
+-r requirements.txt
+
+# API 测试（fastapi.testclient 依赖 httpx）
+httpx==0.28.1

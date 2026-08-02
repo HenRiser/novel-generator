@@ -10,6 +10,7 @@ from typing import Any
 
 from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
+from .common import resolve_workspace_context, clean_text, timestamp, write_json_atomic
 
 
 REVIEW_VERSION = 1
@@ -168,43 +169,29 @@ class ChapterFunctionReviewResult:
     error_code: str = "chapter_function_review_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="microseconds")
 
 
 def _safe_review_id() -> str:
     return f"review_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{secrets.token_hex(4)}"
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _compact(value: Any) -> str:
-    return re.sub(r"[\s，。；;,.、:：!！?？\"'“”‘’（）()\[\]{}<>《》\-—_]+", "", _clean_text(value).casefold())
+    return re.sub(r"[\s，。；;,.、:：!！?？\"'“”‘’（）()\[\]{}<>《》\-—_]+", "", clean_text(value).casefold())
 
 
 def _workspace_context(
     project_ref: str,
     books_root: Path | None = None,
 ) -> tuple[Any | None, str, int, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref.", 404, "project_not_found"
-    try:
-        ctx = resolve_project_context(ref, books_root=books_root)
-    except FileNotFoundError:
-        return None, "Project not found.", 404, "project_not_found"
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref.", 404, "project_not_found"
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return (
-            None,
-            "Chapter Function Reviews are only supported for workspace book projects.",
-            400,
-            "chapter_function_review_unsupported_project",
-        )
-    return ctx, "", 200, ""
+    return resolve_workspace_context(
+        project_ref,
+        books_root=books_root,
+        resolve=resolve_project_context,
+        storage_message='Chapter Function Reviews are only supported for workspace book projects.',
+        storage_error_code='chapter_function_review_unsupported_project',
+    )
 
 
 def _reviews_dir(ctx: Any) -> Path:
@@ -245,7 +232,7 @@ def _chapter_number(value: Any) -> tuple[int, str]:
 
 
 def _project_id(ctx: Any, project_ref: str) -> str:
-    return _clean_text(getattr(ctx, "book_id", "")) or _clean_text(project_ref).split(":", 1)[-1]
+    return clean_text(getattr(ctx, "book_id", "")) or clean_text(project_ref).split(":", 1)[-1]
 
 
 def _relative_chapter_path(ctx: Any, chapter_path: str | Path | None, chapter_number: int) -> str:
@@ -288,7 +275,7 @@ def _forbidden_information(scene_plan: dict[str, Any] | None) -> list[str]:
         if not isinstance(items, list):
             continue
         for item in items:
-            text = _clean_text(item)
+            text = clean_text(item)
             if text:
                 result.append(text)
     return result
@@ -313,7 +300,7 @@ def should_run_no_reveal_review(
     scene_plan: dict[str, Any] | None = None,
 ) -> bool:
     if isinstance(chapter_task, dict) and chapter_task.get("status") == "approved":
-        if _clean_text(chapter_task.get("canon_budget")).casefold() == "none":
+        if clean_text(chapter_task.get("canon_budget")).casefold() == "none":
             return True
     if isinstance(scene_plan, dict) and scene_plan.get("status") == "approved":
         if _has_no_reveal_forbidden_information(scene_plan):
@@ -328,7 +315,7 @@ def _source_rules_for_category(
     scene_plan: dict[str, Any] | None,
 ) -> list[str]:
     rules: list[str] = []
-    if isinstance(chapter_task, dict) and _clean_text(chapter_task.get("canon_budget")).casefold() == "none":
+    if isinstance(chapter_task, dict) and clean_text(chapter_task.get("canon_budget")).casefold() == "none":
         rules.append("Chapter Task Sheet: canon_budget=none")
     if _has_low_no_reveal_contract(allowed_scene_contract):
         rules.append("Allowed Scene Contract: low-intensity no-reveal")
@@ -398,7 +385,7 @@ def evaluate_no_reveal_text(
     allowed_scene_contract: str | None = None,
     scene_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    text = _clean_text(chapter_text)
+    text = clean_text(chapter_text)
     violations: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str, str]] = set()
 
@@ -514,7 +501,7 @@ def create_no_reveal_compliance_review(
         "project_ref": project_ref,
         "chapter_number": number,
         "chapter_path": _relative_chapter_path(ctx, chapter_path, number),
-        "ai_run_id": _clean_text(ai_run_id) or None,
+        "ai_run_id": clean_text(ai_run_id) or None,
         "chapter_task": {
             "id": chapter_task.get("id") if isinstance(chapter_task, dict) else None,
             "revision": chapter_task.get("revision") if isinstance(chapter_task, dict) else None,
@@ -531,7 +518,7 @@ def create_no_reveal_compliance_review(
         "categories": evaluation["categories"],
         "violations": evaluation["violations"],
         "summary": evaluation["summary"],
-        "created_at": _timestamp(),
+        "created_at": timestamp(timespec="microseconds"),
     }
 
     try:
@@ -593,7 +580,7 @@ def list_chapter_function_reviews(
                 status_code=400,
                 error_code="chapter_function_review_read_failed",
             )
-    history.sort(key=lambda item: (_clean_text(item.get("created_at")), _clean_text(item.get("id"))), reverse=True)
+    history.sort(key=lambda item: (clean_text(item.get("created_at")), clean_text(item.get("id"))), reverse=True)
     return ChapterFunctionReviewResult(
         True,
         project_ref=project_ref,

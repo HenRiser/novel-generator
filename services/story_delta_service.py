@@ -18,6 +18,7 @@ from .narrative_graph_service import load_narrative_graph
 from .prompt_profile_service import build_prompt_profile
 from .project_service import load_project_detail
 from .reader_service import read_chapter_for_display
+from .common import clean_text, read_json, resolve_workspace_context, timestamp, write_json_atomic
 
 
 DOCUMENT_VERSION = 1
@@ -115,12 +116,8 @@ class StoryDeltaListResult:
     message: str = ""
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _safe_id(prefix: str) -> str:
@@ -129,23 +126,19 @@ def _safe_id(prefix: str) -> str:
 
 
 def _safe_provided_id(value: Any) -> str:
-    text = _clean_text(value)
+    text = clean_text(value)
     if not text:
         return ""
     return re.sub(r"[^A-Za-z0-9_:-]+", "_", text).strip("_")[:120]
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except (FileNotFoundError, ValueError) as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "Story Delta is only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='Story Delta is only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
 def _memory_dir(ctx: Any) -> Path:
@@ -168,23 +161,8 @@ def _story_delta_failure_ref(failure_id: str) -> str:
     return f"{LOGS_DIR_NAME}/{STORY_DELTA_FAILURES_DIR_NAME}/{failure_id}.json"
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name} is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object.")
-    return data
 
 
-def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _redact_sensitive_text(text: Any) -> str:
@@ -214,21 +192,21 @@ def _save_story_delta_failure(
         "id": failure_id,
         "project_ref": project_ref,
         "chapter_number": chapter_number,
-        "stage": _clean_text(stage),
-        "parse_error": _clean_text(parse_error),
+        "stage": clean_text(stage),
+        "parse_error": clean_text(parse_error),
         "raw_output": _redact_sensitive_text(raw_output),
-        "model": _clean_text(model) or None,
-        "created_at": _timestamp(),
+        "model": clean_text(model) or None,
+        "created_at": timestamp(),
     }
     try:
-        _write_json_atomic(_story_delta_failures_dir(ctx) / f"{failure_id}.json", artifact)
+        write_json_atomic(_story_delta_failures_dir(ctx) / f"{failure_id}.json", artifact)
     except (OSError, ValueError) as exc:
         return "", f"Story Delta failure artifact save failed: {exc}"
     return _story_delta_failure_ref(failure_id), ""
 
 
 def _empty_story_deltas(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
-    now = _timestamp()
+    now = timestamp()
     return {
         "version": DOCUMENT_VERSION,
         "metadata": {
@@ -241,7 +219,7 @@ def _empty_story_deltas(project_ref: str, created_at: str | None = None) -> dict
 
 
 def _empty_knowledge_drafts(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
-    now = _timestamp()
+    now = timestamp()
     return {
         "version": DOCUMENT_VERSION,
         "metadata": {
@@ -260,7 +238,7 @@ def _normalize_story_deltas_document(data: dict[str, Any] | None, project_ref: s
     document["version"] = DOCUMENT_VERSION
     metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
     metadata["project_ref"] = project_ref
-    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("created_at", timestamp())
     metadata.setdefault("updated_at", metadata["created_at"])
     document["metadata"] = metadata
     items = document.get("items")
@@ -275,7 +253,7 @@ def _normalize_knowledge_drafts_document(data: dict[str, Any] | None, project_re
     document["version"] = DOCUMENT_VERSION
     metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
     metadata["project_ref"] = project_ref
-    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("created_at", timestamp())
     metadata.setdefault("updated_at", metadata["created_at"])
     document["metadata"] = metadata
     drafts = document.get("drafts")
@@ -284,7 +262,7 @@ def _normalize_knowledge_drafts_document(data: dict[str, Any] | None, project_re
 
 
 def _update_metadata(document: dict[str, Any]) -> None:
-    now = _timestamp()
+    now = timestamp()
     metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
     metadata.setdefault("created_at", now)
     metadata["updated_at"] = now
@@ -331,7 +309,7 @@ def _validate_chapter_number(value: Any) -> tuple[int, str]:
 
 
 def _truncate(text: str, limit: int) -> str:
-    safe = _clean_text(text)
+    safe = clean_text(text)
     if len(safe) <= limit:
         return safe
     return f"{safe[:limit].rstrip()}\n...[truncated]"
@@ -368,15 +346,15 @@ def _graph_summary(project_ref: str) -> str:
     for node in nodes[:20]:
         lines.append(
             "- node: "
-            f"{_clean_text(node.get('id'))} | {_clean_text(node.get('type'))} | "
-            f"{_clean_text(node.get('label'))} | importance {_clean_text(node.get('importance'))} | "
-            f"status {_clean_text(node.get('status'))} | summary {_truncate(_clean_text(node.get('summary')), 180)}"
+            f"{clean_text(node.get('id'))} | {clean_text(node.get('type'))} | "
+            f"{clean_text(node.get('label'))} | importance {clean_text(node.get('importance'))} | "
+            f"status {clean_text(node.get('status'))} | summary {_truncate(clean_text(node.get('summary')), 180)}"
         )
     for edge in edges[:20]:
         lines.append(
             "- edge: "
-            f"{_clean_text(edge.get('source'))} --{_clean_text(edge.get('label')) or _clean_text(edge.get('type'))}--> "
-            f"{_clean_text(edge.get('target'))} | summary {_truncate(_clean_text(edge.get('summary')), 160)}"
+            f"{clean_text(edge.get('source'))} --{clean_text(edge.get('label')) or clean_text(edge.get('type'))}--> "
+            f"{clean_text(edge.get('target'))} | summary {_truncate(clean_text(edge.get('summary')), 160)}"
         )
     return "\n".join(lines)
 
@@ -391,7 +369,7 @@ def _extract_config_text(project_config: dict[str, Any]) -> str:
         "expected_chapters": options.get("expected_chapters"),
         "seed_prompt": project_config.get("seed_prompt") or project_config.get("story_seed"),
     }
-    return "\n".join(f"{key}: {_clean_text(value)}" for key, value in fields.items() if _clean_text(value))
+    return "\n".join(f"{key}: {clean_text(value)}" for key, value in fields.items() if clean_text(value))
 
 
 def build_story_delta_prompt(
@@ -626,7 +604,7 @@ def _dry_run_response(chapter_number: int, chapter_content: str, include_next: b
 
 
 def _strip_markdown_code_fence(text: str) -> str:
-    cleaned = _clean_text(text)
+    cleaned = clean_text(text)
     fenced = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.IGNORECASE | re.DOTALL)
     if fenced:
         return fenced.group(1).strip()
@@ -810,7 +788,7 @@ def _parse_or_repair_story_delta_response(
 
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
-        return [_clean_text(item) for item in value if _clean_text(item)]
+        return [clean_text(item) for item in value if clean_text(item)]
     if isinstance(value, str) and value.strip():
         return [value.strip()]
     return []
@@ -822,7 +800,7 @@ def normalize_story_delta(data: dict[str, Any], chapter_number: int, include_nex
     story_delta = {key: _list(raw_delta.get(key)) for key in DEFAULT_STORY_DELTA}
 
     for item in story_delta["new_characters"]:
-        if isinstance(item, dict) and not (_clean_text(item.get("evidence")) or _clean_text(item.get("rationale"))):
+        if isinstance(item, dict) and not (clean_text(item.get("evidence")) or clean_text(item.get("rationale"))):
             warnings.append("A new character entry was missing evidence and requires extra review.")
             item["rationale"] = "Model omitted evidence; reviewer must confirm before merge."
 
@@ -885,7 +863,7 @@ def _candidate_change(
 
 def _first_text(*values: Any) -> str:
     for value in values:
-        text = _clean_text(value)
+        text = clean_text(value)
         if text:
             return text
     return ""
@@ -902,13 +880,13 @@ def _normalized_importance(value: Any, default: int) -> int:
 
 
 def _normalized_layer(value: Any, default: str) -> str:
-    layer = _clean_text(value)
+    layer = clean_text(value)
     return layer if layer in LAYERS else default
 
 
 def _normalize_node_candidate_payload(payload: dict[str, Any], forced_type: str = "") -> dict[str, Any]:
     normalized = dict(payload)
-    node_type = _clean_text(forced_type) or _clean_text(normalized.get("type")) or _clean_text(normalized.get("node_type"))
+    node_type = clean_text(forced_type) or clean_text(normalized.get("type")) or clean_text(normalized.get("node_type"))
     if node_type:
         normalized["type"] = node_type
     normalized.pop("node_type", None)
@@ -946,10 +924,10 @@ def _normalize_node_candidate_payload(payload: dict[str, Any], forced_type: str 
 def _normalize_edge_endpoint_refs(payload: dict[str, Any]) -> None:
     for endpoint in ("source", "target"):
         node_id_key = f"{endpoint}_node_id"
-        if not _clean_text(payload.get(endpoint)) and _clean_text(payload.get(node_id_key)):
-            payload[endpoint] = _clean_text(payload.get(node_id_key))
+        if not clean_text(payload.get(endpoint)) and clean_text(payload.get(node_id_key)):
+            payload[endpoint] = clean_text(payload.get(node_id_key))
         change_id_key = f"{endpoint}_change_id"
-        if _clean_text(payload.get(change_id_key)):
+        if clean_text(payload.get(change_id_key)):
             payload[change_id_key] = _safe_provided_id(payload.get(change_id_key))
 
 
@@ -957,7 +935,7 @@ def _normalize_edge_candidate_payload(payload: dict[str, Any]) -> dict[str, Any]
     normalized = dict(payload)
     _normalize_edge_endpoint_refs(normalized)
 
-    edge_type = _clean_text(normalized.get("type")) or "related_to"
+    edge_type = clean_text(normalized.get("type")) or "related_to"
     if edge_type not in EDGE_TYPES:
         edge_type = "related_to"
     normalized["type"] = edge_type
@@ -994,21 +972,21 @@ def _normalize_candidate_operation_and_payload(
 
 
 def _normalize_candidate_change(change: dict[str, Any], warnings: list[str]) -> dict[str, Any] | None:
-    operation = _clean_text(change.get("operation"))
+    operation = clean_text(change.get("operation"))
     payload = _dict(change.get("payload"))
     normalized_operation = _normalize_candidate_operation_and_payload(operation, payload, warnings)
     if normalized_operation is None:
         return None
     operation, payload = normalized_operation
-    source = _clean_text(change.get("source")) or "story_delta"
+    source = clean_text(change.get("source")) or "story_delta"
     if source not in {"story_delta", "next_chapter_proposal"}:
         source = "story_delta"
-    evidence = _clean_text(change.get("evidence"))
-    rationale = _clean_text(change.get("rationale"))
+    evidence = clean_text(change.get("evidence"))
+    rationale = clean_text(change.get("rationale"))
     if not evidence and not rationale:
         warnings.append(f"Candidate change {operation} lacked evidence/rationale and was marked for extra review.")
         rationale = "Model omitted evidence; reviewer must confirm before merge."
-    target = _clean_text(change.get("target")) or "narrative_graph"
+    target = clean_text(change.get("target")) or "narrative_graph"
     if operation in {"create_node", "create_edge"}:
         target = "narrative_graph"
     normalized = _candidate_change(
@@ -1019,7 +997,7 @@ def _normalize_candidate_change(change: dict[str, Any], warnings: list[str]) -> 
         evidence=evidence,
         rationale=rationale,
         confidence=_confidence(change.get("confidence")),
-        change_id=_clean_text(change.get("id")),
+        change_id=clean_text(change.get("id")),
     )
     normalized["requires_review"] = True
     return normalized
@@ -1029,20 +1007,20 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
     changes: list[dict[str, Any]] = []
     for item in _list(story_delta.get("new_characters")):
         if isinstance(item, dict):
-            label = _clean_text(item.get("label") or item.get("name"))
+            label = clean_text(item.get("label") or item.get("name"))
             changes.append(
                 _candidate_change(
                     "create_node",
                     "narrative_graph",
                     "story_delta",
                     _normalize_node_candidate_payload({**item, "type": "character", "label": label, "suggested_status": "confirmed"}),
-                    evidence=_clean_text(item.get("evidence")),
+                    evidence=clean_text(item.get("evidence")),
                     rationale=f"New character candidate: {label}",
                 )
             )
     for item in _list(story_delta.get("character_updates")):
         if isinstance(item, dict):
-            character = _clean_text(item.get("character") or item.get("name") or item.get("label"))
+            character = clean_text(item.get("character") or item.get("name") or item.get("label"))
             changes.append(
                 _candidate_change(
                     "create_node",
@@ -1052,11 +1030,11 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                         {
                             **item,
                             "type": "relationship_note",
-                            "label": f"{character} 状态变化" if character else _clean_text(item.get("label")),
+                            "label": f"{character} 状态变化" if character else clean_text(item.get("label")),
                             "suggested_status": "confirmed",
                         }
                     ),
-                    evidence=_clean_text(item.get("evidence")),
+                    evidence=clean_text(item.get("evidence")),
                     rationale="Character update candidate from chapter facts.",
                 )
             )
@@ -1079,17 +1057,17 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                             {**item, "type": item.get("type") or node_type, "suggested_status": "confirmed"},
                             node_type,
                         ),
-                        evidence=_clean_text(item.get("evidence")),
+                        evidence=clean_text(item.get("evidence")),
                         rationale=f"{node_type} candidate from chapter facts.",
                     )
                 )
     for item in _list(story_delta.get("relationship_updates")):
         if isinstance(item, dict):
-            label = _clean_text(item.get("label"))
+            label = clean_text(item.get("label"))
             if not label:
                 characters = item.get("characters")
                 if isinstance(characters, list):
-                    names = [_clean_text(name) for name in characters if _clean_text(name)]
+                    names = [clean_text(name) for name in characters if clean_text(name)]
                     label = " / ".join(names[:3])
             if not label:
                 label = "Relationship note"
@@ -1102,7 +1080,7 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                         {**item, "type": "relationship_note", "label": label, "suggested_status": "confirmed"},
                         "relationship_note",
                     ),
-                    evidence=_clean_text(item.get("evidence")),
+                    evidence=clean_text(item.get("evidence")),
                     rationale="Relationship candidate from chapter facts.",
                 )
             )
@@ -1114,7 +1092,7 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                     "narrative_graph",
                     "next_chapter_proposal",
                     _normalize_node_candidate_payload({**item, "suggested_status": "planned"}),
-                    rationale=_clean_text(item.get("rationale")) or "Suggested node for next chapter planning.",
+                    rationale=clean_text(item.get("rationale")) or "Suggested node for next chapter planning.",
                 )
             )
     for item in _list(next_proposal.get("suggested_new_edges")):
@@ -1125,7 +1103,7 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                     "narrative_graph",
                     "next_chapter_proposal",
                     _normalize_edge_candidate_payload({**item, "suggested_status": "planned"}),
-                    rationale=_clean_text(item.get("rationale")) or "Suggested edge for next chapter planning.",
+                    rationale=clean_text(item.get("rationale")) or "Suggested edge for next chapter planning.",
                 )
             )
     for item in _list(next_proposal.get("suggested_plot_directions")):
@@ -1139,7 +1117,7 @@ def _derive_changes_from_delta(story_delta: dict[str, Any], next_proposal: dict[
                         {**item, "type": "plot_direction", "suggested_status": "planned"},
                         "plot_direction",
                     ),
-                    rationale=_clean_text(item.get("rationale")) or "Suggested plot direction for next chapter planning.",
+                    rationale=clean_text(item.get("rationale")) or "Suggested plot direction for next chapter planning.",
                 )
             )
     return changes
@@ -1169,7 +1147,7 @@ def _dedupe_candidate_change_ids(changes: list[dict[str, Any]], namespace: str =
 
     if id_map:
         for change in result:
-            if _clean_text(change.get("operation")) != "create_edge":
+            if clean_text(change.get("operation")) != "create_edge":
                 continue
             payload = dict(change.get("payload") if isinstance(change.get("payload"), dict) else {})
             changed = False
@@ -1206,7 +1184,7 @@ def build_knowledge_draft(
         "source_delta_id": source_delta_id,
         "status": "pending_review",
         "candidate_changes": normalized_changes,
-        "created_at": _timestamp(),
+        "created_at": timestamp(),
     }
 
 
@@ -1215,10 +1193,10 @@ def save_story_delta(project_ref: str, item: dict[str, Any]) -> StoryDeltaListRe
     if ctx is None:
         return StoryDeltaListResult(False, project_ref=project_ref, message=message)
     try:
-        document = _normalize_story_deltas_document(_read_json(_story_deltas_path(ctx)), project_ref)
+        document = _normalize_story_deltas_document(read_json(_story_deltas_path(ctx)), project_ref)
         document["items"].append(dict(item))
         _update_metadata(document)
-        _write_json_atomic(_story_deltas_path(ctx), document)
+        write_json_atomic(_story_deltas_path(ctx), document)
     except (OSError, ValueError) as exc:
         return StoryDeltaListResult(False, project_ref=project_ref, message=f"Story Delta save failed: {exc}")
     return StoryDeltaListResult(True, project_ref=project_ref, items=document["items"])
@@ -1229,10 +1207,10 @@ def save_knowledge_draft(project_ref: str, draft: dict[str, Any]) -> StoryDeltaL
     if ctx is None:
         return StoryDeltaListResult(False, project_ref=project_ref, message=message)
     try:
-        document = _normalize_knowledge_drafts_document(_read_json(_knowledge_drafts_path(ctx)), project_ref)
+        document = _normalize_knowledge_drafts_document(read_json(_knowledge_drafts_path(ctx)), project_ref)
         document["drafts"].append(dict(draft))
         _update_metadata(document)
-        _write_json_atomic(_knowledge_drafts_path(ctx), document)
+        write_json_atomic(_knowledge_drafts_path(ctx), document)
     except (OSError, ValueError) as exc:
         return StoryDeltaListResult(False, project_ref=project_ref, message=f"Knowledge Draft save failed: {exc}")
     return StoryDeltaListResult(True, project_ref=project_ref, drafts=document["drafts"])
@@ -1250,7 +1228,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
     include_draft = _as_bool(request.get("include_knowledge_draft"), True)
     dry_run = _as_bool(request.get("dry_run"), False)
     mock_response = request.get("mock_response")
-    context_pack_summary = _clean_text(request.get("context_pack_summary"))
+    context_pack_summary = clean_text(request.get("context_pack_summary"))
 
     detail = load_project_detail(project_ref)
     if not detail.ok:
@@ -1261,7 +1239,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
     if not chapter.ok:
         return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=chapter.message or f"Chapter {number} was not found.")
     chapter_summary, summary_file = _load_summary(ctx, number)
-    model = _clean_text(project_config.get("model")) or None
+    model = clean_text(project_config.get("model")) or None
     resolved_max_tokens = _story_delta_max_tokens(project_config)
     analysis_messages: list[dict[str, str]] | None = None
     analysis_status = "success"
@@ -1322,7 +1300,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
 
     story_delta, next_proposal, candidate_changes, warnings = normalize_story_delta(raw_payload or {}, number, include_next)
     delta_id = _safe_id(f"delta_chapter_{number:03d}")
-    created_at = _timestamp()
+    created_at = timestamp()
     story_delta_item = {
         "id": delta_id,
         "chapter_number": number,
@@ -1435,7 +1413,7 @@ def list_story_deltas(project_ref: str) -> StoryDeltaListResult:
     if ctx is None:
         return StoryDeltaListResult(False, project_ref=project_ref, message=message)
     try:
-        document = _normalize_story_deltas_document(_read_json(_story_deltas_path(ctx)), project_ref)
+        document = _normalize_story_deltas_document(read_json(_story_deltas_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return StoryDeltaListResult(False, project_ref=project_ref, message=f"Story Delta read failed: {exc}")
     return StoryDeltaListResult(True, project_ref=project_ref, items=document["items"])
@@ -1446,7 +1424,7 @@ def list_knowledge_drafts(project_ref: str) -> StoryDeltaListResult:
     if ctx is None:
         return StoryDeltaListResult(False, project_ref=project_ref, message=message)
     try:
-        document = _normalize_knowledge_drafts_document(_read_json(_knowledge_drafts_path(ctx)), project_ref)
+        document = _normalize_knowledge_drafts_document(read_json(_knowledge_drafts_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return StoryDeltaListResult(False, project_ref=project_ref, message=f"Knowledge Draft read failed: {exc}")
     return StoryDeltaListResult(True, project_ref=project_ref, drafts=document["drafts"])
@@ -1456,8 +1434,8 @@ def get_knowledge_draft(project_ref: str, draft_id: str) -> StoryDeltaListResult
     result = list_knowledge_drafts(project_ref)
     if not result.ok:
         return result
-    wanted = _clean_text(draft_id)
+    wanted = clean_text(draft_id)
     for draft in result.drafts:
-        if isinstance(draft, dict) and _clean_text(draft.get("id")) == wanted:
+        if isinstance(draft, dict) and clean_text(draft.get("id")) == wanted:
             return StoryDeltaListResult(True, project_ref=result.project_ref, draft=draft)
     return StoryDeltaListResult(False, project_ref=result.project_ref, message="Knowledge Draft not found.")

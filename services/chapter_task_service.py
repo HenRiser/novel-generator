@@ -10,6 +10,7 @@ from typing import Any
 
 from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
+from .common import resolve_workspace_context, clean_text, timestamp, write_json_atomic
 
 
 DOCUMENT_VERSION = 1
@@ -110,12 +111,8 @@ class ChapterTaskResult:
     error_code: str = "chapter_task_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _chapter_number(value: Any) -> tuple[int, str]:
@@ -134,23 +131,13 @@ def _workspace_context(
     project_ref: str,
     books_root: Path | None = None,
 ) -> tuple[Any | None, str, int, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref.", 404, "project_not_found"
-    try:
-        ctx = resolve_project_context(ref, books_root=books_root)
-    except FileNotFoundError:
-        return None, "Project not found.", 404, "project_not_found"
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref.", 404, "project_not_found"
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return (
-            None,
-            "Chapter Task Sheets are only supported for workspace book projects.",
-            400,
-            "chapter_task_unsupported_project",
-        )
-    return ctx, "", 200, ""
+    return resolve_workspace_context(
+        project_ref,
+        books_root=books_root,
+        resolve=resolve_project_context,
+        storage_message='Chapter Task Sheets are only supported for workspace book projects.',
+        storage_error_code='chapter_task_unsupported_project',
+    )
 
 
 def _task_path(ctx: Any) -> Path:
@@ -188,7 +175,7 @@ def _read_document(path: Path) -> dict[str, Any]:
         status = task.get("status")
         if status not in TASK_STATUSES:
             raise ValueError(f"{path.name} contains an invalid task status.")
-        task_id = _clean_text(task.get("id"))
+        task_id = clean_text(task.get("id"))
         match = TASK_ID_PATTERN.fullmatch(task_id)
         if match is None or int(match.group(1)) != number:
             raise ValueError(f"{path.name} contains an invalid task id.")
@@ -222,11 +209,6 @@ def _read_document(path: Path) -> dict[str, Any]:
     return {"version": DOCUMENT_VERSION, "tasks": [dict(task) for task in tasks]}
 
 
-def _write_document_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _safe_task_id(chapter_number: int) -> str:
@@ -251,7 +233,7 @@ def _string_list(value: Any, field_name: str) -> tuple[list[str], str]:
 
 
 def _comparison_key(value: Any) -> str:
-    return _clean_text(value).casefold()
+    return clean_text(value).casefold()
 
 
 def _advance_conflicts(
@@ -265,14 +247,14 @@ def _advance_conflicts(
         key = _comparison_key(item)
         if key and key in forbidden_keys and key not in seen:
             seen.add(key)
-            conflicts.append(_clean_text(item))
+            conflicts.append(clean_text(item))
     return conflicts
 
 
 def _cross_field_consistency_error(task: dict[str, Any]) -> str:
-    primary_function = _clean_text(task.get("primary_function"))
+    primary_function = clean_text(task.get("primary_function"))
     secondary_functions = list(task.get("secondary_functions") or [])
-    canon_budget = _clean_text(task.get("canon_budget"))
+    canon_budget = clean_text(task.get("canon_budget"))
 
     if primary_function in secondary_functions:
         return (
@@ -324,7 +306,7 @@ def _validate_payload(payload: Any) -> tuple[dict[str, Any] | None, str]:
     else:
         normalized_chapter_number = None
 
-    primary_function = _clean_text(payload.get("primary_function"))
+    primary_function = clean_text(payload.get("primary_function"))
     if primary_function not in CHAPTER_FUNCTIONS:
         return None, "primary_function is invalid."
 
@@ -334,11 +316,11 @@ def _validate_payload(payload: Any) -> tuple[dict[str, Any] | None, str]:
     if any(item not in CHAPTER_FUNCTIONS for item in secondary_functions):
         return None, "secondary_functions contains an invalid value."
 
-    intensity = _clean_text(payload.get("intensity"))
+    intensity = clean_text(payload.get("intensity"))
     if intensity not in INTENSITIES:
         return None, "intensity is invalid."
 
-    canon_budget = _clean_text(payload.get("canon_budget"))
+    canon_budget = clean_text(payload.get("canon_budget"))
     if canon_budget not in CANON_BUDGETS:
         return None, "canon_budget is invalid."
 
@@ -358,7 +340,7 @@ def _validate_payload(payload: Any) -> tuple[dict[str, Any] | None, str]:
         value = payload.get(field_name)
         if value is not None and not isinstance(value, str):
             return None, f"{field_name} must be a string."
-        normalized[field_name] = _clean_text(value)
+        normalized[field_name] = clean_text(value)
     message = _cross_field_consistency_error(normalized)
     if message:
         return None, message
@@ -461,7 +443,7 @@ def save_chapter_task_draft(
     tasks = document["tasks"]
     history = _task_history(tasks, number)
     approved, latest_draft = _selection(history)
-    requested_id = _clean_text(payload.get("id")) if isinstance(payload, dict) else ""
+    requested_id = clean_text(payload.get("id")) if isinstance(payload, dict) else ""
     requested_revision = payload.get("revision") if isinstance(payload, dict) else None
     if requested_id and not history:
         return _error(
@@ -474,7 +456,7 @@ def save_chapter_task_draft(
     if requested_id and history and not any(task.get("id") == requested_id for task in history):
         return _error(project_ref, number, "Task id does not belong to this chapter.", "chapter_task_chapter_mismatch")
 
-    now = _timestamp()
+    now = timestamp()
     if latest_draft is not None:
         if requested_id and requested_id != latest_draft.get("id"):
             return _error(project_ref, number, "Task id does not match the current draft.", "chapter_task_conflict", 409)
@@ -496,7 +478,7 @@ def save_chapter_task_draft(
         saved_task = updated
     else:
         if approved is not None:
-            task_id = _clean_text(approved.get("id"))
+            task_id = clean_text(approved.get("id"))
             revision = int(approved.get("revision") or 0) + 1
             base = {field_name: approved.get(field_name) for field_name in EDITABLE_FIELDS}
         else:
@@ -520,7 +502,7 @@ def save_chapter_task_draft(
         tasks.append(saved_task)
 
     try:
-        _write_document_atomic(path, document)
+        write_json_atomic(path, document)
     except OSError as exc:
         return _error(project_ref, number, f"Chapter task write failed: {exc}", "chapter_task_write_failed")
     result = _result_from_document(project_ref, number, document, "Chapter Task Sheet draft saved.")
@@ -537,7 +519,7 @@ def approve_chapter_task(
     number, message = _chapter_number(chapter_number)
     if message:
         return _error(project_ref, 0, message, "chapter_task_invalid")
-    clean_id = _clean_text(task_id)
+    clean_id = clean_text(task_id)
     if not clean_id and revision in {None, ""}:
         return _error(project_ref, number, "Approval requires task_id or revision.", "chapter_task_invalid")
     clean_revision: int | None = None
@@ -569,7 +551,7 @@ def approve_chapter_task(
     if target is None:
         return _error(project_ref, number, "Requested draft revision was not found.", "chapter_task_not_found", 404)
 
-    now = _timestamp()
+    now = timestamp()
     approved_task: dict[str, Any] | None = None
     for index, task in enumerate(document["tasks"]):
         if task.get("chapter_number") != number:
@@ -592,7 +574,7 @@ def approve_chapter_task(
             document["tasks"][index] = approved_task
 
     try:
-        _write_document_atomic(path, document)
+        write_json_atomic(path, document)
     except OSError as exc:
         return _error(project_ref, number, f"Chapter task write failed: {exc}", "chapter_task_write_failed")
     result = _result_from_document(project_ref, number, document, "Chapter Task Sheet approved.")
@@ -608,7 +590,7 @@ def resolve_approved_chapter_task(
     result = get_chapter_tasks(project_ref, chapter_number, books_root=books_root)
     if not result.ok:
         return result
-    clean_id = _clean_text(task_id)
+    clean_id = clean_text(task_id)
     approved = result.approved
     if clean_id:
         matching = [task for task in result.history if task.get("id") == clean_id]
@@ -666,14 +648,14 @@ def resolve_approved_chapter_task(
 def derive_allowed_scene_contract(task: dict[str, Any]) -> str:
     if not isinstance(task, dict) or task.get("status") != "approved":
         raise ValueError("Allowed Scene Contract requires an approved Chapter Task Sheet.")
-    primary_function = _clean_text(task.get("primary_function"))
+    primary_function = clean_text(task.get("primary_function"))
     secondary_functions = [
-        _clean_text(item)
+        clean_text(item)
         for item in task.get("secondary_functions", [])
-        if _clean_text(item) in CHAPTER_FUNCTIONS
+        if clean_text(item) in CHAPTER_FUNCTIONS
     ]
-    intensity = _clean_text(task.get("intensity"))
-    canon_budget = _clean_text(task.get("canon_budget"))
+    intensity = clean_text(task.get("intensity"))
+    canon_budget = clean_text(task.get("canon_budget"))
     if primary_function not in CHAPTER_FUNCTIONS or intensity not in INTENSITIES or canon_budget not in CANON_BUDGETS:
         raise ValueError("Approved Chapter Task Sheet contains invalid enums.")
     consistency_message = _cross_field_consistency_error(task)
@@ -706,8 +688,8 @@ def derive_allowed_scene_contract(task: dict[str, Any]) -> str:
     elif canon_budget == "minor":
         forbidden.append("释放改变主线因果或终局真相的重大新正典")
 
-    allowed.extend(_clean_text(item) for item in task.get("allowed_scene_types", []) if _clean_text(item))
-    forbidden.extend(_clean_text(item) for item in task.get("forbidden_scene_drivers", []) if _clean_text(item))
+    allowed.extend(clean_text(item) for item in task.get("allowed_scene_types", []) if clean_text(item))
+    forbidden.extend(clean_text(item) for item in task.get("forbidden_scene_drivers", []) if clean_text(item))
 
     def unique(items: list[str]) -> list[str]:
         return list(dict.fromkeys(item for item in items if item))
@@ -745,7 +727,7 @@ def format_approved_task_for_prompt(task: dict[str, Any]) -> str:
         raise ValueError("Prompt formatting requires an approved Chapter Task Sheet.")
 
     def list_text(field_name: str) -> str:
-        values = [_clean_text(item) for item in task.get(field_name, []) if _clean_text(item)]
+        values = [clean_text(item) for item in task.get(field_name, []) if clean_text(item)]
         return "；".join(values) if values else "无"
 
     return "\n".join(
@@ -764,11 +746,11 @@ def format_approved_task_for_prompt(task: dict[str, Any]) -> str:
             f"- allowed_advances: {list_text('allowed_advances')}",
             f"- forbidden_advances: {list_text('forbidden_advances')}",
             f"- required_characters: {list_text('required_characters')}",
-            f"- relationship_goal: {_clean_text(task.get('relationship_goal')) or '无'}",
-            f"- decision_goal: {_clean_text(task.get('decision_goal')) or '无'}",
+            f"- relationship_goal: {clean_text(task.get('relationship_goal')) or '无'}",
+            f"- decision_goal: {clean_text(task.get('decision_goal')) or '无'}",
             f"- allowed_scene_types: {list_text('allowed_scene_types')}",
             f"- forbidden_scene_drivers: {list_text('forbidden_scene_drivers')}",
-            f"- ending_state: {_clean_text(task.get('ending_state')) or '无'}",
-            f"- notes: {_clean_text(task.get('notes')) or '无'}",
+            f"- ending_state: {clean_text(task.get('ending_state')) or '无'}",
+            f"- notes: {clean_text(task.get('notes')) or '无'}",
         ]
     )

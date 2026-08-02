@@ -11,6 +11,7 @@ from api.schemas import (
     ChapterSummaryResponse,
     CreateProjectRequest,
     CreateProjectResponse,
+    DeleteProjectResponse,
     ProjectDetailResponse,
     ProjectSummaryResponse,
     UpdateGenerationSettingsRequest,
@@ -19,6 +20,7 @@ from api.schemas import (
 from config import PROJECT_ROOT
 from services.project_service import (
     create_workspace_project,
+    delete_workspace_project,
     list_project_summaries,
     load_project_detail,
     update_generation_settings,
@@ -132,6 +134,18 @@ def get_project(project_ref: str) -> ProjectDetailResponse:
         project_ref=result.project_ref,
         title=result.title,
         config=_sanitize_config(result.config or {}),
+    )
+
+
+@router.delete("/{project_ref}", response_model=DeleteProjectResponse)
+def delete_project(project_ref: str) -> DeleteProjectResponse:
+    ok, message = delete_workspace_project(project_ref)
+    if not ok:
+        _error(404, "project_delete_failed", message or "Project deletion failed.")
+    return DeleteProjectResponse(
+        ok=True,
+        project_ref=project_ref,
+        message=message,
     )
 
 

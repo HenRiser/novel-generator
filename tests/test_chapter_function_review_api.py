@@ -153,7 +153,16 @@ class ChapterFunctionReviewApiTests(unittest.TestCase):
             common[4],
             common[5],
             common[6],
-            patch("services.generation_service.stream_generate_text", return_value=iter(["# Chapter\n", "He decoded GA-197."])),
+            patch(
+                "services.generation_service.stream_generate_text_events",
+                return_value=iter(
+                    [
+                        {"kind": "reasoning", "text": "Checking archive attendance record."},
+                        {"kind": "content", "text": "# Chapter\n"},
+                        {"kind": "content", "text": "He decoded GA-197."},
+                    ]
+                ),
+            ),
             patch("services.generation_service.generate_text", return_value="summary"),
         ):
             response = self.client.post(

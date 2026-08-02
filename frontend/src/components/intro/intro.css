@@ -1,0 +1,286 @@
+/* Braipen 开篇动画：3D 全息大脑 → 钢笔刺穿 → 简笔画 logo */
+
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #f4efe6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.intro-overlay-leaving {
+  animation: intro-overlay-exit 0.55s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes intro-overlay-exit {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96) translateY(-18px);
+    visibility: hidden;
+  }
+}
+
+.intro-stage {
+  position: relative;
+  width: min(560px, 92vw);
+  height: min(560px, 92vw);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- 全息层 ---------- */
+
+.intro-holo {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: intro-holo-exit 0.7s ease 1.75s both;
+}
+
+@keyframes intro-holo-exit {
+  to {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+}
+
+/* 全息底座光环 */
+.intro-halo {
+  position: absolute;
+  left: 50%;
+  bottom: 13%;
+  width: 250px;
+  height: 52px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  border: 2px solid rgba(99, 214, 238, 0.55);
+  box-shadow:
+    0 0 16px rgba(99, 214, 238, 0.45),
+    inset 0 0 14px rgba(99, 214, 238, 0.35);
+  animation:
+    intro-halo-in 0.35s ease-out both,
+    intro-halo-pulse 1.8s ease-in-out 0.35s infinite;
+}
+
+@keyframes intro-halo-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes intro-halo-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 16px rgba(99, 214, 238, 0.45),
+      inset 0 0 14px rgba(99, 214, 238, 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 26px rgba(99, 214, 238, 0.7),
+      inset 0 0 20px rgba(99, 214, 238, 0.5);
+  }
+}
+
+/* 3D 大脑容器 */
+.intro-brain3d {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 380px;
+  height: 320px;
+  transform: translate(-50%, -50%);
+  animation:
+    intro-brain-in 0.35s ease-out both,
+    intro-brain3d-glow 1.9s ease-in-out 0.35s infinite;
+}
+
+.intro-brain3d canvas {
+  display: block;
+}
+
+@keyframes intro-brain-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+@keyframes intro-brain3d-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 6px rgba(99, 214, 238, 0.5))
+      drop-shadow(0 0 18px rgba(99, 214, 238, 0.22));
+  }
+  50% {
+    filter: drop-shadow(0 0 12px rgba(99, 214, 238, 0.8))
+      drop-shadow(0 0 30px rgba(99, 214, 238, 0.4));
+  }
+}
+
+/* ---------- 钢笔 ---------- */
+
+.intro-pen {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 56px;
+  height: 330px;
+  margin-left: -28px;
+  margin-top: -165px;
+  transform-origin: 50% 50%;
+  animation: intro-pen-pierce 0.6s cubic-bezier(0.25, 0.85, 0.35, 1) 0.85s both;
+}
+
+@keyframes intro-pen-pierce {
+  0% {
+    transform: translate(-190px, -240px) rotate(-62deg);
+    opacity: 0;
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-20px, -16px) rotate(-35deg);
+    opacity: 1;
+  }
+}
+
+.intro-pen-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  filter: drop-shadow(0 0 7px rgba(99, 214, 238, 0.9))
+    drop-shadow(0 0 18px rgba(99, 214, 238, 0.4));
+}
+
+/* 刺入瞬间光晕 */
+.intro-flash {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  width: 260px;
+  height: 260px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(120, 224, 245, 0.85) 0%,
+    rgba(99, 214, 238, 0.35) 38%,
+    transparent 68%
+  );
+  animation: intro-flash-burst 0.45s ease-out 1.42s both;
+}
+
+@keyframes intro-flash-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.3);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
+/* ---------- 最终 logo ---------- */
+
+.intro-logo {
+  position: absolute;
+  left: 50%;
+  top: 47%;
+  width: min(470px, 78vw);
+  transform: translate(-50%, -50%);
+  mix-blend-mode: multiply;
+  animation: intro-logo-in 0.8s cubic-bezier(0.2, 0.7, 0.3, 1) 1.85s both;
+}
+
+@keyframes intro-logo-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.88);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+/* ---------- 品牌文字 ---------- */
+
+.intro-brand {
+  position: absolute;
+  left: 50%;
+  bottom: 2%;
+  transform: translateX(-50%);
+  font-size: 15px;
+  font-weight: 500;
+  color: #746b5f;
+  letter-spacing: 0.5em;
+  padding-left: 0.5em; /* 补偿 letter-spacing 末字空隙，视觉居中 */
+  animation: intro-brand-in 0.6s ease 2.6s both;
+}
+
+@keyframes intro-brand-in {
+  from {
+    opacity: 0;
+    letter-spacing: 1.1em;
+    padding-left: 1.1em;
+  }
+  to {
+    opacity: 1;
+    letter-spacing: 0.5em;
+    padding-left: 0.5em;
+  }
+}
+
+/* ---------- 跳过提示 ---------- */
+
+.intro-skip {
+  position: absolute;
+  right: 26px;
+  bottom: 20px;
+  font-size: 12px;
+  color: #b4a88f;
+  animation: intro-brand-in 0.5s ease 0.9s both;
+  user-select: none;
+}
+
+/* 降低动态偏好：直接静态显示 logo */
+@media (prefers-reduced-motion: reduce) {
+  .intro-holo,
+  .intro-flash,
+  .intro-skip,
+  .intro-brand {
+    animation: none !important;
+    display: none;
+  }
+  .intro-logo {
+    animation: none;
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}

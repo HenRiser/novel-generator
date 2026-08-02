@@ -13,6 +13,7 @@ from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
 
 from .event_log_service import append_event_best_effort
+from .common import clean_text, read_json, resolve_workspace_context, timestamp, write_json_atomic
 
 
 SNAPSHOT_VERSION = 1
@@ -37,57 +38,32 @@ class SafetySnapshotResult:
     error_code: str = "safety_snapshot_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _safe_id(reason: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_reason = re.sub(r"[^A-Za-z0-9_]+", "_", _clean_text(reason)).strip("_") or "snapshot"
+    safe_reason = re.sub(r"[^A-Za-z0-9_]+", "_", clean_text(reason)).strip("_") or "snapshot"
     safe_reason = safe_reason[:60]
     return f"snapshot_{timestamp}_{safe_reason}_{secrets.token_hex(4)}"
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except FileNotFoundError:
-        return None, "Project not found."
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "Safety snapshots are only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='Safety snapshots are only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
 def _snapshots_dir(ctx: Any) -> Path:
     return ctx.project_dir / SNAPSHOTS_DIR_NAME
 
 
-def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name} is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object.")
-    return data
 
 
 def _sanitize_payload(value: Any) -> Any:
@@ -112,7 +88,7 @@ def _sanitize_payload(value: Any) -> Any:
 
 
 def _valid_relative_path(value: str) -> str:
-    text = _clean_text(value).replace("\\", "/")
+    text = clean_text(value).replace("\\", "/")
     if not text or Path(text).is_absolute() or ".." in Path(text).parts:
         return ""
     return text
@@ -143,7 +119,7 @@ def create_safety_snapshot(
             400,
         )
 
-    clean_reason = _clean_text(reason) or "manual_snapshot"
+    clean_reason = clean_text(reason) or "manual_snapshot"
     snapshot_id = _safe_id(clean_reason)
     snapshot_dir = _snapshots_dir(ctx) / snapshot_id
     copied_files: list[str] = []
@@ -173,9 +149,9 @@ def create_safety_snapshot(
             "source": _sanitize_payload(source if isinstance(source, dict) else {}),
             "files": copied_files,
             "skipped_files": skipped_files,
-            "created_at": _timestamp(),
+            "created_at": timestamp(),
         }
-        _write_json_atomic(snapshot_dir / "manifest.json", manifest)
+        write_json_atomic(snapshot_dir / "manifest.json", manifest)
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"Safety snapshot failed: {exc}", "safety_snapshot_write_failed", 400)
 
@@ -216,12 +192,12 @@ def list_safety_snapshots(project_ref: str) -> SafetySnapshotResult:
         for path in root.iterdir():
             if not path.is_dir():
                 continue
-            manifest = _read_json(path / "manifest.json")
+            manifest = read_json(path / "manifest.json")
             if not isinstance(manifest, dict):
                 continue
             snapshots.append(_sanitize_payload(manifest))
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"Safety snapshot read failed: {exc}", "safety_snapshot_read_failed", 400)
 
-    snapshots.sort(key=lambda item: _clean_text(item.get("created_at")), reverse=True)
+    snapshots.sort(key=lambda item: clean_text(item.get("created_at")), reverse=True)
     return SafetySnapshotResult(True, project_ref=project_ref, snapshots=snapshots)

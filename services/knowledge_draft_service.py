@@ -21,6 +21,7 @@ from .narrative_graph_service import (
     save_graph_documents_for_review,
 )
 from .safety_snapshot_service import create_safety_snapshot
+from .common import clean_text, read_json, resolve_workspace_context, timestamp, write_json_atomic
 
 
 DOCUMENT_VERSION = 1
@@ -48,25 +49,17 @@ class KnowledgeDraftReviewResult:
     error_code: str = "knowledge_draft_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except (FileNotFoundError, ValueError) as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "Knowledge Draft review is only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='Knowledge Draft review is only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
 def _memory_dir(ctx: Any) -> Path:
@@ -77,27 +70,12 @@ def _knowledge_drafts_path(ctx: Any) -> Path:
     return _memory_dir(ctx) / KNOWLEDGE_DRAFTS_NAME
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name} is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object.")
-    return data
 
 
-def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _empty_knowledge_drafts(project_ref: str, created_at: str | None = None) -> dict[str, Any]:
-    now = _timestamp()
+    now = timestamp()
     return {
         "version": DOCUMENT_VERSION,
         "metadata": {
@@ -120,31 +98,31 @@ def _normalize_result(value: Any) -> dict[str, Any]:
 def _normalize_payload_for_operation(operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     if operation == "create_node":
-        node_type = _clean_text(normalized.get("type")) or _clean_text(normalized.get("node_type"))
+        node_type = clean_text(normalized.get("type")) or clean_text(normalized.get("node_type"))
         if node_type:
             normalized["type"] = node_type
         normalized.pop("node_type", None)
-        if not _clean_text(normalized.get("summary")) and _clean_text(normalized.get("description")):
-            normalized["summary"] = _clean_text(normalized.get("description"))
+        if not clean_text(normalized.get("summary")) and clean_text(normalized.get("description")):
+            normalized["summary"] = clean_text(normalized.get("description"))
     elif operation == "create_edge":
         for endpoint in ("source", "target"):
             node_id_key = f"{endpoint}_node_id"
-            if not _clean_text(normalized.get(endpoint)) and _clean_text(normalized.get(node_id_key)):
-                normalized[endpoint] = _clean_text(normalized.get(node_id_key))
-        if not _clean_text(normalized.get("label")):
+            if not clean_text(normalized.get(endpoint)) and clean_text(normalized.get(node_id_key)):
+                normalized[endpoint] = clean_text(normalized.get(node_id_key))
+        if not clean_text(normalized.get("label")):
             normalized["label"] = (
-                _clean_text(normalized.get("description"))
-                or _clean_text(normalized.get("summary"))
-                or _clean_text(normalized.get("type"))
+                clean_text(normalized.get("description"))
+                or clean_text(normalized.get("summary"))
+                or clean_text(normalized.get("type"))
             )
-        if not _clean_text(normalized.get("summary")) and _clean_text(normalized.get("description")):
-            normalized["summary"] = _clean_text(normalized.get("description"))
+        if not clean_text(normalized.get("summary")) and clean_text(normalized.get("description")):
+            normalized["summary"] = clean_text(normalized.get("description"))
     return normalized
 
 
 def normalize_candidate_change(change: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(change)
-    status = _clean_text(normalized.get("status")) or "pending_review"
+    status = clean_text(normalized.get("status")) or "pending_review"
     if status not in CHANGE_STATUSES:
         status = "pending_review"
     normalized["status"] = status
@@ -155,7 +133,7 @@ def normalize_candidate_change(change: dict[str, Any]) -> dict[str, Any]:
     normalized["result"] = _normalize_result(normalized.get("result"))
     payload = normalized.get("payload")
     if isinstance(payload, dict):
-        normalized["payload"] = _normalize_payload_for_operation(_clean_text(normalized.get("operation")), payload)
+        normalized["payload"] = _normalize_payload_for_operation(clean_text(normalized.get("operation")), payload)
     else:
         normalized["payload"] = payload
     return normalized
@@ -168,12 +146,12 @@ def aggregate_draft_status(draft: dict[str, Any]) -> str:
         if isinstance(change, dict)
     ]
     statuses = [
-        _clean_text(change.get("status")) or "pending_review"
+        clean_text(change.get("status")) or "pending_review"
         for change in changes
     ]
     statuses = [status if status in CHANGE_STATUSES else "pending_review" for status in statuses]
     if not statuses:
-        return _clean_text(draft.get("status")) or "pending_review"
+        return clean_text(draft.get("status")) or "pending_review"
     if all(status == "pending_review" for status in statuses):
         return "pending_review"
     if all(status == "accepted" for status in statuses):
@@ -204,7 +182,7 @@ def _normalize_knowledge_drafts_document(data: dict[str, Any] | None, project_re
     document["version"] = DOCUMENT_VERSION
     metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
     metadata["project_ref"] = project_ref
-    metadata.setdefault("created_at", _timestamp())
+    metadata.setdefault("created_at", timestamp())
     metadata.setdefault("updated_at", metadata["created_at"])
     document["metadata"] = metadata
     raw_drafts = document.get("drafts")
@@ -217,7 +195,7 @@ def _normalize_knowledge_drafts_document(data: dict[str, Any] | None, project_re
 
 
 def _update_metadata(document: dict[str, Any]) -> None:
-    now = _timestamp()
+    now = timestamp()
     metadata = dict(document.get("metadata") if isinstance(document.get("metadata"), dict) else {})
     metadata.setdefault("created_at", now)
     metadata["updated_at"] = now
@@ -230,7 +208,7 @@ def _load_document(project_ref: str) -> tuple[Any | None, dict[str, Any] | None,
         return None, None, message
     try:
         document = _normalize_knowledge_drafts_document(
-            _read_json(_knowledge_drafts_path(ctx)),
+            read_json(_knowledge_drafts_path(ctx)),
             project_ref,
         )
     except (OSError, ValueError) as exc:
@@ -240,27 +218,27 @@ def _load_document(project_ref: str) -> tuple[Any | None, dict[str, Any] | None,
 
 def _save_document(ctx: Any, document: dict[str, Any]) -> None:
     _update_metadata(document)
-    _write_json_atomic(_knowledge_drafts_path(ctx), document)
+    write_json_atomic(_knowledge_drafts_path(ctx), document)
 
 
 def _find_draft_index(document: dict[str, Any], draft_id: str) -> int | None:
-    wanted = _clean_text(draft_id)
+    wanted = clean_text(draft_id)
     for index, draft in enumerate(document.get("drafts", [])):
-        if isinstance(draft, dict) and _clean_text(draft.get("id")) == wanted:
+        if isinstance(draft, dict) and clean_text(draft.get("id")) == wanted:
             return index
     return None
 
 
 def _find_change_index(draft: dict[str, Any], change_id: str) -> int | None:
-    wanted = _clean_text(change_id)
+    wanted = clean_text(change_id)
     for index, change in enumerate(draft.get("candidate_changes", [])):
-        if isinstance(change, dict) and _clean_text(change.get("id")) == wanted:
+        if isinstance(change, dict) and clean_text(change.get("id")) == wanted:
             return index
     return None
 
 
 def _safe_graph_id(kind: str, change_id: str) -> str:
-    safe_change_id = re.sub(r"[^A-Za-z0-9_]+", "_", _clean_text(change_id)).strip("_") or "change"
+    safe_change_id = re.sub(r"[^A-Za-z0-9_]+", "_", clean_text(change_id)).strip("_") or "change"
     return f"{kind}_from_{safe_change_id}"
 
 
@@ -279,11 +257,11 @@ def _review_source_info(draft: dict[str, Any], change: dict[str, Any]) -> dict[s
         "created_by": "knowledge_draft_review",
         "introduced_in": introduced_in,
         "last_updated_in": None,
-        "draft_id": _clean_text(draft.get("id")),
-        "candidate_change_id": _clean_text(change.get("id")),
-        "source_delta_id": _clean_text(draft.get("source_delta_id")) or None,
+        "draft_id": clean_text(draft.get("id")),
+        "candidate_change_id": clean_text(change.get("id")),
+        "source_delta_id": clean_text(draft.get("source_delta_id")) or None,
         "chapter_number": chapter_number,
-        "candidate_source": _clean_text(change.get("source")) or None,
+        "candidate_source": clean_text(change.get("source")) or None,
     }
 
 
@@ -301,9 +279,9 @@ def _review_info_from_entity(entity: dict[str, Any]) -> dict[str, Any]:
 def _review_matches(entity: dict[str, Any], draft_id: str, change_id: str) -> bool:
     info = _review_info_from_entity(entity)
     return (
-        _clean_text(info.get("created_by")) == "knowledge_draft_review"
-        and _clean_text(info.get("draft_id")) == _clean_text(draft_id)
-        and _clean_text(info.get("candidate_change_id")) == _clean_text(change_id)
+        clean_text(info.get("created_by")) == "knowledge_draft_review"
+        and clean_text(info.get("draft_id")) == clean_text(draft_id)
+        and clean_text(info.get("candidate_change_id")) == clean_text(change_id)
     )
 
 
@@ -325,19 +303,19 @@ def _find_entity_by_id(graph: dict[str, Any], entity_kind: str, entity_id: str) 
     graph_data = graph.get("graph") if isinstance(graph.get("graph"), dict) else {}
     key = "nodes" if entity_kind == "node" else "edges"
     for entity in graph_data.get(key, []):
-        if isinstance(entity, dict) and _clean_text(entity.get("id")) == _clean_text(entity_id):
+        if isinstance(entity, dict) and clean_text(entity.get("id")) == clean_text(entity_id):
             return entity
     return None
 
 
 def _resolved_status(payload: dict[str, Any], change: dict[str, Any]) -> str:
-    payload_status = _clean_text(payload.get("status"))
+    payload_status = clean_text(payload.get("status"))
     if payload_status:
         return payload_status
-    suggested_status = _clean_text(payload.get("suggested_status"))
+    suggested_status = clean_text(payload.get("suggested_status"))
     if suggested_status:
         return suggested_status
-    source = _clean_text(change.get("source"))
+    source = clean_text(change.get("source"))
     if source == "story_delta":
         return "confirmed"
     if source == "next_chapter_proposal":
@@ -351,8 +329,8 @@ def _payload_for_graph(payload: dict[str, Any], change: dict[str, Any]) -> dict[
     graph_payload.pop("node_type", None)
     graph_payload.pop("source_node_id", None)
     graph_payload.pop("target_node_id", None)
-    if not _clean_text(graph_payload.get("summary")) and _clean_text(payload.get("description")):
-        graph_payload["summary"] = _clean_text(payload.get("description"))
+    if not clean_text(graph_payload.get("summary")) and clean_text(payload.get("description")):
+        graph_payload["summary"] = clean_text(payload.get("description"))
     graph_payload["status"] = _resolved_status(payload, change)
     return graph_payload
 
@@ -375,7 +353,7 @@ def _mark_change_accepted(
     changes = draft["candidate_changes"]
     change = dict(changes[change_index])
     change["status"] = "accepted"
-    change["reviewed_at"] = _timestamp()
+    change["reviewed_at"] = timestamp()
     change["reviewed_by"] = REVIEWED_BY
     change["review_note"] = review_note
     change["requires_review"] = True
@@ -389,7 +367,7 @@ def _mark_change_rejected(draft: dict[str, Any], change_index: int, review_note:
     changes = draft["candidate_changes"]
     change = dict(changes[change_index])
     change["status"] = "rejected"
-    change["reviewed_at"] = _timestamp()
+    change["reviewed_at"] = timestamp()
     change["reviewed_by"] = REVIEWED_BY
     change["review_note"] = review_note
     change["requires_review"] = True
@@ -488,7 +466,7 @@ def get_knowledge_draft(project_ref: str, draft_id: str) -> KnowledgeDraftReview
 
 def _payload_from_request(change: dict[str, Any], request: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     override = request.get("payload_override")
-    operation = _clean_text(change.get("operation"))
+    operation = clean_text(change.get("operation"))
     if override is not None:
         if not isinstance(override, dict):
             return None, "payload_override must be a JSON object when provided."
@@ -500,7 +478,7 @@ def _payload_from_request(change: dict[str, Any], request: dict[str, Any]) -> tu
 
 
 def _validate_common_accept(change: dict[str, Any], payload: dict[str, Any]) -> str:
-    if _clean_text(change.get("target")) != "narrative_graph":
+    if clean_text(change.get("target")) != "narrative_graph":
         return "Candidate target must be narrative_graph."
     if not isinstance(payload, dict):
         return "Candidate payload must be a JSON object."
@@ -513,19 +491,19 @@ def _build_node_from_change(
     change: dict[str, Any],
     payload: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, str, str]:
-    label = _clean_text(payload.get("label"))
+    label = clean_text(payload.get("label"))
     if not label:
         return None, "", "Node label cannot be empty."
-    node_type = _clean_text(payload.get("type")) or _clean_text(payload.get("node_type"))
+    node_type = clean_text(payload.get("type")) or clean_text(payload.get("node_type"))
     if not node_type:
         return None, "", "Node type cannot be empty."
     if node_type not in NODE_TYPES:
         return None, "", "Node type is invalid."
 
-    node_id = _safe_graph_id("node", _clean_text(change.get("id")))
-    existing = _find_existing_review_entity(graph, "node", _clean_text(draft.get("id")), _clean_text(change.get("id")))
+    node_id = _safe_graph_id("node", clean_text(change.get("id")))
+    existing = _find_existing_review_entity(graph, "node", clean_text(draft.get("id")), clean_text(change.get("id")))
     if existing is not None:
-        return existing, _clean_text(existing.get("id")), ""
+        return existing, clean_text(existing.get("id")), ""
     conflict = _find_entity_by_id(graph, "node", node_id)
     if conflict is not None:
         return None, node_id, "Node id already exists for a different review change."
@@ -547,22 +525,22 @@ def _resolve_edge_endpoint(
     endpoint_key: str,
 ) -> tuple[str, str]:
     node_ids = graph_node_ids(graph)
-    direct = _clean_text(payload.get(endpoint_key)) or _clean_text(payload.get(f"{endpoint_key}_node_id"))
+    direct = clean_text(payload.get(endpoint_key)) or clean_text(payload.get(f"{endpoint_key}_node_id"))
     if direct:
         if direct in node_ids:
             return direct, ""
         return "", f"{endpoint_key} node does not exist: {direct}."
 
-    change_ref = _clean_text(payload.get(f"{endpoint_key}_change_id"))
+    change_ref = clean_text(payload.get(f"{endpoint_key}_change_id"))
     if change_ref:
         for change in draft.get("candidate_changes", []):
-            if not isinstance(change, dict) or _clean_text(change.get("id")) != change_ref:
+            if not isinstance(change, dict) or clean_text(change.get("id")) != change_ref:
                 continue
-            if _clean_text(change.get("operation")) != "create_node":
+            if clean_text(change.get("operation")) != "create_node":
                 return "", f"{endpoint_key}_change_id must reference a create_node change."
-            if _clean_text(change.get("status")) != "accepted":
+            if clean_text(change.get("status")) != "accepted":
                 return "", f"{endpoint_key}_change_id must reference an accepted create_node change."
-            created_node_id = _clean_text(_normalize_result(change.get("result")).get("created_node_id"))
+            created_node_id = clean_text(_normalize_result(change.get("result")).get("created_node_id"))
             if not created_node_id:
                 return "", f"{endpoint_key}_change_id does not have result.created_node_id."
             if created_node_id not in node_ids:
@@ -571,7 +549,7 @@ def _resolve_edge_endpoint(
         return "", f"{endpoint_key}_change_id was not found in this draft."
 
     label_key = f"{endpoint_key}_label"
-    if _clean_text(payload.get(label_key)):
+    if clean_text(payload.get(label_key)):
         return "", f"{label_key} cannot be merged automatically; accept the node first and use {endpoint_key}_change_id."
     return "", f"{endpoint_key} must be an existing node id or an accepted {endpoint_key}_change_id."
 
@@ -591,22 +569,22 @@ def _build_edge_from_change(
     if source == target:
         return None, "", "Edge source and target cannot be the same node."
 
-    edge_type = _clean_text(payload.get("type"))
+    edge_type = clean_text(payload.get("type"))
     if not edge_type:
         return None, "", "Edge type cannot be empty."
-    if not _clean_text(payload.get("label")):
+    if not clean_text(payload.get("label")):
         payload["label"] = (
-            _clean_text(payload.get("description"))
-            or _clean_text(payload.get("summary"))
+            clean_text(payload.get("description"))
+            or clean_text(payload.get("summary"))
             or edge_type
         )
-    if not _clean_text(payload.get("label")):
+    if not clean_text(payload.get("label")):
         return None, "", "Edge label cannot be empty."
 
-    edge_id = _safe_graph_id("edge", _clean_text(change.get("id")))
-    existing = _find_existing_review_entity(graph, "edge", _clean_text(draft.get("id")), _clean_text(change.get("id")))
+    edge_id = _safe_graph_id("edge", clean_text(change.get("id")))
+    existing = _find_existing_review_entity(graph, "edge", clean_text(draft.get("id")), clean_text(change.get("id")))
     if existing is not None:
-        return existing, _clean_text(existing.get("id")), ""
+        return existing, clean_text(existing.get("id")), ""
     conflict = _find_entity_by_id(graph, "edge", edge_id)
     if conflict is not None:
         return None, edge_id, "Edge id already exists for a different review change."
@@ -636,7 +614,7 @@ def accept_candidate_change(
     request: dict[str, Any] | None = None,
 ) -> KnowledgeDraftReviewResult:
     payload_request = dict(request) if isinstance(request, dict) else {}
-    review_note = _clean_text(payload_request.get("review_note"))
+    review_note = clean_text(payload_request.get("review_note"))
     ctx, document, draft_index, change_index, error = _load_draft_and_change(project_ref, draft_id, change_id)
     if error is not None:
         return error
@@ -644,7 +622,7 @@ def accept_candidate_change(
 
     draft = document["drafts"][draft_index]
     change = draft["candidate_changes"][change_index]
-    status = _clean_text(change.get("status")) or "pending_review"
+    status = clean_text(change.get("status")) or "pending_review"
     if status in TERMINAL_CHANGE_STATUSES:
         return _error_result(
             project_ref,
@@ -652,7 +630,7 @@ def accept_candidate_change(
             "knowledge_draft_change_already_reviewed",
             409,
         )
-    operation = _clean_text(change.get("operation"))
+    operation = clean_text(change.get("operation"))
     if operation not in SUPPORTED_ACCEPT_OPERATIONS:
         return _error_result(
             project_ref,
@@ -678,8 +656,8 @@ def accept_candidate_change(
     recovered_before = _find_existing_review_entity(
         graph,
         entity_kind,
-        _clean_text(draft.get("id")),
-        _clean_text(change.get("id")),
+        clean_text(draft.get("id")),
+        clean_text(change.get("id")),
     ) is not None
 
     if operation == "create_node":
@@ -698,8 +676,8 @@ def accept_candidate_change(
         project_ref=project_ref,
         reason="before_accept_knowledge_draft_change",
         source={
-            "draft_id": _clean_text(draft.get("id")),
-            "candidate_change_id": _clean_text(change.get("id")),
+            "draft_id": clean_text(draft.get("id")),
+            "candidate_change_id": clean_text(change.get("id")),
             "operation": operation,
         },
     )
@@ -738,8 +716,8 @@ def accept_candidate_change(
         summary=f"Accepted {operation}: {entity_id}",
         chapter_number=_chapter_number(draft),
         source={
-            "draft_id": _clean_text(draft.get("id")),
-            "candidate_change_id": _clean_text(change.get("id")),
+            "draft_id": clean_text(draft.get("id")),
+            "candidate_change_id": clean_text(change.get("id")),
             "operation": operation,
             "created_node_id": entity_id if entity_kind == "node" else None,
             "created_edge_id": entity_id if entity_kind == "edge" else None,
@@ -768,7 +746,7 @@ def reject_candidate_change(
     request: dict[str, Any] | None = None,
 ) -> KnowledgeDraftReviewResult:
     payload_request = dict(request) if isinstance(request, dict) else {}
-    review_note = _clean_text(payload_request.get("review_note"))
+    review_note = clean_text(payload_request.get("review_note"))
     ctx, document, draft_index, change_index, error = _load_draft_and_change(project_ref, draft_id, change_id)
     if error is not None:
         return error
@@ -776,7 +754,7 @@ def reject_candidate_change(
 
     draft = document["drafts"][draft_index]
     change = draft["candidate_changes"][change_index]
-    status = _clean_text(change.get("status")) or "pending_review"
+    status = clean_text(change.get("status")) or "pending_review"
     if status in TERMINAL_CHANGE_STATUSES:
         return _error_result(
             project_ref,
@@ -795,12 +773,12 @@ def reject_candidate_change(
     append_event_best_effort(
         project_ref=project_ref,
         event_type="knowledge_draft_change_rejected",
-        summary=f"Rejected candidate change: {_clean_text(change.get('id'))}",
+        summary=f"Rejected candidate change: {clean_text(change.get('id'))}",
         chapter_number=_chapter_number(draft),
         source={
-            "draft_id": _clean_text(draft.get("id")),
-            "candidate_change_id": _clean_text(change.get("id")),
-            "operation": _clean_text(change.get("operation")),
+            "draft_id": clean_text(draft.get("id")),
+            "candidate_change_id": clean_text(change.get("id")),
+            "operation": clean_text(change.get("operation")),
         },
         changed_targets=["memory/knowledge_drafts.json"],
         snapshot_id=None,

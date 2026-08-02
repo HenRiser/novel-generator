@@ -12,6 +12,7 @@ from api.routers import (
     chapter_status,
     chapter_tasks,
     context_pack,
+    continue_writing,
     generation,
     health,
     knowledge_drafts,
@@ -44,6 +45,7 @@ app.include_router(chapter_tasks.router)
 app.include_router(scene_plans.router)
 app.include_router(narrative_graph.router)
 app.include_router(context_pack.router)
+app.include_router(continue_writing.router)
 app.include_router(story_delta.router)
 app.include_router(knowledge_drafts.router)
 app.include_router(generation.router)

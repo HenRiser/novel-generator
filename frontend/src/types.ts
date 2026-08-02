@@ -702,6 +702,11 @@ export type ChapterStreamDeltaEvent = {
   text: string;
 };
 
+export type ChapterStreamReasoningEvent = {
+  type: "reasoning";
+  text: string;
+};
+
 export type ChapterStreamDoneEvent = {
   type: "done";
   ok: true;
@@ -727,11 +732,27 @@ export type ChapterStreamErrorEvent = {
 
 export type ChapterStreamEvent =
   | ChapterStreamDeltaEvent
+  | ChapterStreamReasoningEvent
   | ChapterStreamDoneEvent
   | ChapterStreamErrorEvent;
 
 export type ChapterStreamHandlers = {
   onDelta?: (text: string) => void;
+  onReasoning?: (text: string) => void;
   onDone?: (result: ChapterStreamDoneEvent) => void;
   onError?: (error: ChapterStreamErrorEvent) => void;
+};
+
+export type ContinueSaveRequest = {
+  content: string;
+  mode: "append" | "replace";
+  chapter_title?: string;
+};
+
+export type ContinueSaveResponse = {
+  ok: boolean;
+  project_ref: string;
+  chapter_number: number;
+  chapter_file: string;
+  message: string;
 };

@@ -12,6 +12,7 @@ from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
 
 from .chapter_task_service import get_chapter_tasks
+from .common import resolve_workspace_context, clean_text, timestamp, write_json_atomic
 
 
 DOCUMENT_VERSION = 1
@@ -58,16 +59,12 @@ class ScenePlanResult:
     error_code: str = "scene_plan_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _comparison_key(value: Any) -> str:
-    return _clean_text(value).casefold()
+    return clean_text(value).casefold()
 
 
 def _chapter_number(value: Any) -> tuple[int, str]:
@@ -86,27 +83,17 @@ def _workspace_context(
     project_ref: str,
     books_root: Path | None = None,
 ) -> tuple[Any | None, str, int, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref.", 404, "project_not_found"
-    try:
-        ctx = resolve_project_context(ref, books_root=books_root)
-    except FileNotFoundError:
-        return None, "Project not found.", 404, "project_not_found"
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref.", 404, "project_not_found"
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return (
-            None,
-            "Scene Plans are only supported for workspace book projects.",
-            400,
-            "scene_plan_unsupported_project",
-        )
-    return ctx, "", 200, ""
+    return resolve_workspace_context(
+        project_ref,
+        books_root=books_root,
+        resolve=resolve_project_context,
+        storage_message='Scene Plans are only supported for workspace book projects.',
+        storage_error_code='scene_plan_unsupported_project',
+    )
 
 
 def _project_id(ctx: Any, project_ref: str) -> str:
-    return _clean_text(getattr(ctx, "book_id", "")) or _clean_text(project_ref)
+    return clean_text(getattr(ctx, "book_id", "")) or clean_text(project_ref)
 
 
 def _scene_plan_path(ctx: Any) -> Path:
@@ -121,11 +108,6 @@ def _empty_document() -> dict[str, Any]:
     return {"version": DOCUMENT_VERSION, "items": []}
 
 
-def _write_document_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _safe_plan_id(chapter_number: int) -> str:
@@ -152,7 +134,7 @@ def _string_list(value: Any, field_name: str, *, required: bool = False) -> tupl
 
 
 def _no_new_canon_key(value: Any) -> str:
-    return re.sub(r"[\s，。；;,.、:：!！?？\-—_]+", "", _clean_text(value).casefold())
+    return re.sub(r"[\s，。；;,.、:：!！?？\-—_]+", "", clean_text(value).casefold())
 
 
 def _has_no_new_canon_marker(items: list[str]) -> bool:
@@ -179,7 +161,7 @@ def _validate_scene(raw_scene: Any, expected_scene_no: int) -> tuple[dict[str, A
 
     scene: dict[str, Any] = {"scene_no": scene_no}
     for field_name in sorted(SCENE_TEXT_FIELDS):
-        text = _clean_text(raw_scene.get(field_name))
+        text = clean_text(raw_scene.get(field_name))
         if not text:
             return None, f"{field_name} cannot be empty."
         scene[field_name] = text
@@ -222,7 +204,7 @@ def _validate_payload(payload: Any) -> tuple[dict[str, Any] | None, str]:
             return None, message
         normalized["chapter_number"] = number
 
-    source_task_id = _clean_text(payload.get("source_chapter_task_id"))
+    source_task_id = clean_text(payload.get("source_chapter_task_id"))
     normalized["source_chapter_task_id"] = source_task_id or None
     source_revision = payload.get("source_chapter_task_revision")
     if source_revision in {None, ""}:
@@ -251,11 +233,11 @@ def _validate_document_item(plan: dict[str, Any], path_name: str) -> None:
         raise ValueError(f"{path_name} contains an invalid Scene Plan revision.")
     if plan.get("status") not in SCENE_PLAN_STATUSES:
         raise ValueError(f"{path_name} contains an invalid Scene Plan status.")
-    plan_id = _clean_text(plan.get("id"))
+    plan_id = clean_text(plan.get("id"))
     match = SCENE_PLAN_ID_PATTERN.fullmatch(plan_id)
     if match is None or int(match.group(1)) != number:
         raise ValueError(f"{path_name} contains an invalid Scene Plan id.")
-    if not isinstance(plan.get("project_id"), str) or not _clean_text(plan.get("project_id")):
+    if not isinstance(plan.get("project_id"), str) or not clean_text(plan.get("project_id")):
         raise ValueError(f"{path_name} contains an invalid project_id.")
     source_task_id = plan.get("source_chapter_task_id")
     if source_task_id is not None and not isinstance(source_task_id, str):
@@ -349,7 +331,7 @@ def _current_chapter_task(
 
 
 def _matched_source_task(plan: dict[str, Any], task_result: Any | None) -> tuple[dict[str, Any] | None, str]:
-    source_task_id = _clean_text(plan.get("source_chapter_task_id"))
+    source_task_id = clean_text(plan.get("source_chapter_task_id"))
     source_revision = plan.get("source_chapter_task_revision")
     if not source_task_id:
         return None, ""
@@ -367,7 +349,7 @@ def _matched_source_task(plan: dict[str, Any], task_result: Any | None) -> tuple
     approved = next((task for task in matching if task.get("status") == "approved"), None)
     if approved is not None:
         return dict(approved), ""
-    status = _clean_text(matching[0].get("status"))
+    status = clean_text(matching[0].get("status"))
     if status == "draft":
         return None, "Scene Plan cannot bind a draft Chapter Task Sheet."
     if status == "superseded":
@@ -382,7 +364,7 @@ def _advance_conflicts(left: list[str], right: list[str]) -> list[str]:
     for item in left:
         key = _comparison_key(item)
         if key and key in right_keys and key not in seen:
-            conflicts.append(_clean_text(item))
+            conflicts.append(clean_text(item))
             seen.add(key)
     return conflicts
 
@@ -395,10 +377,10 @@ def _validate_plan_against_task(plan: dict[str, Any], task_result: Any | None) -
     if active_task is None:
         return None, ""
 
-    canon_budget = _clean_text(active_task.get("canon_budget"))
+    canon_budget = clean_text(active_task.get("canon_budget"))
     if canon_budget == "none":
         for scene in plan.get("scenes", []):
-            scene_function = _clean_text(scene.get("scene_function"))
+            scene_function = clean_text(scene.get("scene_function"))
             if scene_function in SCENE_FUNCTIONS_FORBIDDEN_WITH_NONE:
                 return (
                     active_task,
@@ -517,7 +499,7 @@ def save_scene_plan_draft(
     items = document["items"]
     history = _plan_history(items, number)
     approved, latest_draft = _selection(history)
-    requested_id = _clean_text(payload.get("id")) if isinstance(payload, dict) else ""
+    requested_id = clean_text(payload.get("id")) if isinstance(payload, dict) else ""
     requested_revision = payload.get("revision") if isinstance(payload, dict) else None
     if requested_id and not history:
         return _error(
@@ -530,7 +512,7 @@ def save_scene_plan_draft(
     if requested_id and history and not any(plan.get("id") == requested_id for plan in history):
         return _error(project_ref, number, "Scene Plan id does not belong to this chapter.", "scene_plan_chapter_mismatch")
 
-    now = _timestamp()
+    now = timestamp()
     if latest_draft is not None:
         if requested_id and requested_id != latest_draft.get("id"):
             return _error(project_ref, number, "Scene Plan id does not match the current draft.", "scene_plan_conflict", 409)
@@ -583,7 +565,7 @@ def save_scene_plan_draft(
         items.append(saved_plan)
 
     try:
-        _write_document_atomic(path, document)
+        write_json_atomic(path, document)
     except OSError as exc:
         return _error(project_ref, number, f"Scene Plan write failed: {exc}", "scene_plan_write_failed")
     result = _result_from_document(
@@ -606,7 +588,7 @@ def approve_scene_plan(
     number, message = _chapter_number(chapter_number)
     if message:
         return _error(project_ref, 0, message, "scene_plan_invalid")
-    clean_id = _clean_text(scene_plan_id)
+    clean_id = clean_text(scene_plan_id)
     if not clean_id and revision in {None, ""}:
         return _error(project_ref, number, "Approval requires scene_plan_id or revision.", "scene_plan_invalid")
     clean_revision: int | None = None
@@ -644,7 +626,7 @@ def approve_scene_plan(
     if message:
         return _error(project_ref, number, message, "scene_plan_invalid")
 
-    now = _timestamp()
+    now = timestamp()
     approved_plan: dict[str, Any] | None = None
     for index, plan in enumerate(document["items"]):
         if plan.get("chapter_number") != number:
@@ -667,7 +649,7 @@ def approve_scene_plan(
             document["items"][index] = approved_plan
 
     try:
-        _write_document_atomic(path, document)
+        write_json_atomic(path, document)
     except OSError as exc:
         return _error(project_ref, number, f"Scene Plan write failed: {exc}", "scene_plan_write_failed")
     result = _result_from_document(
@@ -688,7 +670,7 @@ def resolve_approved_scene_plan(
     require_task_binding: bool = False,
     books_root: Path | None = None,
 ) -> ScenePlanResult:
-    clean_id = _clean_text(scene_plan_id)
+    clean_id = clean_text(scene_plan_id)
     if not clean_id:
         return ScenePlanResult(
             True,
@@ -723,7 +705,7 @@ def resolve_approved_scene_plan(
         )
 
     if chapter_task is not None:
-        source_task_id = _clean_text(approved.get("source_chapter_task_id"))
+        source_task_id = clean_text(approved.get("source_chapter_task_id"))
         source_revision = approved.get("source_chapter_task_revision")
         if not source_task_id:
             if require_task_binding:
@@ -735,7 +717,7 @@ def resolve_approved_scene_plan(
                     400,
                 )
         elif (
-            source_task_id != _clean_text(chapter_task.get("id"))
+            source_task_id != clean_text(chapter_task.get("id"))
             or source_revision != chapter_task.get("revision")
         ):
             return _error(
@@ -792,14 +774,14 @@ def format_approved_scene_plan_for_prompt(plan: dict[str, Any]) -> str:
     for scene in plan.get("scenes", []):
         lines.extend(
             [
-                f"#### Scene {scene.get('scene_no')}: {_clean_text(scene.get('title'))}",
-                f"- location: {_clean_text(scene.get('location'))}",
+                f"#### Scene {scene.get('scene_no')}: {clean_text(scene.get('title'))}",
+                f"- location: {clean_text(scene.get('location'))}",
                 f"- participants: {'; '.join(scene.get('participants') or [])}",
-                f"- scene_function: {_clean_text(scene.get('scene_function'))}",
+                f"- scene_function: {clean_text(scene.get('scene_function'))}",
                 f"- allowed_information: {'; '.join(scene.get('allowed_information') or [])}",
                 f"- forbidden_information: {'; '.join(scene.get('forbidden_information') or [])}",
-                f"- emotional_shift: {_clean_text(scene.get('emotional_shift'))}",
-                f"- ending_state: {_clean_text(scene.get('ending_state'))}",
+                f"- emotional_shift: {clean_text(scene.get('emotional_shift'))}",
+                f"- ending_state: {clean_text(scene.get('ending_state'))}",
                 "",
             ]
         )

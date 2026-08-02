@@ -10,6 +10,7 @@ from typing import Any
 
 from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
+from .common import clean_text, read_json, resolve_workspace_context, timestamp, write_json_atomic
 
 
 AI_RUN_VERSION = 1
@@ -32,33 +33,23 @@ class AIRunResult:
     error_code: str = "ai_run_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _safe_id(prefix: str = "run") -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_prefix = re.sub(r"[^A-Za-z0-9_]+", "_", _clean_text(prefix)).strip("_") or "run"
+    safe_prefix = re.sub(r"[^A-Za-z0-9_]+", "_", clean_text(prefix)).strip("_") or "run"
     return f"{safe_prefix}_{timestamp}_{secrets.token_hex(4)}"
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except FileNotFoundError:
-        return None, "Project not found."
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "AI Run Provenance is only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='AI Run Provenance is only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
 def _ai_runs_dir(ctx: Any) -> Path:
@@ -69,23 +60,8 @@ def _run_path(ctx: Any, run_id: str) -> Path:
     return _ai_runs_dir(ctx) / f"{run_id}.json"
 
 
-def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name} is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object.")
-    return data
 
 
 def _sanitize_string(value: str) -> str:
@@ -124,7 +100,7 @@ def _string_list(value: Any) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for item in value:
-        text = _clean_text(item).replace("\\", "/")
+        text = clean_text(item).replace("\\", "/")
         if not text or Path(text).is_absolute() or ".." in Path(text).parts or text in seen:
             continue
         seen.add(text)
@@ -135,7 +111,7 @@ def _string_list(value: Any) -> list[str]:
 def _normalize_context(context: Any) -> dict[str, Any]:
     source = dict(context) if isinstance(context, dict) else {}
     return {
-        "context_pack_id": _clean_text(source.get("context_pack_id")) or None,
+        "context_pack_id": clean_text(source.get("context_pack_id")) or None,
         "included_node_ids": _string_list(source.get("included_node_ids")),
         "included_edge_ids": _string_list(source.get("included_edge_ids")),
         "outline_refs": _string_list(source.get("outline_refs")),
@@ -147,14 +123,14 @@ def _normalize_context(context: Any) -> dict[str, Any]:
 
 def _normalize_result(result: Any) -> dict[str, Any]:
     source = dict(result) if isinstance(result, dict) else {}
-    output_ref = _clean_text(source.get("output_ref")).replace("\\", "/")
+    output_ref = clean_text(source.get("output_ref")).replace("\\", "/")
     if Path(output_ref).is_absolute() or ".." in Path(output_ref).parts:
         output_ref = Path(output_ref).name
     return {
-        "status": _clean_text(source.get("status")) or "success",
+        "status": clean_text(source.get("status")) or "success",
         "output_ref": output_ref or None,
-        "finish_reason": _clean_text(source.get("finish_reason")) or None,
-        "error": _clean_text(source.get("error")) or None,
+        "finish_reason": clean_text(source.get("finish_reason")) or None,
+        "error": clean_text(source.get("error")) or None,
         "metadata": sanitize_ai_run(source.get("metadata") if isinstance(source.get("metadata"), dict) else {}),
     }
 
@@ -194,21 +170,21 @@ def create_ai_run_record(
     run = {
         "version": AI_RUN_VERSION,
         "id": run_id,
-        "run_type": _clean_text(run_type),
+        "run_type": clean_text(run_type),
         "project_ref": project_ref,
         "chapter_number": chapter_number if isinstance(chapter_number, int) and chapter_number > 0 else None,
-        "model": _clean_text(model) or None,
+        "model": clean_text(model) or None,
         "temperature": temperature,
         "max_tokens": max_tokens,
         "prompt_profile": sanitize_ai_run(prompt_profile),
         "context": _normalize_context(context),
         "result": _normalize_result(result),
-        "event_id": _clean_text(event_id) or None,
-        "created_at": _timestamp(),
+        "event_id": clean_text(event_id) or None,
+        "created_at": timestamp(),
     }
 
     try:
-        _write_json_atomic(_run_path(ctx, run_id), sanitize_ai_run(run))
+        write_json_atomic(_run_path(ctx, run_id), sanitize_ai_run(run))
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"AI run write failed: {exc}", "ai_run_write_failed", 400)
     return AIRunResult(True, project_ref=project_ref, run_id=run_id, run=run, message="AI run recorded.")
@@ -240,13 +216,13 @@ def list_ai_runs(project_ref: str, limit: int = 50) -> AIRunResult:
         for path in root.glob("*.json"):
             if path.name == "index.json":
                 continue
-            data = _read_json(path)
+            data = read_json(path)
             if isinstance(data, dict):
                 runs.append(sanitize_ai_run(data))
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"AI run read failed: {exc}", "ai_run_read_failed", 400)
 
-    runs.sort(key=lambda item: _clean_text(item.get("created_at")), reverse=True)
+    runs.sort(key=lambda item: clean_text(item.get("created_at")), reverse=True)
     safe_limit = max(1, min(int(limit or 50), 200))
     return AIRunResult(True, project_ref=project_ref, runs=runs[:safe_limit])
 
@@ -260,11 +236,11 @@ def get_ai_run(project_ref: str, run_id: str) -> AIRunResult:
             "ai_run_unsupported_project" if "only supported" in message else "ai_run_unavailable",
             400,
         )
-    clean_id = _clean_text(run_id)
+    clean_id = clean_text(run_id)
     if not clean_id or "/" in clean_id or "\\" in clean_id or ".." in clean_id:
         return _error_result(project_ref, "AI run not found.", "ai_run_not_found", 404)
     try:
-        data = _read_json(_run_path(ctx, clean_id))
+        data = read_json(_run_path(ctx, clean_id))
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"AI run read failed: {exc}", "ai_run_read_failed", 400)
     if not isinstance(data, dict):

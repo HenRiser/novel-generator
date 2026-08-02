@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterator
 
-from deepseek_client import DeepSeekClientError, generate_text, stream_generate_text
+from deepseek_client import DeepSeekClientError, generate_text, stream_generate_text, stream_generate_text_events
 from file_manager import (
     read_history_summaries,
     read_latest_characters,
@@ -670,14 +670,19 @@ def stream_generate_single_chapter(
             allowed_scene_contract=allowed_scene_contract,
             scene_plan=scene_plan,
         )
-        for delta in stream_generate_text(
+        for event in stream_generate_text_events(
             messages=messages,
             model=chapter_model,
             temperature=temperature,
             max_tokens=int(max_tokens),
         ):
-            chunks.append(delta)
-            yield {"type": "delta", "text": delta}
+            if event["kind"] == "content":
+                delta = event["text"]
+                chunks.append(delta)
+                yield {"type": "delta", "text": delta}
+            else:
+                # 推理过程：仅透传展示，绝不进入正文/文件
+                yield {"type": "reasoning", "text": event["text"]}
     except DeepSeekClientError as exc:
         yield _stream_error_event(str(exc), number, partial_length=len("".join(chunks)))
         return

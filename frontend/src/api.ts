@@ -13,6 +13,8 @@ import type {
   ChapterFunctionReviewResponse,
   ContextPackPreviewRequest,
   ContextPackPreviewResponse,
+  ContinueSaveRequest,
+  ContinueSaveResponse,
   CreateProjectRequest,
   CreateProjectResponse,
   GenerationSettingsRequest,
@@ -240,6 +242,13 @@ function handleStreamLine(
   if (payload.type === "delta") {
     if (payload.text) {
       handlers.onDelta?.(payload.text);
+    }
+    return null;
+  }
+
+  if (payload.type === "reasoning") {
+    if (payload.text) {
+      handlers.onReasoning?.(payload.text);
     }
     return null;
   }
@@ -680,4 +689,15 @@ export async function generateChapterStream(
   }
 
   return doneEvent;
+}
+
+export function saveContinueResult(
+  projectRef: string,
+  chapterNumber: number,
+  request: ContinueSaveRequest,
+): Promise<ContinueSaveResponse> {
+  return postJson<ContinueSaveResponse>(
+    `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/continue/save`,
+    request,
+  );
 }

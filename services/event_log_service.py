@@ -10,6 +10,7 @@ from typing import Any
 
 from file_manager import resolve_project_context
 from project_context import WORKSPACE_STORAGE_KIND
+from .common import clean_text, read_json, resolve_workspace_context, timestamp, write_json_atomic
 
 
 EVENT_LOG_VERSION = 1
@@ -46,56 +47,31 @@ class EventLogResult:
     error_code: str = "event_log_error"
 
 
-def _timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def _clean_text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _safe_id(prefix: str) -> str:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_prefix = re.sub(r"[^A-Za-z0-9_]+", "_", _clean_text(prefix)).strip("_") or "event"
+    safe_prefix = re.sub(r"[^A-Za-z0-9_]+", "_", clean_text(prefix)).strip("_") or "event"
     return f"{safe_prefix}_{timestamp}_{secrets.token_hex(4)}"
 
 
 def _workspace_context(project_ref: str) -> tuple[Any | None, str]:
-    ref = _clean_text(project_ref)
-    if not ref:
-        return None, "Unknown project_ref."
-    try:
-        ctx = resolve_project_context(ref)
-    except FileNotFoundError:
-        return None, "Project not found."
-    except ValueError as exc:
-        return None, str(exc) or "Unknown project_ref."
-    if ctx.storage_kind != WORKSPACE_STORAGE_KIND:
-        return None, "Event log is only supported for workspace book projects."
-    return ctx, ""
+    ctx, message, _status, _code = resolve_workspace_context(
+        project_ref,
+        resolve=resolve_project_context,
+    storage_message='Event log is only supported for workspace book projects.',
+    )
+    return ctx, message
 
 
 def _events_path(ctx: Any) -> Path:
     return ctx.project_dir / HISTORY_DIR_NAME / EVENTS_NAME
 
 
-def _read_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path.name} is not valid JSON.") from exc
-    if not isinstance(data, dict):
-        raise ValueError(f"{path.name} must be a JSON object.")
-    return data
 
 
-def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
-    temp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _empty_event_log(project_ref: str) -> dict[str, Any]:
@@ -148,7 +124,7 @@ def _string_list(value: Any) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for item in value:
-        text = _clean_text(item).replace("\\", "/")
+        text = clean_text(item).replace("\\", "/")
         if not text or Path(text).is_absolute() or text in seen:
             continue
         seen.add(text)
@@ -176,7 +152,7 @@ def list_events(project_ref: str) -> EventLogResult:
             400,
         )
     try:
-        document = _normalize_event_log(_read_json(_events_path(ctx)), project_ref)
+        document = _normalize_event_log(read_json(_events_path(ctx)), project_ref)
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"Event log read failed: {exc}", "event_log_read_failed", 400)
     return EventLogResult(True, project_ref=project_ref, events=document["events"])
@@ -200,7 +176,7 @@ def append_event(
             400,
         )
 
-    clean_type = _clean_text(event_type)
+    clean_type = clean_text(event_type)
     if clean_type not in ALLOWED_EVENT_TYPES:
         return _error_result(project_ref, "Event type is not supported.", "event_log_type_unsupported", 400)
 
@@ -209,17 +185,17 @@ def append_event(
         "type": clean_type,
         "project_ref": project_ref,
         "chapter_number": chapter_number if isinstance(chapter_number, int) and chapter_number > 0 else None,
-        "summary": _clean_text(summary),
+        "summary": clean_text(summary),
         "source": _sanitize_payload(source if isinstance(source, dict) else {}),
         "changed_targets": _string_list(changed_targets or []),
-        "snapshot_id": _clean_text(snapshot_id) or None,
-        "created_at": _timestamp(),
+        "snapshot_id": clean_text(snapshot_id) or None,
+        "created_at": timestamp(),
     }
 
     try:
-        document = _normalize_event_log(_read_json(_events_path(ctx)), project_ref)
+        document = _normalize_event_log(read_json(_events_path(ctx)), project_ref)
         document["events"].append(event)
-        _write_json_atomic(_events_path(ctx), document)
+        write_json_atomic(_events_path(ctx), document)
     except (OSError, ValueError) as exc:
         return _error_result(project_ref, f"Event log write failed: {exc}", "event_log_write_failed", 400)
 
