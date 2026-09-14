@@ -5,7 +5,7 @@ import type { ChapterStreamDoneEvent } from "../../types";
 type StreamingPreviewProps = {
   content: string;
   reasoning: string;
-  status: "idle" | "streaming" | "saved" | "failed";
+  status: "idle" | "streaming" | "saved" | "failed" | "stopped";
   error: string;
   result: ChapterStreamDoneEvent | null;
   saveSucceeded: boolean;
@@ -30,9 +30,9 @@ export default function StreamingPreview({
   return (
     <div
       style={{
-        border: "1px solid #e6dccb",
+        border: "1px solid var(--border)",
         borderRadius: 8,
-        background: "#fffdf8",
+        background: "var(--paper)",
         overflow: "hidden",
       }}
     >
@@ -42,11 +42,11 @@ export default function StreamingPreview({
           justifyContent: "space-between",
           alignItems: "center",
           padding: "8px 12px",
-          borderBottom: "1px solid #e6dccb",
+          borderBottom: "1px solid var(--border)",
         }}
       >
         <Space>
-          <FileTextOutlined style={{ color: "#5f4b32" }} />
+          <FileTextOutlined style={{ color: "var(--accent)" }} />
           <Typography.Text strong>手稿实时预览</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {content.length} 字
@@ -64,6 +64,7 @@ export default function StreamingPreview({
             </Tag>
           )}
           {status === "failed" && <Tag color="error">失败</Tag>}
+          {status === "stopped" && <Tag>已停止接收</Tag>}
         </Space>
       </div>
 
@@ -74,7 +75,7 @@ export default function StreamingPreview({
           <Collapse
             ghost
             size="small"
-            style={{ marginBottom: 8, background: "#f7f1e6", borderRadius: 6 }}
+            style={{ marginBottom: 8, background: "var(--paper)", borderRadius: 6 }}
             items={[
               {
                 key: "reasoning",

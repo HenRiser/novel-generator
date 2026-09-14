@@ -1,14 +1,15 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Collapse, Input, Space, Typography, message } from "antd";
 import { CommentOutlined, SaveOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { API_BASE_URL, saveContinueResult } from "../../api";
+import { API_BASE_URL, safePublicMessage, saveContinueResult } from "../../api";
+import { useAppStore } from "../../store/useAppStore";
 
 type ContinueWriterProps = {
   projectRef: string;
   chapterNumber: number;
   /** 当前章节全文，作为续写上下文 */
   contextText: string;
-  /** 用户选中的文本（可选），续写紧跟其后 */
+  /** 用户选中的文本（可选），用于续写参考；保存仍追加到章末。 */
   anchorText?: string | null;
   onClearAnchor?: () => void;
 };
@@ -31,19 +32,38 @@ export default function ContinueWriter({
   const [reasoning, setReasoning] = useState("");
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const { apiStatus, generationBusy, setBusy } = useAppStore();
   const abortRef = useRef<AbortController | null>(null);
   const activeRef = useRef(false);
+  const instanceVersion = useRef(0);
 
-  const canStart = Boolean(projectRef) && status !== "streaming" && (instruction.trim().length > 0 || Boolean(anchorText));
+  const canStart = Boolean(projectRef && contextText) && apiStatus === "online" && !saving && status !== "streaming" && !generationBusy.chapterStreaming && !generationBusy.chapterGenerating && !generationBusy.outlineGenerating;
+
+  useEffect(() => {
+    ++instanceVersion.current;
+    setOutput(""); setReasoning(""); setStatus("idle"); setError(""); setSaved(false);
+    return () => {
+      ++instanceVersion.current;
+      const wasActive = activeRef.current;
+      activeRef.current = false;
+      abortRef.current?.abort();
+      abortRef.current = null;
+      if (wasActive) setBusy({ chapterStreaming: false });
+    };
+  }, [chapterNumber, projectRef, setBusy]);
 
   const handleStop = useCallback(() => {
     activeRef.current = false;
     abortRef.current?.abort();
+    abortRef.current = null;
     setStatus("idle");
-  }, []);
+    setBusy({ chapterStreaming: false });
+  }, [setBusy]);
 
   const handleStart = useCallback(async () => {
-    if (!projectRef || status === "streaming") {
+    if (!canStart) {
       return;
     }
     activeRef.current = true;
@@ -51,9 +71,12 @@ export default function ContinueWriter({
     setReasoning("");
     setError("");
     setStatus("streaming");
+    setSaved(false);
+    setBusy({ chapterStreaming: true });
 
     const controller = new AbortController();
     abortRef.current = controller;
+    const current = () => abortRef.current === controller && !controller.signal.aborted;
 
     try {
       const response = await fetch(
@@ -69,6 +92,7 @@ export default function ContinueWriter({
           signal: controller.signal,
         },
       );
+      if (!current()) return;
 
       if (!response.ok) {
         let payload: unknown = null;
@@ -79,7 +103,7 @@ export default function ContinueWriter({
         }
         const message =
           payload && typeof payload === "object" && "error" in payload
-            ? String((payload as { error: { message?: string } }).error?.message ?? "续写请求失败。")
+            ? safePublicMessage((payload as { error: { message?: string } }).error?.message, "续写请求失败。")
             : `续写请求失败（${response.status}）。`;
         throw new Error(message);
       }
@@ -91,10 +115,11 @@ export default function ContinueWriter({
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      let receivedDone = false;
 
       const consume = (final = false) => {
         let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0 && activeRef.current) {
+        while (newlineIndex >= 0 && activeRef.current && current()) {
           const line = buffer.slice(0, newlineIndex).trim();
           buffer = buffer.slice(newlineIndex + 1);
           if (line) {
@@ -102,7 +127,7 @@ export default function ContinueWriter({
           }
           newlineIndex = buffer.indexOf("\n");
         }
-        if (final && buffer.trim() && activeRef.current) {
+        if (final && buffer.trim() && activeRef.current && current()) {
           handleEvent(buffer.trim());
           buffer = "";
         }
@@ -113,79 +138,83 @@ export default function ContinueWriter({
         try {
           payload = JSON.parse(line);
         } catch {
-          return;
+          throw new Error("续写响应格式不完整，请重试。");
         }
         if (payload.type === "delta" && typeof payload.text === "string") {
           setOutput((current) => current + payload.text);
         } else if (payload.type === "reasoning" && typeof payload.text === "string") {
           setReasoning((current) => current + payload.text);
         } else if (payload.type === "done") {
+          receivedDone = true;
           setStatus("done");
           activeRef.current = false;
         } else if (payload.type === "error") {
-          setError(payload.message || "续写失败。");
+          setError(safePublicMessage(payload.message, "续写失败。"));
           setStatus("error");
           activeRef.current = false;
         }
       };
 
-      while (activeRef.current) {
+      while (activeRef.current && current()) {
         const { value, done } = await reader.read();
         if (done) {
           break;
         }
+        if (!current()) return;
         buffer += decoder.decode(value, { stream: true });
         consume();
       }
-      if (activeRef.current) {
+      if (activeRef.current && current()) {
         buffer += decoder.decode();
         consume(true);
-        setStatus("done");
+        if (!receivedDone && activeRef.current) throw new Error("连接提前结束，续写尚未完成，请重试。");
       }
-      activeRef.current = false;
+      await reader.cancel();
+      if (current()) activeRef.current = false;
     } catch (e) {
-      if (!activeRef.current) {
+      if (!current()) {
         return; // 用户主动取消
       }
       activeRef.current = false;
-      setError(e instanceof Error ? e.message : "续写失败。");
+      setError(safePublicMessage(e instanceof Error ? e.message : "", "续写失败。"));
       setStatus("error");
     } finally {
-      abortRef.current = null;
+      if (abortRef.current === controller) { abortRef.current = null; setBusy({ chapterStreaming: false }); }
     }
-  }, [anchorText, chapterNumber, contextText, instruction, projectRef, status]);
-
-  const [saving, setSaving] = useState(false);
+  }, [anchorText, canStart, chapterNumber, contextText, instruction, projectRef, setBusy]);
 
   const handleInsert = useCallback(async () => {
-    if (!output || !projectRef || saving) {
+    if (!output || !projectRef || saving || saved) {
       return;
     }
     setSaving(true);
+    const version = instanceVersion.current;
     try {
       const result = await saveContinueResult(projectRef, chapterNumber, {
         content: output,
         mode: "append",
       });
+      if (version !== instanceVersion.current || useAppStore.getState().selectedProjectRef !== projectRef) return;
+      setSaved(true);
       message.success(result.message || "续写内容已保存到章节文件。");
       // 通知阅读器刷新章节正文
       window.dispatchEvent(
-        new CustomEvent("braipen:continue-saved", { detail: { chapterNumber } }),
+        new CustomEvent("braipen:continue-saved", { detail: { projectRef, chapterNumber } }),
       );
       setStatus("done");
     } catch (e) {
-      message.error(e instanceof Error ? e.message : "保存失败，请重试。");
+      if (version === instanceVersion.current) message.error(e instanceof Error ? e.message : "保存失败，请重试。");
     } finally {
-      setSaving(false);
+      if (version === instanceVersion.current) setSaving(false);
     }
-  }, [chapterNumber, output, projectRef, saving]);
+  }, [chapterNumber, output, projectRef, saved, saving]);
 
   return (
     <div
       style={{
-        border: "1px solid #e6dccb",
+        border: "1px solid var(--border)",
         borderRadius: 10,
-        background: "#fffdf8",
+        background: "var(--paper)",
         padding: 12,
         display: "flex",
         flexDirection: "column",
@@ -193,7 +222,7 @@ export default function ContinueWriter({
       }}
     >
       <Space size={8}>
-        <CommentOutlined style={{ color: "#5f4b32" }} />
+        <CommentOutlined style={{ color: "var(--accent)" }} />
         <Typography.Text strong>对话式续写</Typography.Text>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           在章节末尾继续生成，跟随你的指令调整风格
@@ -204,7 +233,7 @@ export default function ContinueWriter({
         <Alert
           type="info"
           showIcon
-          message={`已锚定选中文本（${anchorText.length} 字），续写将紧跟其后`}
+          message={`以选中文本（${anchorText.length} 字）为参考，保存时追加到章节末尾`}
           closable
           onClose={onClearAnchor}
         />
@@ -213,7 +242,7 @@ export default function ContinueWriter({
       <Input.TextArea
         value={instruction}
         onChange={(e) => setInstruction(e.target.value)}
-        placeholder="例如：用更悬疑的笔调继续，埋下灰剧团失踪的伏笔…（留空则自然续写）"
+        placeholder="告诉模型接下来如何发展、调整节奏或语气。留空则自然续写。"
         autoSize={{ minRows: 2, maxRows: 5 }}
         disabled={status === "streaming"}
       />
@@ -234,8 +263,8 @@ export default function ContinueWriter({
           </Button>
         )}
         {output && status === "done" && (
-          <Button type="primary" icon={<SaveOutlined />} onClick={() => void handleInsert()} loading={saving}>
-            保存到章节文件
+          <Button type="primary" icon={<SaveOutlined />} onClick={() => void handleInsert()} loading={saving} disabled={saved}>
+            {saved ? "已追加到章末" : "追加到章节末尾"}
           </Button>
         )}
       </Space>
@@ -245,7 +274,7 @@ export default function ContinueWriter({
         <Collapse
           ghost
           size="small"
-          style={{ background: "#f7f1e6", borderRadius: 6 }}
+          style={{ background: "var(--paper)", borderRadius: 6 }}
           items={[
             {
               key: "reasoning",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Alert,
+  App as AntApp,
   Badge,
   Button,
   Card,
@@ -12,9 +13,9 @@ import {
   Select,
   Space,
   Spin,
+  Switch,
   Tabs,
   Typography,
-  message,
 } from "antd";
 import {
   ApiOutlined,
@@ -27,10 +28,12 @@ import {
 import { getApiConfigStatus, getGenerationStatus, saveApiConfig, testApiConnection, updateGenerationSettings } from "../api";
 import { useAppStore } from "../store/useAppStore";
 import { API_BASE_URL } from "../api";
+import { useProjectData } from "../hooks/useProjectData";
+import { isIntroHidden, setIntroHidden } from "../appConfig";
 
 const MODEL_OPTIONS = [
   { value: "deepseek-v4-flash", label: "deepseek-v4-flash（默认，快速）" },
-  { value: "deepseek-v4-pro", label: "deepseek-v4-pro（更高质量）" },
+  { value: "deepseek-v4-pro", label: "deepseek-v4-pro" },
 ];
 
 const apiStatusConfig = {
@@ -46,6 +49,7 @@ type GenerationSettingsForm = {
 };
 
 export default function SettingsPage() {
+  const { message } = AntApp.useApp();
   const navigate = useNavigate();
   const {
     apiStatus,
@@ -59,6 +63,9 @@ export default function SettingsPage() {
   } = useAppStore();
   const [form] = Form.useForm<GenerationSettingsForm>();
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState("api");
+  const [hideIntro, setHideIntro] = useState(isIntroHidden);
+  const { refreshProject, detailError } = useProjectData(selectedProjectRef);
 
   // API 密钥配置
   const [apiConfigForm] = Form.useForm();
@@ -147,6 +154,10 @@ export default function SettingsPage() {
   const configModel = typeof config.model === "string" ? config.model : "";
   const configMaxTokens = typeof config.max_tokens === "number" ? config.max_tokens : 16384;
   const configTemperature = typeof config.temperature === "number" ? config.temperature : 1.0;
+  useEffect(() => {
+    if (activeTab !== "project" || !selectedProjectRef || projectLoading) return;
+    form.setFieldsValue({ model: configModel || "deepseek-v4-flash", max_tokens: configMaxTokens, temperature: configTemperature });
+  }, [form, activeTab, projectLoading, selectedProjectRef, configModel, configMaxTokens, configTemperature]);
 
   const status = apiStatusConfig[apiStatus];
 
@@ -182,7 +193,10 @@ export default function SettingsPage() {
         max_tokens: values.max_tokens,
         temperature: values.temperature,
       });
-      message.success("项目生成设置已保存。");
+      if (useAppStore.getState().selectedProjectRef === selectedProjectRef) {
+        message.success("项目生成设置已保存。");
+        await refreshProject();
+      }
     } catch (e) {
       if (e instanceof Error && "errorFields" in e) {
         return;
@@ -191,7 +205,7 @@ export default function SettingsPage() {
     } finally {
       setSaving(false);
     }
-  }, [form, selectedProjectRef]);
+  }, [form, selectedProjectRef, refreshProject]);
 
   const apiKeyTab = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -242,7 +256,7 @@ export default function SettingsPage() {
             <Select
               options={[
                 { value: "deepseek-v4-flash", label: "deepseek-v4-flash（默认，快速）" },
-                { value: "deepseek-v4-pro", label: "deepseek-v4-pro（更高质量）" },
+                { value: "deepseek-v4-pro", label: "deepseek-v4-pro" },
               ]}
               style={{ maxWidth: 480 }}
             />
@@ -257,20 +271,20 @@ export default function SettingsPage() {
               onClick={() => void handleSaveApiConfig()}
               loading={savingApiConfig}
             >
-              保存配置
+              保存连接配置
             </Button>
             <Button
               icon={<ThunderboltOutlined />}
               onClick={() => void handleTestConnection()}
               loading={testingConnection}
             >
-              测试连接
+              测试模型连接
             </Button>
           </Space>
           <Alert
             type="info"
             showIcon
-            message="API Key 只写入本地 .env 文件，不会显示明文，也不会提交到代码仓库。"
+            message="密钥保存在本地。测试模型连接会向模型服务发送一次请求。"
             style={{ marginTop: 12 }}
           />
         </Form>
@@ -327,11 +341,11 @@ export default function SettingsPage() {
       >
         {generationStatus ? (
           <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label="running">{generationStatus.running ? "true" : "false"}</Descriptions.Item>
-            <Descriptions.Item label="task_type">{generationStatus.task_type || "-"}</Descriptions.Item>
-            <Descriptions.Item label="target">{generationStatus.target || "-"}</Descriptions.Item>
+            <Descriptions.Item label="进行中">{generationStatus.running ? "true" : "false"}</Descriptions.Item>
+            <Descriptions.Item label="任务类型">{generationStatus.task_type || "-"}</Descriptions.Item>
+            <Descriptions.Item label="目标">{generationStatus.target || "-"}</Descriptions.Item>
             {generationStatus.last_error && (
-              <Descriptions.Item label="last_error">
+              <Descriptions.Item label="最近错误">
                 <Typography.Text type="danger" style={{ fontSize: 12 }}>
                   {generationStatus.last_error}
                 </Typography.Text>
@@ -343,11 +357,9 @@ export default function SettingsPage() {
         )}
       </Card>
 
-      <Card size="small" title="启动方式">
-        <Descriptions column={1} size="small" bordered>
-          <Descriptions.Item label="官方前端">React + FastAPI（start-react.bat）</Descriptions.Item>
-          <Descriptions.Item label="旧 Streamlit">已废弃（start.bat 会自动转向 React）</Descriptions.Item>
-        </Descriptions>
+      <Card size="small" title="进场体验">
+        <Space><Switch checked={hideIntro} onChange={value => { setHideIntro(value); setIntroHidden(value); }} aria-label="隐藏自动开场" /><span>隐藏自动开场</span></Space>
+        <p className="page-subtitle" style={{ margin: "12px 0 0" }}>默认只在首次访问播放。随时可以通过页脚“重播开场”再次观看。</p>
       </Card>
     </div>
   );
@@ -356,7 +368,7 @@ export default function SettingsPage() {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <Card size="small" title="项目生成设置">
         {!selectedProjectRef ? (
-          <Alert type="info" showIcon message="请先在左侧选择项目。" action={<Button size="small" onClick={() => navigate("/writing")}>去选择</Button>} />
+          <Alert type="info" showIcon message="请先在顶部选择项目。" action={<Button size="small" onClick={() => navigate("/writing")}>去选择</Button>} />
         ) : projectLoading ? (
           <Spin />
         ) : (
@@ -374,12 +386,13 @@ export default function SettingsPage() {
             </Form.Item>
             <Form.Item
               name="max_tokens"
-              label="max_tokens（推理模型需 ≥ 16384 才能稳定产出正文）"
+              label="单次输出预算（token）"
+              extra="预算同时容纳推理与正文，不等同于中文字数。"
               rules={[{ required: true, type: "number", min: 512, max: 32768 }]}
             >
               <InputNumber min={512} max={32768} step={1024} style={{ width: "100%" }} />
             </Form.Item>
-            <Form.Item name="temperature" label="temperature" rules={[{ required: true, type: "number", min: 0, max: 2 }]}>
+            <Form.Item name="temperature" label="创作温度（0 收敛 — 2 发散）" rules={[{ required: true, type: "number", min: 0, max: 2 }]}>
               <InputNumber min={0} max={2} step={0.1} style={{ width: "100%" }} />
             </Form.Item>
             <Button type="primary" icon={<SaveOutlined />} onClick={() => void handleSaveProjectSettings()} loading={saving}>
@@ -392,24 +405,23 @@ export default function SettingsPage() {
   );
 
   return (
-    <div style={{ padding: 20 }}>
-      <Card
-        title={
-          <Space>
-            <SettingOutlined style={{ color: "#5f4b32" }} />
-            <span>设置</span>
-          </Space>
-        }
-        styles={{ body: { paddingTop: 12 } }}
-      >
+    <div className="page-container">
+      <div className="page-heading"><div><span className="eyebrow">MAKE IT YOURS</span><h1 className="page-title">偏好设置</h1><p className="page-subtitle">连接你的模型，找到适合自己的创作节奏。</p></div></div>
+      {detailError && <Alert type="error" showIcon message={detailError} style={{ marginBottom: 20 }} />}
+      <div className="settings-layout">
+      <div>
         <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
           items={[
-            { key: "api", label: "API 密钥", children: apiKeyTab },
-            { key: "system", label: "系统设置", children: systemTab },
-            { key: "project", label: "项目设置", children: projectTab },
+            { key: "api", label: "模型连接", children: apiKeyTab },
+            { key: "project", label: "故事偏好", children: projectTab },
+            { key: "system", label: "本地服务与体验", children: systemTab },
           ]}
         />
-      </Card>
+      </div>
+      <aside className="settings-note"><span className="note-number">B / P</span><h3>工具顺手，思想自由。</h3><p>连接配置作用于整个工作空间。故事偏好只影响当前选择的项目，可以在创作台为单次生成调整。</p><p>模型负责给出可能性，取舍由你完成。</p></aside>
+      </div>
     </div>
   );
 }

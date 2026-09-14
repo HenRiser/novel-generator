@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChapterSummary, ProjectDetail } from "../types";
-import { getChapter, getChapters, getHealth, getProject, getProjects } from "../api";
+import { getChapter, getChapters, getChapterStatus, getHealth, getProject, getProjects } from "../api";
 import { useAppStore } from "../store/useAppStore";
 
 /** 后端健康轮询，维护 apiStatus */
@@ -74,47 +74,99 @@ export function useProjectData(projectRef: string | null): {
   const setChaptersLoading = useAppStore((state) => state.setChaptersLoading);
   const [detailError, setDetailError] = useState("");
   const [chaptersError, setChaptersError] = useState("");
+  const detailSequence = useRef(0);
+  const chaptersSequence = useRef(0);
 
   const refreshProject = useCallback(async () => {
+    if (useAppStore.getState().selectedProjectRef !== projectRef) return;
+    const sequence = ++detailSequence.current;
+    const current = () => sequence === detailSequence.current && useAppStore.getState().selectedProjectRef === projectRef;
     if (!projectRef) {
       setSelectedProject(null);
+      setDetailError("");
+      setProjectLoading(false);
       return;
     }
     setProjectLoading(true);
     setDetailError("");
     try {
       const detail: ProjectDetail = await getProject(projectRef);
-      setSelectedProject(detail);
+      if (current()) setSelectedProject(detail);
     } catch (e) {
-      setDetailError(e instanceof Error ? e.message : "加载项目详情失败。");
+      if (current()) setDetailError(e instanceof Error ? e.message : "加载项目详情失败。");
     } finally {
-      setProjectLoading(false);
+      if (current()) setProjectLoading(false);
     }
   }, [projectRef, setProjectLoading, setSelectedProject]);
 
   const refreshChapters = useCallback(async () => {
+    if (useAppStore.getState().selectedProjectRef !== projectRef) return;
+    const sequence = ++chaptersSequence.current;
+    const current = () => sequence === chaptersSequence.current && useAppStore.getState().selectedProjectRef === projectRef;
     if (!projectRef) {
       setChapters([]);
+      setChaptersError("");
+      setChaptersLoading(false);
       return;
     }
     setChaptersLoading(true);
     setChaptersError("");
     try {
       const list: ChapterSummary[] = await getChapters(projectRef);
-      setChapters(list);
+      if (current()) setChapters(list);
     } catch (e) {
-      setChaptersError(e instanceof Error ? e.message : "加载章节列表失败。");
+      if (current()) setChaptersError(e instanceof Error ? e.message : "加载章节列表失败。");
     } finally {
-      setChaptersLoading(false);
+      if (current()) setChaptersLoading(false);
     }
   }, [projectRef, setChapters, setChaptersLoading]);
 
   useEffect(() => {
     void refreshProject();
     void refreshChapters();
+    return () => {
+      ++detailSequence.current;
+      ++chaptersSequence.current;
+    };
   }, [refreshChapters, refreshProject]);
 
   return { detailError, chaptersError, refreshChapters, refreshProject };
+}
+
+/** 状态跟随项目及章节加载，旧请求不会覆盖新章节。 */
+export function useChapterStatus(projectRef: string | null, chapterNumber: number | null, refreshToken = 0) {
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const sequenceRef = useRef(0);
+  const refresh = useCallback(async () => {
+    const sequence = ++sequenceRef.current;
+    const current = () => sequence === sequenceRef.current && useAppStore.getState().selectedProjectRef === projectRef;
+    setError("");
+    useAppStore.getState().setChapterStatus(null);
+    if (!projectRef?.startsWith("book:") || chapterNumber === null) {
+      setLoading(false);
+      useAppStore.getState().setChapterStatusLoading(false);
+      return;
+    }
+    setLoading(true);
+    useAppStore.getState().setChapterStatusLoading(true);
+    try {
+      const result = await getChapterStatus(projectRef, chapterNumber);
+      if (current()) useAppStore.getState().setChapterStatus(result);
+    } catch (e) {
+      if (current()) setError(e instanceof Error ? e.message : "章节状态加载失败。");
+    } finally {
+      if (current()) {
+        setLoading(false);
+        useAppStore.getState().setChapterStatusLoading(false);
+      }
+    }
+  }, [chapterNumber, projectRef]);
+  useEffect(() => {
+    void refresh();
+    return () => { ++sequenceRef.current; };
+  }, [refresh, refreshToken]);
+  return { error, loading, refresh };
 }
 
 /** 章节正文加载 */

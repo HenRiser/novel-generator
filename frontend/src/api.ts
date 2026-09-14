@@ -73,6 +73,13 @@ export function safePublicMessage(message: unknown, fallback: string): string {
     return fallback;
   }
 
+  if (text.startsWith("Model config is missing.")) {
+    return "尚未配置模型密钥。请前往「偏好设置 → 模型连接」完成配置后再试。";
+  }
+  if (text === "Failed to fetch" || text === "NetworkError when attempting to fetch resource.") {
+    return "暂时无法连接本地服务，请检查服务是否启动后重试。";
+  }
+
   if (/Traceback\s*\(/i.test(text) || /\n\s*File\s+["']/.test(text)) {
     return fallback;
   }
@@ -377,7 +384,7 @@ export function createNarrativeGraphNode(
 export function updateNarrativeGraphNode(
   projectRef: string,
   nodeId: string,
-  request: NarrativeGraphNodeRequest,
+  request: Partial<NarrativeGraphNodeRequest>,
 ): Promise<NarrativeGraphNodeResponse> {
   return patchJson<NarrativeGraphNodeResponse>(
     `/api/projects/${projectPath(projectRef)}/narrative-graph/nodes/${encodeURIComponent(nodeId)}`,
@@ -600,10 +607,11 @@ export function getGenerationStatus(): Promise<GenerationStatus> {
 export function generateOutlineCharacters(
   projectRef: string,
   request: GenerationRequest,
+  signal?: AbortSignal,
 ): Promise<OutlineCharactersGenerationResponse> {
-  return postJson<OutlineCharactersGenerationResponse>(
+  return apiFetch<OutlineCharactersGenerationResponse>(
     `/api/projects/${projectPath(projectRef)}/outline-characters/generate`,
-    request,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request), signal },
   );
 }
 
@@ -623,6 +631,7 @@ export async function generateChapterStream(
   chapterNumber: number,
   request: GenerationRequest,
   handlers: ChapterStreamHandlers = {},
+  signal?: AbortSignal,
 ): Promise<ChapterStreamDoneEvent> {
   let response: Response;
   try {
@@ -635,6 +644,7 @@ export async function generateChapterStream(
           Accept: "application/x-ndjson",
         },
         body: JSON.stringify(request),
+        signal,
       },
     );
   } catch (error) {

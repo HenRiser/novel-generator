@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Badge,
@@ -99,14 +99,7 @@ function toForm(task: ChapterTaskSheet | null): ChapterTaskDraftRequest {
 }
 
 function splitLines(value: string): string[] {
-  return Array.from(
-    new Set(
-      value
-        .split(/\r?\n/)
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  );
+  return value.split(/\r?\n/);
 }
 
 function listValue(values: string[]): string {
@@ -137,7 +130,7 @@ function formConsistencyErrors(form: ChapterTaskDraftRequest): string[] {
     NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(form.primary_function)
   ) {
     errors.push(
-      `主要功能 ${form.primary_function} 与新正典预算 none 不兼容；请修改章节功能或提高新正典预算。`,
+      `主要功能 ${form.primary_function} 与新增设定预算 none 不兼容；请修改章节功能或提高新增设定预算。`,
     );
   }
   const incompatibleSecondary = form.secondary_functions.filter(
@@ -146,7 +139,7 @@ function formConsistencyErrors(form: ChapterTaskDraftRequest): string[] {
   );
   if (incompatibleSecondary.length > 0) {
     errors.push(
-      `次要功能 ${incompatibleSecondary.join("、")} 与新正典预算 none 不兼容；请修改章节功能或提高新正典预算。`,
+      `次要功能 ${incompatibleSecondary.join("、")} 与新增设定预算 none 不兼容；请修改章节功能或提高新增设定预算。`,
     );
   }
   if (form.secondary_functions.includes(form.primary_function)) {
@@ -181,6 +174,15 @@ export function ChapterTaskSheetPanel({
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const lifecycleRef = useRef(0);
+  const loadedScopeRef = useRef<string | null>(null);
+  const savedFormRef = useRef(JSON.stringify(EMPTY_FORM));
+  const callbacksRef = useRef({ onApprovedTaskChange, onTaskStateChange });
+  callbacksRef.current = { onApprovedTaskChange, onTaskStateChange };
+  const scope = `${projectRef}:${chapterNumber}`;
+  const activeScopeRef = useRef(scope);
+  activeScopeRef.current = scope;
+  const hasUnsavedChanges = JSON.stringify(form) !== savedFormRef.current;
 
   const editableSource = data?.latest_draft ?? data?.approved ?? null;
   const isWorkspaceProject = projectRef.startsWith("book:");
@@ -192,46 +194,58 @@ export function ChapterTaskSheetPanel({
   );
 
   useEffect(() => {
-    let ignore = false;
-    onApprovedTaskChange(null);
-    onTaskStateChange?.(null, null);
+    lifecycleRef.current += 1;
+    loadedScopeRef.current = null;
+    callbacksRef.current.onApprovedTaskChange(null);
+    callbacksRef.current.onTaskStateChange?.(null, null);
     setData(null);
+    savedFormRef.current = JSON.stringify(EMPTY_FORM);
     setForm({ ...EMPTY_FORM });
     setError("");
     setMessage("");
+    setLoading(false);
+    setSaving(false);
+    setApproving(false);
+    return () => { lifecycleRef.current += 1; };
+  }, [scope]);
 
+  useEffect(() => {
+    let ignore = false;
     if (!canUseApi || !Number.isInteger(chapterNumber) || chapterNumber < 1) {
-      return () => {
-        ignore = true;
-      };
+      setLoading(false);
+      return;
     }
-
+    // A health-check reconnect must not replace an already loaded local draft.
+    if (loadedScopeRef.current === scope) {
+      return;
+    }
     setLoading(true);
+    setError("");
     void getChapterTask(projectRef, chapterNumber)
       .then((result) => {
-        if (ignore) {
+        if (ignore || activeScopeRef.current !== scope) {
           return;
         }
+        loadedScopeRef.current = scope;
         setData(result);
-        setForm(toForm(result.latest_draft ?? result.approved));
-        onApprovedTaskChange(result.approved);
-        onTaskStateChange?.(result.approved, result.latest_draft);
+        const nextForm = toForm(result.latest_draft ?? result.approved);
+        savedFormRef.current = JSON.stringify(nextForm);
+        setForm(nextForm);
+        callbacksRef.current.onApprovedTaskChange(result.approved);
+        callbacksRef.current.onTaskStateChange?.(result.approved, result.latest_draft);
       })
       .catch((loadError) => {
-        if (!ignore) {
+        if (!ignore && activeScopeRef.current === scope) {
           setError(safePublicMessage(loadError instanceof Error ? loadError.message : "", "任务单读取失败。"));
         }
       })
       .finally(() => {
-        if (!ignore) {
+        if (!ignore && activeScopeRef.current === scope) {
           setLoading(false);
         }
       });
-
-    return () => {
-      ignore = true;
-    };
-  }, [canUseApi, chapterNumber, onApprovedTaskChange, onTaskStateChange, projectRef]);
+    return () => { ignore = true; };
+  }, [canUseApi, chapterNumber, projectRef, scope]);
 
   function updateList(field: ListField, value: string) {
     setForm((current) => ({ ...current, [field]: splitLines(value) }));
@@ -261,49 +275,66 @@ export function ChapterTaskSheetPanel({
       setError(consistencyErrors[0]);
       return;
     }
+    const lifecycle = lifecycleRef.current;
+    const isCurrent = () => lifecycleRef.current === lifecycle && activeScopeRef.current === scope;
     setSaving(true);
     setError("");
     setMessage("");
     try {
-      const result = await saveChapterTaskDraft(projectRef, chapterNumber, form);
+      const payload = { ...form };
+      const listFields: ListField[] = ["must_carry", "allowed_advances", "forbidden_advances", "required_characters", "allowed_scene_types", "forbidden_scene_drivers"];
+      for (const field of listFields) {
+        payload[field] = [...new Set(form[field].map((item) => item.trim()).filter(Boolean))];
+      }
+      const result = await saveChapterTaskDraft(projectRef, chapterNumber, payload);
+      if (!isCurrent()) return;
       setData(result);
-      setForm(toForm(result.latest_draft));
-      onApprovedTaskChange(result.approved);
-      onTaskStateChange?.(result.approved, result.latest_draft);
+      const nextForm = toForm(result.latest_draft);
+      savedFormRef.current = JSON.stringify(nextForm);
+      setForm(nextForm);
+      callbacksRef.current.onApprovedTaskChange(result.approved);
+      callbacksRef.current.onTaskStateChange?.(result.approved, result.latest_draft);
       setMessage("草稿已保存。草稿不会进入正文生成。");
     } catch (saveError) {
+      if (!isCurrent()) return;
       setError(safePublicMessage(saveError instanceof Error ? saveError.message : "", "任务单草稿保存失败。"));
     } finally {
-      setSaving(false);
+      if (isCurrent()) setSaving(false);
     }
   }
 
   async function approveDraft() {
     const draft = data?.latest_draft;
-    if (!canUseApi || !draft) {
+    if (!canUseApi || !draft || hasUnsavedChanges) {
       return;
     }
+    const lifecycle = lifecycleRef.current;
+    const isCurrent = () => lifecycleRef.current === lifecycle && activeScopeRef.current === scope;
     setApproving(true);
     setError("");
     setMessage("");
     try {
       const result = await approveChapterTask(projectRef, chapterNumber, draft.id, draft.revision);
+      if (!isCurrent()) return;
       setData(result);
-      setForm(toForm(result.approved));
-      onApprovedTaskChange(result.approved);
-      onTaskStateChange?.(result.approved, result.latest_draft);
-      setMessage(`revision ${result.approved?.revision ?? draft.revision} 已批准，将用于本章正文生成。`);
+      const nextForm = toForm(result.approved);
+      savedFormRef.current = JSON.stringify(nextForm);
+      setForm(nextForm);
+      callbacksRef.current.onApprovedTaskChange(result.approved);
+      callbacksRef.current.onTaskStateChange?.(result.approved, result.latest_draft);
+      setMessage(`版本 ${result.approved?.revision ?? draft.revision} 已批准，将用于本章正文生成。`);
     } catch (approveError) {
+      if (!isCurrent()) return;
       setError(safePublicMessage(approveError instanceof Error ? approveError.message : "", "任务单批准失败。"));
     } finally {
-      setApproving(false);
+      if (isCurrent()) setApproving(false);
     }
   }
 
   const fieldsDisabled = !canUseApi || disabled || loading || saving || approving;
 
   const statusTag =
-    data?.approved ? <Tag color="green">已生效（revision {data.approved.revision}）</Tag>
+    data?.approved ? <Tag color="green">已生效（版本 {data.approved.revision}）</Tag>
     : data?.latest_draft ? <Tag color="orange">仅草稿</Tag>
     : <Tag>未创建</Tag>;
 
@@ -331,15 +362,15 @@ export function ChapterTaskSheetPanel({
       )}
 
       <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
-        <Descriptions.Item label="生成生效">{data?.approved ? `revision ${data.approved.revision}` : "无"}</Descriptions.Item>
-        <Descriptions.Item label="编辑中">{data?.latest_draft ? `revision ${data.latest_draft.revision}` : "无"}</Descriptions.Item>
+        <Descriptions.Item label="生成生效">{data?.approved ? `版本 ${data.approved.revision}` : "无"}</Descriptions.Item>
+        <Descriptions.Item label="编辑中">{data?.latest_draft ? `版本 ${data.latest_draft.revision}` : "无"}</Descriptions.Item>
       </Descriptions>
 
       {editableSource?.status === "draft" && (
-        <Alert type="warning" showIcon message={`当前是草稿 revision ${editableSource.revision}：草稿不会进入正文生成。`} style={{ marginBottom: 12 }} />
+        <Alert type="warning" showIcon message={`当前是草稿 版本 ${editableSource.revision}：草稿不会进入正文生成。`} style={{ marginBottom: 12 }} />
       )}
       {data?.approved && (
-        <Alert type="success" showIcon message={`正文生成将使用已生效 revision ${data.approved.revision}（${data.approved.id}）。`} style={{ marginBottom: 12 }} />
+        <Alert type="success" showIcon message={`正文生成将使用已生效 版本 ${data.approved.revision}。`} style={{ marginBottom: 12 }} />
       )}
       {historySummary && (
         <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginBottom: 12 }}>
@@ -358,14 +389,15 @@ export function ChapterTaskSheetPanel({
         />
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(260px, 100%), 1fr))", gap: 12 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span style={{ fontWeight: 500 }}>章节号</span>
-          <Input value={chapterNumber} readOnly disabled />
+          <Input aria-label="章节号" value={chapterNumber} readOnly disabled />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span style={{ fontWeight: 500 }}>主要功能</span>
           <Select
+            aria-label="主要功能"
             value={form.primary_function}
             onChange={(value) => setForm((current) => ({ ...current, primary_function: value as ChapterTaskFunction }))}
             options={FUNCTION_OPTIONS}
@@ -375,6 +407,7 @@ export function ChapterTaskSheetPanel({
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span style={{ fontWeight: 500 }}>强度</span>
           <Select
+            aria-label="推进强度"
             value={form.intensity}
             onChange={(value) => setForm((current) => ({ ...current, intensity: value as ChapterTaskDraftRequest["intensity"] }))}
             options={[
@@ -386,8 +419,9 @@ export function ChapterTaskSheetPanel({
           />
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontWeight: 500 }}>新正典预算</span>
+          <span style={{ fontWeight: 500 }}>新增设定预算</span>
           <Select
+            aria-label="新增设定预算"
             value={form.canon_budget}
             onChange={(value) => setForm((current) => ({ ...current, canon_budget: value as ChapterTaskDraftRequest["canon_budget"] }))}
             options={[
@@ -434,6 +468,7 @@ export function ChapterTaskSheetPanel({
           <div key={field} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <span style={{ fontWeight: 500 }}>{label}（每行一项）</span>
             <Input.TextArea
+              aria-label={label}
               value={listValue(form[field])}
               onChange={(event) => updateList(field, event.target.value)}
               disabled={fieldsDisabled}
@@ -453,6 +488,7 @@ export function ChapterTaskSheetPanel({
           <div key={field} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <span style={{ fontWeight: 500 }}>{label}</span>
             <Input.TextArea
+              aria-label={label}
               value={form[field]}
               onChange={(event) => updateText(field, event.target.value)}
               disabled={fieldsDisabled}
@@ -462,6 +498,7 @@ export function ChapterTaskSheetPanel({
         ))}
       </div>
 
+      {hasUnsavedChanges && <Alert type="info" showIcon message="有未保存的修改，请先保存草稿，再批准当前内容。" style={{ marginTop: 16 }} />}
       <Divider style={{ margin: "16px 0" }} />
       <Space>
         <Button
@@ -475,7 +512,7 @@ export function ChapterTaskSheetPanel({
         <Button
           type="primary"
           onClick={() => void approveDraft()}
-          disabled={fieldsDisabled || consistencyErrors.length > 0 || !data?.latest_draft}
+          disabled={fieldsDisabled || consistencyErrors.length > 0 || !data?.latest_draft || hasUnsavedChanges}
           loading={approving}
         >
           批准草稿

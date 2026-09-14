@@ -1,32 +1,29 @@
-/**
- * 前端应用级配置。
- *
- * 优先读取环境变量 VITE_* 覆盖，缺省使用本地默认值。
- * 环境变量方式：在 frontend/.env.local 中设置
- *   VITE_SHOW_INTRO=false    （开屏动画）
- * 修改后需重启 vite dev server 生效。
- */
-
-interface AppConfig {
-  /** 是否在首次进入应用时播放开屏动画（IntroAnimation） */
-  showIntro: boolean;
-}
+/** 开场偏好只保存在当前浏览器，存储不可用时仍可正常进入工作台。 */
+const INTRO_SEEN_KEY = "braipen:intro-seen:v2";
+const INTRO_HIDDEN_KEY = "braipen:intro-hidden";
 
 function envFlag(name: string, fallback: boolean): boolean {
-  const value = (import.meta as unknown as {
-    readonly env?: { readonly [key: string]: string | undefined };
-  }).env?.[name];
-  if (value === undefined || value === "") {
-    return fallback;
-  }
-  return value !== "false" && value !== "0" && value.toLowerCase() !== "off";
+  const value = (import.meta as unknown as { readonly env?: Record<string, string | undefined> }).env?.[name];
+  if (value === undefined || value === "") return fallback;
+  return !["false", "0", "off"].includes(value.toLowerCase());
 }
 
-export const APP_CONFIG: AppConfig = {
-  // 当前默认关闭开屏动画（three.js 开场动画体积较大，仅展示用）
-  showIntro: envFlag("VITE_SHOW_INTRO", false),
-};
+export const APP_CONFIG = { showIntro: envFlag("VITE_SHOW_INTRO", true) };
+
+function readFlag(key: string): boolean {
+  try { return window.localStorage.getItem(key) === "true"; } catch { return false; }
+}
+
+export function isIntroHidden(): boolean { return readFlag(INTRO_HIDDEN_KEY); }
+
+export function setIntroHidden(hidden: boolean): void {
+  try { window.localStorage.setItem(INTRO_HIDDEN_KEY, String(hidden)); } catch { /* 浏览器禁用存储时，偏好只在当前界面生效。 */ }
+}
+
+export function markIntroSeen(): void {
+  try { window.localStorage.setItem(INTRO_SEEN_KEY, "true"); } catch { /* 存储失败不影响进入应用。 */ }
+}
 
 export function shouldShowIntro(): boolean {
-  return APP_CONFIG.showIntro;
+  return APP_CONFIG.showIntro && !isIntroHidden() && !readFlag(INTRO_SEEN_KEY);
 }

@@ -1,53 +1,24 @@
 import type { ThemeConfig } from "antd";
 
-/**
- * Braipen 暖纸质感主题 —— 从旧 styles.css 的设计变量迁移而来
- * 保留：米色底、棕色主色、纸张质感、圆角体系
- */
+/** 纸张、墨色与低饱和标记：与创作内容保持同一套视觉语言。 */
 export const braipenTheme: ThemeConfig = {
   token: {
-    colorPrimary: "#5f4b32",
-    colorInfo: "#5f4b32",
-    colorSuccess: "#4f7354",
-    colorWarning: "#a16d24",
-    colorError: "#a6534e",
-    colorText: "#26221c",
-    colorTextSecondary: "#746b5f",
-    colorTextTertiary: "#9a8f80",
-    colorBgLayout: "#f4efe6",
-    colorBgContainer: "#fffaf2",
-    colorBgElevated: "#fffdf8",
-    colorBorder: "#ddd0bd",
-    colorBorderSecondary: "#e6dccb",
-    borderRadius: 8,
-    borderRadiusLG: 10,
-    fontFamily:
-      '"Segoe UI", "Microsoft YaHei", system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-    fontSize: 14,
+    colorPrimary: "#173f35", colorInfo: "#416a5d", colorSuccess: "#527d59",
+    colorWarning: "#ad7742", colorError: "#b45646", colorText: "#263b32",
+    colorTextSecondary: "#728078", colorTextTertiary: "#909b94",
+    colorBgLayout: "#f6f5f0", colorBgContainer: "#fffefa", colorBgElevated: "#fffefa",
+    colorBorder: "#d8dfd6", colorBorderSecondary: "#e5e8e0",
+    borderRadius: 8, borderRadiusLG: 12, controlHeight: 36, fontSize: 14,
+    fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+    boxShadow: "0 8px 32px rgba(27, 51, 39, .08)",
   },
   components: {
-    Layout: {
-      headerBg: "#f4efe6",
-      siderBg: "#f4efe6",
-      bodyBg: "#f4efe6",
-    },
-    Card: {
-      colorBgContainer: "#fffaf2",
-      headerBg: "transparent",
-    },
-    Menu: {
-      itemBg: "transparent",
-      itemSelectedBg: "#efe4d3",
-      itemSelectedColor: "#493821",
-      itemHoverBg: "#f5eedd",
-    },
-    Button: {
-      primaryShadow: "none",
-    },
-    Table: {
-      headerBg: "#f0e8dc",
-      headerColor: "#493821",
-      rowHoverBg: "#f8f1e7",
-    },
+    Layout: { headerBg: "#f6f5f0", siderBg: "#163b32", bodyBg: "#f6f5f0" },
+    Card: { headerBg: "transparent", headerFontSize: 14, paddingLG: 24 },
+    Menu: { itemBg: "transparent", itemSelectedBg: "#e9eee5", itemSelectedColor: "#173f35", itemHoverBg: "#eff2eb" },
+    Button: { primaryShadow: "none", defaultShadow: "none", fontWeight: 500 },
+    Table: { headerBg: "#f0f3ec", headerColor: "#385446", rowHoverBg: "#f6f8f2" },
+    Tabs: { horizontalItemGutter: 28 },
+    Modal: { titleFontSize: 20 },
   },
 };

@@ -1,178 +1,111 @@
-import { useEffect, useRef } from "react";
-import { Graph } from "@antv/g6";
+import { useEffect, useRef, useState } from "react";
+import { Alert, Button, Space, Tooltip } from "antd";
+import { FullscreenOutlined, MinusOutlined, PlusOutlined } from "@ant-design/icons";
+import type { Graph } from "@antv/g6";
 import type { NarrativeGraphDocument } from "../../types";
 
 type GraphCanvasProps = {
-  projectRef: string;
-  graph: NarrativeGraphDocument | null;
-  loading: boolean;
-  onNodeClick: (nodeId: string) => void;
-  onNodeDoubleClick: (nodeId: string) => void;
-  onBlankClick: () => void;
+  projectRef: string; graph: NarrativeGraphDocument | null; loading: boolean;
+  selectedNodeId?: string | null;
+  onNodeClick: (nodeId: string) => void; onNodeDoubleClick: (nodeId: string) => void; onBlankClick: () => void;
 };
-
-/** 节点类型 → 颜色（暖色系，与主题一致） */
-const NODE_COLORS: Record<string, string> = {
-  character: "#d85a30",
-  scene: "#1d9e75",
-  item: "#378add",
-  foreshadowing: "#ba7517",
-  relationship_note: "#993556",
-  plot_direction: "#534ab7",
-  world_fact: "#5f5e5a",
-  event: "#639922",
-  organization: "#185fa5",
+export const NODE_COLORS: Record<string, string> = {
+  character: "#326451", scene: "#809987", item: "#7390a1", foreshadowing: "#bd6d45",
+  relationship_note: "#957980", plot_direction: "#8481a0", world_fact: "#9b9376", event: "#b89856", organization: "#496777",
 };
-
-function nodeColor(type: string): string {
-  return NODE_COLORS[type] ?? "#888780";
+function dataField(value: unknown, key: string): string | number | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const data = (value as { data?: Record<string, unknown> }).data;
+  return typeof data?.[key] === "string" || typeof data?.[key] === "number" ? data[key] as string | number : undefined;
 }
 
-function nodeSizeByImportance(importance: number): number {
-  return 32 + Math.min(28, Math.max(0, (importance - 1) * 3));
-}
-
-/** G6 v5 的 data 字段是 Record<string, unknown>，这里安全取值 */
-function dataField(d: unknown, key: string): string | number | undefined {
-  if (!d || typeof d !== "object") {
-    return undefined;
-  }
-  const record = d as Record<string, unknown>;
-  if (typeof record.data !== "object" || record.data === null) {
-    return undefined;
-  }
-  const value = (record.data as Record<string, unknown>)[key];
-  return typeof value === "string" || typeof value === "number" ? value : undefined;
-}
-
-/**
- * 叙事图谱画布：G6 v5 渲染，支持拖拽布局、滚轮缩放、点击/双击节点。
- * 只负责可视化；增删改通过回调交给页面调用后端接口。
- */
-export default function GraphCanvas({
-  projectRef,
-  graph,
-  loading,
-  onNodeClick,
-  onNodeDoubleClick,
-  onBlankClick,
-}: GraphCanvasProps) {
+export default function GraphCanvas({ projectRef, graph, loading, selectedNodeId, onNodeClick, onNodeDoubleClick, onBlankClick }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
-  const callbacksRef = useRef({ onNodeClick, onNodeDoubleClick, onBlankClick });
+  const callbacks = useRef({ onNodeClick, onNodeDoubleClick, onBlankClick });
+  callbacks.current = { onNodeClick, onNodeDoubleClick, onBlankClick };
+  const [ready, setReady] = useState(false);
+  const [renderError, setRenderError] = useState("");
+  const [retry, setRetry] = useState(0);
 
-  // 回调保持最新引用
   useEffect(() => {
-    callbacksRef.current = { onNodeClick, onNodeDoubleClick, onBlankClick };
-  }, [onNodeClick, onNodeDoubleClick, onBlankClick]);
-
-  // 初始化画布（一次）
-  useEffect(() => {
-    if (!containerRef.current || graphRef.current) {
-      return;
+    let cancelled = false;
+    let instance: Graph | null = null;
+    let resizeObserver: ResizeObserver | null = null;
+    let resizeFrame = 0;
+    setReady(false); setRenderError("");
+    if (!graph || !containerRef.current) return;
+    async function mountGraph() {
+      try {
+        // 图谱库只在进入画布时加载，不占用首屏和开场动画的加载预算。
+        const { Graph: GraphConstructor } = await import("@antv/g6");
+        if (cancelled || !containerRef.current) return;
+        const container = containerRef.current;
+        instance = new GraphConstructor({
+          container, width: container.clientWidth, height: container.clientHeight,
+          padding: 50, autoFit: "view", animation: false,
+          layout: { type: "d3-force", manyBody: { strength: -340 }, link: { distance: 165 }, collide: { radius: 46 } },
+          behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
+          node: { style: {
+            labelText: (d: unknown) => String(dataField(d, "label") ?? ""), labelPlacement: "bottom", labelOffsetY: 10,
+            labelFill: "#263e35", labelFontSize: 12, labelFontFamily: "Segoe UI, Microsoft YaHei, sans-serif",
+            fill: (d: unknown) => NODE_COLORS[String(dataField(d, "type"))] ?? "#869185",
+            stroke: "#ffffff", lineWidth: 3,
+            size: (d: unknown) => 24 + Math.max(1, Math.min(10, Number(dataField(d, "importance") ?? 5))) * 3,
+            shadowColor: "rgba(28, 63, 49, 0.12)", shadowBlur: 12,
+          } },
+          edge: { style: {
+            stroke: "#b5c1b5", lineWidth: 1, labelText: (d: unknown) => String(dataField(d, "label") ?? ""),
+            labelFontSize: 10, labelFill: "#7b877d", labelBackground: true, labelBackgroundFill: "#fafbf7", endArrow: true,
+          } },
+          data: {
+            nodes: graph!.graph.nodes.map((node) => ({ id: node.id, data: node })),
+            edges: graph!.graph.edges.map((edge) => ({ id: edge.id, source: edge.source, target: edge.target, data: edge })),
+          },
+        });
+        const active = instance;
+        active.on("node:click", (event) => { const id = (event as unknown as { target?: { id?: string } }).target?.id; if (id) callbacks.current.onNodeClick(id); });
+        active.on("node:dblclick", (event) => { const id = (event as unknown as { target?: { id?: string } }).target?.id; if (id) callbacks.current.onNodeDoubleClick(id); });
+        active.on("canvas:click", () => callbacks.current.onBlankClick());
+        graphRef.current = active;
+        await active.render();
+        if (cancelled) return;
+        if (graph!.graph.nodes.length) await active.fitView();
+        if (cancelled) return;
+        setReady(true);
+        resizeObserver = new ResizeObserver(() => {
+          cancelAnimationFrame(resizeFrame);
+          resizeFrame = requestAnimationFrame(() => {
+            if (!cancelled && container.clientWidth && container.clientHeight) active.resize(container.clientWidth, container.clientHeight);
+          });
+        });
+        resizeObserver.observe(container);
+      } catch {
+        if (!cancelled) setRenderError("画布暂时无法显示。仍可通过搜索查看和编辑节点。");
+      }
     }
-
-    const graph = new Graph({
-      container: containerRef.current,
-      autoFit: "view",
-      // 力导向布局：初始加载时把节点分散开，避免全部重叠在画布原点
-      layout: {
-        type: "d3-force",
-        manyBody: {
-          strength: -240,
-        },
-        link: {
-          distance: 140,
-        },
-        collide: {
-          radius: 40,
-        },
-      },
-      behaviors: ["drag-canvas", "zoom-canvas", "drag-element", "click-select"],
-      node: {
-        style: {
-          labelText: (d: unknown) => String(dataField(d, "label") ?? ""),
-          labelPlacement: "bottom",
-          labelFill: "#5f4b32",
-          labelFontSize: 11,
-          fill: (d: unknown) => nodeColor(String(dataField(d, "type") ?? "")),
-          stroke: "#ffffff",
-          lineWidth: 1.5,
-          size: (d: unknown) => nodeSizeByImportance(Number(dataField(d, "importance") ?? 1)),
-        },
-      },
-      edge: {
-        style: {
-          stroke: "#c8b897",
-          lineWidth: 1,
-          labelText: (d: unknown) => String(dataField(d, "label") ?? ""),
-          labelFontSize: 10,
-          labelFill: "#8a7a63",
-          labelBackground: true,
-          labelBackgroundFill: "#fffdf8",
-          endArrow: true,
-        },
-      },
-    });
-
-    graph.on("node:click", (event) => {
-      const id = (event as unknown as { target?: { id?: string } }).target?.id;
-      if (id) {
-        callbacksRef.current.onNodeClick(id);
-      }
-    });
-    graph.on("node:dblclick", (event) => {
-      const id = (event as unknown as { target?: { id?: string } }).target?.id;
-      if (id) {
-        callbacksRef.current.onNodeDoubleClick(id);
-      }
-    });
-    graph.on("canvas:click", () => {
-      callbacksRef.current.onBlankClick();
-    });
-
-    graphRef.current = graph;
+    void mountGraph();
     return () => {
-      graph.destroy();
-      graphRef.current = null;
+      cancelled = true; resizeObserver?.disconnect(); cancelAnimationFrame(resizeFrame);
+      if (graphRef.current === instance) graphRef.current = null;
+      instance?.destroy();
     };
-  }, []);
+  }, [graph, projectRef, retry]);
 
-  // 数据变化 → 更新画布
   useEffect(() => {
-    const g = graphRef.current;
-    if (!g || loading) {
-      return;
+    if (ready && selectedNodeId && graph?.graph.nodes.some((node) => node.id === selectedNodeId)) {
+      void graphRef.current?.focusElement(selectedNodeId, false).catch(() => undefined);
     }
+  }, [selectedNodeId, ready, graph]);
 
-    const nodes = (graph?.graph.nodes ?? []).map((node) => ({
-      id: node.id,
-      data: node,
-    }));
-    const edges = (graph?.graph.edges ?? []).map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      data: edge,
-    }));
-
-    g.setData({ nodes, edges });
-    void g.render().then(() => {
-      g.fitView();
-    });
-  }, [graph, loading, projectRef]);
-
-  return (
-    <div
-      ref={containerRef}
-      style={{
-        width: "100%",
-        height: 560,
-        borderRadius: 8,
-        border: "1px solid #e6dccb",
-        background: "#fffdf8",
-        overflow: "hidden",
-      }}
-    />
-  );
+  const viewport = (action: "in" | "out" | "fit") => {
+    const instance = graphRef.current;
+    if (!instance || !ready) return;
+    void (action === "fit" ? instance.fitView() : instance.zoomBy(action === "in" ? 1.2 : 1 / 1.2)).catch(() => undefined);
+  };
+  return <div className="graph-canvas-shell">
+    <div ref={containerRef} className="graph-canvas" role="img" aria-label={`叙事关系图，${graph?.graph.nodes.length ?? 0} 个节点。可使用上方搜索选择节点查看详情。`} />
+    {renderError && <Alert className="graph-render-error" type="warning" message={renderError} action={<Button size="small" onClick={() => setRetry((current) => current + 1)}>重载画布</Button>} />}
+    {Boolean(graph?.graph.nodes.length) && <div className="graph-canvas-controls"><Space.Compact><Tooltip title="放大"><Button aria-label="放大图谱" disabled={!ready || loading} icon={<PlusOutlined />} onClick={() => viewport("in")} /></Tooltip><Tooltip title="缩小"><Button aria-label="缩小图谱" disabled={!ready || loading} icon={<MinusOutlined />} onClick={() => viewport("out")} /></Tooltip><Tooltip title="显示完整图谱"><Button aria-label="显示完整图谱" disabled={!ready || loading} icon={<FullscreenOutlined />} onClick={() => viewport("fit")} /></Tooltip></Space.Compact></div>}
+  </div>;
 }

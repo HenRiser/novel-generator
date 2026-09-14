@@ -13,6 +13,7 @@ import {
   Typography,
 } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
+import "./library.css";
 
 import {
   acceptKnowledgeDraftChange,
@@ -112,13 +113,13 @@ function changeResult(change: CandidateChange): string {
     return "";
   }
   if (result.created_node_id) {
-    return `created_node_id: ${result.created_node_id}`;
+    return "已创建故事节点，可在叙事图谱中查看。";
   }
   if (result.created_edge_id) {
-    return `created_edge_id: ${result.created_edge_id}`;
+    return "已创建人物或线索关系，可在叙事图谱中查看。";
   }
   if (result.error) {
-    return `error: ${result.error}`;
+    return safePublicMessage(result.error, "此候选未能写入，请检查后重试。");
   }
   return "";
 }
@@ -258,7 +259,7 @@ function summarizeDraft(draft: KnowledgeDraft): string {
   const accepted = changes.filter((change) => changeStatus(change) === "accepted").length;
   const rejected = changes.filter((change) => changeStatus(change) === "rejected").length;
   const failed = changes.filter((change) => changeStatus(change) === "failed").length;
-  return `${changes.length} changes · ${pending} pending · ${accepted} accepted · ${rejected} rejected · ${failed} failed`;
+  return `${changes.length} 项候选 · ${pending} 项待审 · ${accepted} 项已接受 · ${rejected} 项已拒绝${failed ? ` · ${failed} 项失败` : ""}`;
 }
 
 function hasPendingCandidateChange(draft: KnowledgeDraft): boolean {
@@ -323,8 +324,14 @@ export function KnowledgeDraftReviewPanel({
   const [error, setError] = useState("");
   const [selectionHint, setSelectionHint] = useState("");
   const selectedDraftIdRef = useRef("");
+  const mounted = useRef(false);
 
   const projectRef = selectedProject.project_ref;
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   useEffect(() => {
     selectedDraftIdRef.current = selectedDraftId;
@@ -402,6 +409,7 @@ export function KnowledgeDraftReviewPanel({
         return;
       }
       setLoadingDraft(true);
+      setDraft(null);
       setError("");
       try {
         const response = await getKnowledgeDraft(projectRef, selectedDraftId);
@@ -444,7 +452,7 @@ export function KnowledgeDraftReviewPanel({
   }
 
   async function handleAccept(change: CandidateChange) {
-    if (!canAccept(change)) {
+    if (!draft || !canAccept(change) || busyChangeId || apiStatus !== "online") {
       return;
     }
     setBusyChangeId(change.id);
@@ -454,20 +462,21 @@ export function KnowledgeDraftReviewPanel({
       const response = await acceptKnowledgeDraftChange(projectRef, draft?.id || "", change.id, {
         review_note: reviewNotes[change.id] || "",
       });
+      if (!mounted.current) return;
       updateDraftState(response.draft);
       if (response.graph) {
         onGraphUpdated(response.graph);
       }
-      setMessage("Candidate change accepted and merged into Narrative Graph.");
+      setMessage("候选已接受，并写入正式叙事图谱。");
     } catch (acceptError) {
-      setError(safePublicMessage(acceptError instanceof Error ? acceptError.message : "", "Candidate change accept failed."));
+      if (mounted.current) setError(safePublicMessage(acceptError instanceof Error ? acceptError.message : "", "接受候选失败，请重试。"));
     } finally {
-      setBusyChangeId("");
+      if (mounted.current) setBusyChangeId("");
     }
   }
 
   async function handleReject(change: CandidateChange) {
-    if (!canReview(change)) {
+    if (!draft || !canReview(change) || busyChangeId || apiStatus !== "online") {
       return;
     }
     setBusyChangeId(change.id);
@@ -477,21 +486,22 @@ export function KnowledgeDraftReviewPanel({
       const response = await rejectKnowledgeDraftChange(projectRef, draft?.id || "", change.id, {
         review_note: reviewNotes[change.id] || "",
       });
+      if (!mounted.current) return;
       updateDraftState(response.draft);
-      setMessage("Candidate change rejected. Narrative Graph was not modified.");
+      setMessage("候选已拒绝，正式叙事图谱未改变。");
     } catch (rejectError) {
-      setError(safePublicMessage(rejectError instanceof Error ? rejectError.message : "", "Candidate change reject failed."));
+      if (mounted.current) setError(safePublicMessage(rejectError instanceof Error ? rejectError.message : "", "拒绝候选失败，请重试。"));
     } finally {
-      setBusyChangeId("");
+      if (mounted.current) setBusyChangeId("");
     }
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="knowledge-review">
       <Card
         size="small"
         title={
-          <Space>
+          <Space wrap>
             <Typography.Text strong>知识草稿审核</Typography.Text>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               接受会写入正式叙事图谱，拒绝仅更新审核状态
@@ -514,16 +524,16 @@ export function KnowledgeDraftReviewPanel({
         {error && <Alert type="error" showIcon message={error} closable onClose={() => setError("")} style={{ marginBottom: 8 }} />}
       </Card>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 0.42fr) minmax(0, 1fr)", gap: 12, alignItems: "start" }}>
+      <div className="knowledge-review-grid">
         <Card
           size="small"
+          className="knowledge-draft-list"
           title="草稿列表"
-          styles={{ body: { maxHeight: "calc(100vh - 360px)", overflowY: "auto" } }}
         >
           {loadingDrafts ? (
             <div style={{ textAlign: "center", padding: 24 }}><Spin /></div>
           ) : sortedDrafts.length === 0 ? (
-            <Empty description="当前项目暂无知识草稿。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty description="分析已保存的章节后，候选草稿会出现在这里。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : (
             <List
               size="small"
@@ -534,14 +544,24 @@ export function KnowledgeDraftReviewPanel({
                 const selected = selectedDraftId === item.id;
                 return (
                   <List.Item
+                    role="button"
+                    tabIndex={busyChangeId ? -1 : 0}
+                    aria-pressed={selected}
+                    aria-disabled={Boolean(busyChangeId)}
+                    onKeyDown={(event) => {
+                      if (!busyChangeId && (event.key === "Enter" || event.key === " ")) {
+                        event.preventDefault(); setSelectionHint(""); setSelectedDraftId(item.id);
+                      }
+                    }}
                     style={{
                       cursor: "pointer",
                       padding: "8px 10px",
                       borderRadius: 8,
-                      border: selected ? "1px solid #d8a24a" : "1px solid transparent",
-                      background: selected ? "#faf3e3" : "transparent",
+                      border: selected ? "1px solid #9eb5a5" : "1px solid transparent",
+                      background: selected ? "#edf2e9" : "transparent",
                     }}
                     onClick={() => {
+                      if (busyChangeId) return;
                       setSelectionHint("");
                       setSelectedDraftId(item.id);
                     }}
@@ -549,12 +569,12 @@ export function KnowledgeDraftReviewPanel({
                     <div style={{ display: "flex", flexDirection: "column", gap: 4, width: "100%" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <Typography.Text strong>第 {item.chapter_number || "-"} 章</Typography.Text>
-                        <Space size={4}>
+                        <Space size={4} wrap>
                           {pendingDraft ? <Tag color="orange">待审核</Tag> : <Tag color="default">{statusLabel(item.status || "")}</Tag>}
                           {recommendedDraft && <Tag color="blue">推荐审核</Tag>}
                         </Space>
                       </div>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>{item.id}</Typography.Text>
+                      <Typography.Text type="secondary" style={{ fontSize: 11 }} title={item.id}>{item.created_at ? new Date(item.created_at).toLocaleString("zh-CN") : "时间未记录"}</Typography.Text>
                       <Typography.Text type="secondary" style={{ fontSize: 12 }}>{summarizeDraft(item)}</Typography.Text>
                     </div>
                   </List.Item>
@@ -566,20 +586,21 @@ export function KnowledgeDraftReviewPanel({
 
         <Card
           size="small"
+          className="knowledge-draft-detail"
           title={draft ? `草稿详情 · 第 ${draft.chapter_number || "-"} 章` : "草稿详情"}
-          styles={{ body: { maxHeight: "calc(100vh - 360px)", overflowY: "auto" } }}
         >
           {loadingDraft && <div style={{ textAlign: "center", padding: 24 }}><Spin /></div>}
           {!loadingDraft && !draft && <Empty description="请选择一个知识草稿。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
 
-          {draft && (
+          {!loadingDraft && draft && (
             <>
-              <Descriptions size="small" column={2} bordered style={{ marginBottom: 12 }}>
+              <details className="knowledge-draft-metadata"><summary>草稿来源与记录</summary><Descriptions size="small" column={1} style={{ marginBottom: 12 }}>
                 <Descriptions.Item label="草稿 ID">{draft.id}</Descriptions.Item>
                 <Descriptions.Item label="来源分析 ID">{draft.source_delta_id || "-"}</Descriptions.Item>
-                <Descriptions.Item label="状态">{draft.status || "待审核"}</Descriptions.Item>
+                <Descriptions.Item label="状态">{statusLabel(draft.status || "")}</Descriptions.Item>
                 <Descriptions.Item label="创建时间">{draft.created_at || "-"}</Descriptions.Item>
-              </Descriptions>
+              </Descriptions></details>
+              {!draft.candidate_changes?.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="本次分析没有提取到候选变更。" />}
 
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {(draft.candidate_changes ?? []).map((change) => {
@@ -603,8 +624,8 @@ export function KnowledgeDraftReviewPanel({
                     status === "accepted" ? "green" : status === "rejected" ? "red" : status === "pending" || status === "pending_review" ? "orange" : "default";
 
                   return (
-                    <Card key={change.id} size="small" type="inner">
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <Card key={change.id} className="knowledge-candidate" size="small" type="inner">
+                      <div className="knowledge-candidate-heading">
                         <Tag color={statusTagColor}>{statusLabel(status)}</Tag>
                         {!supported && <Tag color="purple">暂不支持合并</Tag>}
                         <Typography.Text strong>{cardTitle}</Typography.Text>
@@ -664,14 +685,14 @@ export function KnowledgeDraftReviewPanel({
                       {resultText && <Alert type="info" showIcon message={resultText} style={{ marginBottom: 8 }} />}
 
                       <details style={{ marginBottom: 8 }}>
-                        <summary style={{ cursor: "pointer", color: "#8a7a63" }}>技术细节 / 调试信息</summary>
+                        <summary style={{ cursor: "pointer", color: "var(--muted)" }}>查看结构化候选</summary>
                         <Descriptions size="small" column={2} style={{ marginTop: 8 }}>
                           <Descriptions.Item label="操作">{change.operation}</Descriptions.Item>
                           <Descriptions.Item label="目标">{change.target || "-"}</Descriptions.Item>
                           <Descriptions.Item label="来源">{change.source || "-"}</Descriptions.Item>
                           <Descriptions.Item label="变更 ID">{change.id}</Descriptions.Item>
                         </Descriptions>
-                        <pre style={{ background: "#faf6ee", padding: 8, borderRadius: 6, fontSize: 12, overflow: "auto" }}>
+                        <pre style={{ background: "#f1f3ed", padding: 12, borderRadius: 6, fontSize: 12, overflow: "auto" }}>
                           {formatJson(change.payload)}
                         </pre>
                       </details>
@@ -681,22 +702,22 @@ export function KnowledgeDraftReviewPanel({
                           placeholder="审核备注（可选）"
                           value={reviewNotes[change.id] || ""}
                           onChange={(event) => setReviewNotes((current) => ({ ...current, [change.id]: event.target.value }))}
-                          disabled={!pendingReview || Boolean(busyChangeId)}
+                          disabled={!pendingReview || Boolean(busyChangeId) || apiStatus !== "online"}
                           autoSize={{ minRows: 2, maxRows: 4 }}
                         />
                         <Space>
                           <Button
                             type="primary"
                             onClick={() => void handleAccept(change)}
-                            disabled={!canAccept(change) || Boolean(busyChangeId)}
+                            disabled={!canAccept(change) || Boolean(busyChangeId) || apiStatus !== "online"}
                             loading={busy}
                           >
-                            接受
+                            接受并入图
                           </Button>
                           <Button
                             danger
                             onClick={() => void handleReject(change)}
-                            disabled={!pendingReview || Boolean(busyChangeId)}
+                            disabled={!pendingReview || Boolean(busyChangeId) || apiStatus !== "online"}
                           >
                             拒绝
                           </Button>
