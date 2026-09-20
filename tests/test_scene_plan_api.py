@@ -83,8 +83,16 @@ class ScenePlanApiTests(unittest.TestCase):
         )
         self.scene_context_patcher.start()
         self.task_context_patcher.start()
+        self.workflow_patchers = [
+            patch("services.chapter_workflow_service.resolve_project_context", side_effect=self._resolve_project_context),
+            patch("file_manager.resolve_project_context", side_effect=self._resolve_project_context),
+        ]
+        for patcher in self.workflow_patchers:
+            patcher.start()
 
     def tearDown(self):
+        for patcher in reversed(self.workflow_patchers):
+            patcher.stop()
         self.scene_context_patcher.stop()
         self.task_context_patcher.stop()
         self.client.close()

@@ -20,6 +20,8 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 
+from file_manager import save_chapter as write_test_chapter
+
 from project_context import create_workspace_book
 
 from services.narrative_graph_service import (
@@ -186,9 +188,19 @@ class ContinueSaveApiTests(unittest.TestCase):
 
         self.context_patcher.start()
 
+        self.workflow_patchers = [
+            patch("services.chapter_workflow_service.resolve_project_context", return_value=self.book),
+            patch("file_manager.resolve_project_context", return_value=self.book),
+        ]
+        for patcher in self.workflow_patchers:
+            patcher.start()
+
 
 
     def tearDown(self):
+
+        for patcher in reversed(self.workflow_patchers):
+            patcher.stop()
 
         self.context_patcher.stop()
 
@@ -210,13 +222,11 @@ class ContinueSaveApiTests(unittest.TestCase):
 
             patch("api.routers.continue_writing.read_chapter", return_value=("第一章：夜色降临。", None)),
 
-            patch("api.routers.continue_writing.save_chapter") as mock_save,
+            patch("api.routers.continue_writing.save_chapter", side_effect=write_test_chapter) as mock_save,
 
             patch("api.routers.continue_writing.update_chapter_index") as mock_index,
 
         ):
-
-            mock_save.return_value = Path("chapter_001.md")
 
             response = self.client.post(
 
@@ -252,13 +262,11 @@ class ContinueSaveApiTests(unittest.TestCase):
 
             patch("api.routers.continue_writing.read_chapter", return_value=("旧内容", None)),
 
-            patch("api.routers.continue_writing.save_chapter") as mock_save,
+            patch("api.routers.continue_writing.save_chapter", side_effect=write_test_chapter) as mock_save,
 
             patch("api.routers.continue_writing.update_chapter_index"),
 
         ):
-
-            mock_save.return_value = Path("chapter_001.md")
 
             response = self.client.post(
 
@@ -487,4 +495,3 @@ class OutlineImportTests(unittest.TestCase):
 if __name__ == "__main__":
 
     unittest.main()
-

@@ -60,7 +60,7 @@ export default function StreamingPreview({
           )}
           {status === "saved" && saveSucceeded && (
             <Tag icon={<CheckCircleOutlined />} color="success">
-              已保存
+              {result?.workflow?.status === "awaiting_confirmation" ? "正文已保存 · 待确认" : "已保存"}
             </Tag>
           )}
           {status === "failed" && <Tag color="error">失败</Tag>}
@@ -103,7 +103,7 @@ export default function StreamingPreview({
               章节文件：{fileNameFormatter(result.chapter_file) || "—"}
             </Typography.Text>
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              摘要文件：{fileNameFormatter(result.summary_file) || "—"}
+              {result.workflow?.status === "awaiting_confirmation" ? "确认正文后，摘要将在后台生成。" : result.summary_file ? `摘要文件：${fileNameFormatter(result.summary_file)}` : "摘要状态可在章节手稿中查看。"}
             </Typography.Text>
             {(result.consistency_warnings?.length ?? 0) > 0 && (
               <Alert

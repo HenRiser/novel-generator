@@ -46,7 +46,7 @@
 .context-prompt summary { cursor:pointer; color:var(--accent); }
 .context-prompt pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; line-height:1.8; padding:15px; background:#f1f3ed; }
 .studio-document-actions { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:16px; font-size:12px; margin-bottom:16px; }
-.studio-reader > div:last-child { height:auto !important; overflow:visible !important; }
+.studio-reader > .chapter-reader { height:clamp(440px,calc(100vh - 280px),800px); }
 .studio-reader .chapter-prose { max-height:none; min-height:320px; height:auto; overflow:visible; }
 .studio-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:75px 24px; min-height:480px; border:1px solid var(--border); border-radius:18px; background:var(--paper); text-align:center; }
 .studio-empty-mark { font-size:38px; color:var(--accent); margin-bottom:12px; }
@@ -73,3 +73,8 @@
 .scene-task-binding > span, .scene-task-binding small { color: var(--muted); }
 .scene-task-binding strong { font-weight: 500; }
 @media (max-width: 600px) { .review-content .ant-card-head-wrapper { flex-wrap: wrap; padding-block: 10px; gap: 10px; } .review-content .ant-card-head-title { overflow: visible; white-space: normal; min-width: 0; } .review-content .ant-card-head-title .ant-space { flex-wrap: wrap; } .review-content .ant-card-body { padding: 16px; } }
+.generation-mode-hint { font-size:12px; color:var(--muted); line-height:1.9; margin:12px 0; }
+.batch-progress { padding:18px; border:1px solid var(--border); background:var(--paper); border-radius:12px; margin-block:16px; }
+.batch-progress-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.batch-progress p { margin:8px 0; }
+.batch-progress small { display:block; color:var(--muted); line-height:1.9; margin-bottom:8px; }

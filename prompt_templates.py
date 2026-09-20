@@ -357,14 +357,12 @@ def build_chapter_prompt(
 
     context_text = "\n\n".join(context_blocks) if context_blocks else "暂无额外上下文。"
 
+    # Keep reusable rules and reference material ahead of chapter-specific input.
     user_prompt = f"""
 请根据以下小说项目设定和上下文，创作指定章节正文。
 
 ## 项目设定
 {project_brief}
-
-## 章节编号
-第 {chapter_number} 章
 
 ## Prompt Authority Order
 When instructions conflict, obey them in this exact order:
@@ -377,15 +375,8 @@ When instructions conflict, obey them in this exact order:
 
 Hard Continuity Constraints always win. Historical planning references may be stale and must never override an approved task sheet or confirmed continuity state.
 
-## 可用上下文
-{context_text}
-
-## 正文格式
-# 第 {chapter_number} 章：章节标题
-
-必须以 Markdown 一级标题开头，并且章节标题必须与正文一起生成：
-
-# 第 {chapter_number} 章：贴合本章内容的章节标题
+## 正文格式要求
+必须以 Markdown 一级标题开头，并且章节标题必须与正文一起生成。
 
 标题与正文之间空一行后再开始正文。章节标题必须根据本章内容自动生成，贴合本章核心事件，不要过于泛泛，不要剧透过度，要符合小说类型与写作风格，长度适中。不要输出“（待定标题）”，不要省略标题。
 
@@ -405,6 +396,15 @@ Hard Continuity Constraints always win. Historical planning references may be st
 13. 不要把故事写成总结，要写成具体场景。
 14. 如果可用上下文中提供了 Narrative Context Pack 的 Hard Continuity Constraints，必须视为最高优先级连续性约束，不得改写其中的日期、死亡/存活状态、身份状态、组织归属或因果关系。
 15. Historical Planning Reference 中的大纲和人物卡只作为历史规划参考；如果它们与 Approved Chapter Task Sheet 或已确认连续性状态冲突，以后两者为准。
+
+## 可用上下文
+{context_text}
+
+## 章节编号
+第 {chapter_number} 章
+
+## 正文格式
+# 第 {chapter_number} 章：贴合本章内容的章节标题
 """
     return _messages(user_prompt, story_scale)
 

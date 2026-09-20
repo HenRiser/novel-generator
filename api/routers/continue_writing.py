@@ -13,6 +13,11 @@ from deepseek_client import DeepSeekClientError, stream_generate_text_events
 from file_manager import read_chapter, save_chapter, update_chapter_index
 from services.common import resolve_workspace_context
 from services.project_service import load_project_detail
+from api.generation_state import get_generation_status
+from services.chapter_workflow_service import (
+    WorkflowError, ensure_chapter_editable, invalidate_after_external_edit,
+    prepare_next_chapter, project_workflow_lock,
+)
 
 
 router = APIRouter(prefix="/api", tags=["continue-writing"])
@@ -47,6 +52,13 @@ def _json_line(event: dict[str, Any]) -> str:
     return json.dumps(event, ensure_ascii=False) + "\n"
 
 
+def _ensure_editable(project_ref: str, chapter_number: int) -> None:
+    active = get_generation_status()
+    if active["running"] and active["project_ref"] == project_ref:
+        raise WorkflowError("本项目正在生成正文，请等待当前任务结束后再续写。", "generation_running", 409)
+    ensure_chapter_editable(project_ref, chapter_number)
+
+
 def _build_prompt(request: ContinueWritingRequest) -> list[dict[str, str]]:
     """构造对话式续写的 prompt：上下文 + 锚点 + 指令。"""
     system = (
@@ -74,6 +86,9 @@ def continue_writing_stream(
     payload: ContinueWritingRequest | None = None,
 ) -> StreamingResponse:
     request = payload or ContinueWritingRequest()
+
+    with project_workflow_lock(project_ref):
+        _ensure_editable(project_ref, chapter_number)
 
     if not has_api_key():
         _error(
@@ -156,6 +171,20 @@ def continue_writing_stream(
 def save_continue_result(
     project_ref: str,
     chapter_number: ChapterNumber,
+    request: ContinueSaveRequest,
+) -> ContinueSaveResponse:
+    with project_workflow_lock(project_ref):
+        _ensure_editable(project_ref, chapter_number)
+        if read_chapter(project_ref, chapter_number)[1] is None:
+            prepare_next_chapter(project_ref, chapter_number)
+        result = _save_continue_result(project_ref, chapter_number, request)
+        invalidate_after_external_edit(project_ref, chapter_number)
+        return result
+
+
+def _save_continue_result(
+    project_ref: str,
+    chapter_number: int,
     request: ContinueSaveRequest,
 ) -> ContinueSaveResponse:
     """把对话式续写的结果保存回章节文件。

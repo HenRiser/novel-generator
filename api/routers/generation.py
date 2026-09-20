@@ -26,6 +26,9 @@ from services.generation_service import (
 from services.chapter_task_service import resolve_approved_chapter_task
 from services.scene_plan_service import resolve_approved_scene_plan
 from services.project_service import load_project_detail, validate_outline_character_ready
+from services.chapter_workflow_service import (
+    WorkflowError, ensure_chapter_editable, prepare_next_chapter, project_workflow_lock,
+)
 
 
 router = APIRouter(prefix="/api", tags=["generation"])
@@ -215,6 +218,8 @@ def _chapter_response(result: Any) -> dict[str, Any]:
         response["function_review"] = function_review
     if result.summary_error:
         response["summary_error"] = public_message(result.summary_error)
+    if isinstance(getattr(result, "workflow", None), dict):
+        response["workflow"] = result.workflow
     return response
 
 
@@ -253,6 +258,8 @@ def _public_stream_event(event: dict[str, Any]) -> dict[str, Any]:
             response["function_review"] = event["function_review"]
         if event.get("summary_error"):
             response["summary_error"] = public_message(str(event["summary_error"]))
+        if isinstance(event.get("workflow"), dict):
+            response["workflow"] = event["workflow"]
         return response
 
     message = public_message(str(event.get("message") or "Chapter generation failed."))
@@ -278,6 +285,16 @@ def _generation_state_payload(event: dict[str, Any]) -> dict[str, Any]:
         "message": public_message(str(event.get("message") or "")),
         "partial_length": int(event.get("partial_length") or 0),
     }
+
+
+def _prepare_started_chapter(project_ref: str, chapter_number: int) -> None:
+    try:
+        with project_workflow_lock(project_ref):
+            ensure_chapter_editable(project_ref, chapter_number)
+            prepare_next_chapter(project_ref, chapter_number)
+    except Exception:
+        fail_generation_task("章节尚未就绪或已被后文锁定。")
+        raise
 
 
 @router.get("/generation/status")
@@ -348,6 +365,7 @@ def generate_project_chapter(
         _error(409, "generation_running", "Another API generation task is already running.")
 
     try:
+        _prepare_started_chapter(project_ref, chapter_number)
         result = generate_single_chapter(
             project_ref=project_ref,
             chapter_number=chapter_number,
@@ -376,7 +394,7 @@ def generate_project_chapter(
         response = _chapter_response(result)
         complete_generation_task(response)
         return response
-    except HTTPException:
+    except (HTTPException, WorkflowError):
         raise
     except Exception as exc:
         message = public_message(str(exc) or "Chapter generation failed.")
@@ -407,6 +425,8 @@ def generate_project_chapter_stream(
 
     if not start_generation_task("chapter_stream", project_ref, f"chapter_{chapter_number:03d}"):
         _error(409, "generation_running", "Another API generation task is already running.")
+
+    _prepare_started_chapter(project_ref, chapter_number)
 
     task_models = _task_models(_request_model(payload.model))
     max_tokens = _request_max_tokens(payload.max_tokens)

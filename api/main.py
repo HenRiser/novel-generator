@@ -11,6 +11,7 @@ from api.routers import (
     chapter_function_reviews,
     chapter_status,
     chapter_tasks,
+    chapter_workflow,
     context_pack,
     continue_writing,
     generation,
@@ -22,6 +23,7 @@ from api.routers import (
     settings,
     story_delta,
 )
+from services.chapter_workflow_service import WorkflowError
 
 
 app = FastAPI(title="novel-generator API")
@@ -51,6 +53,12 @@ app.include_router(continue_writing.router)
 app.include_router(story_delta.router)
 app.include_router(knowledge_drafts.router)
 app.include_router(generation.router)
+app.include_router(chapter_workflow.router)
+
+
+@app.exception_handler(WorkflowError)
+async def workflow_exception_handler(request: Request, exc: WorkflowError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message}})
 
 
 @app.exception_handler(StarletteHTTPException)

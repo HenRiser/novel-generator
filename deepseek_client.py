@@ -38,16 +38,11 @@ def _message_detail(message: str) -> str:
     return f"：{message}" if message else ""
 
 
-def _extract_message_text(message: Any) -> str:
-    """Extract readable text from OpenAI-style message objects or dicts."""
-    candidates = [
-        getattr(message, "content", None),
-        # Some DeepSeek models return readable text in reasoning_content; keep
-        # connection tests and generation behavior consistent by sharing fallback.
-        getattr(message, "reasoning_content", None),
-    ]
-    if isinstance(message, dict):
-        candidates.extend([message.get("content"), message.get("reasoning_content")])
+def _extract_message_text(message: Any, allow_reasoning: bool = False) -> str:
+    """Extract final content; reasoning is useful only for connectivity checks."""
+    fields = ("content", "reasoning_content") if allow_reasoning else ("content",)
+    candidates = [message.get(field) if isinstance(message, dict) else getattr(message, field, None)
+                  for field in fields]
 
     for value in candidates:
         if value is None:
@@ -98,6 +93,47 @@ def _stream_chunk_delta(chunk: Any) -> Any:
     if isinstance(choice, dict):
         delta = choice.get("delta")
     return delta
+
+
+def _finish_reason(choice: Any) -> str:
+    value = choice.get("finish_reason") if isinstance(choice, dict) else getattr(choice, "finish_reason", None)
+    return str(value or "").strip().lower()
+
+
+def _raise_if_truncated(finish_reason: str) -> None:
+    if finish_reason == "length":
+        raise DeepSeekClientError(
+            "模型输出达到 Token 上限，内容可能被截断，未作为完整结果保存。请提高 max_tokens 或缩小生成范围后重试。"
+        )
+
+
+def _capture_usage(response: Any, metrics: dict[str, Any] | None) -> None:
+    """Copy only numeric usage; absent provider statistics remain unknown."""
+    if metrics is None:
+        return
+
+    def field(value: Any, name: str) -> Any:
+        return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+    usage = field(response, "usage")
+    if usage is None:
+        return
+    values: dict[str, int] = {}
+    for name in ("prompt_tokens", "completion_tokens", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens"):
+        value = field(usage, name)
+        if type(value) is int and value >= 0:
+            values[name] = value
+    for name, detail, key in (
+        ("prompt_cache_hit_tokens", "prompt_tokens_details", "cached_tokens"),
+        ("reasoning_tokens", "completion_tokens_details", "reasoning_tokens"),
+    ):
+        value = field(field(usage, detail), key)
+        if name not in values and type(value) is int and value >= 0:
+            values[name] = value
+    prompt, hit = values.get("prompt_tokens"), values.get("prompt_cache_hit_tokens")
+    if "prompt_cache_miss_tokens" not in values and prompt is not None and hit is not None and hit <= prompt:
+        values["prompt_cache_miss_tokens"] = prompt - hit
+    metrics.update(values)
 
 
 def _get_api_key() -> str:
@@ -151,7 +187,7 @@ def test_deepseek_connection(api_key: str, model: str) -> tuple[bool, str]:
     if not getattr(response, "choices", None):
         return False, "API 请求完成，但模型没有返回候选结果。"
 
-    content = _extract_message_text(response.choices[0].message)
+    content = _extract_message_text(response.choices[0].message, allow_reasoning=True)
     if not content:
         return False, "API 请求完成，但模型返回内容为空。"
 
@@ -163,10 +199,19 @@ def generate_text(
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4000,
+    usage_metrics: dict[str, Any] | None = None,
+    *,
+    json_mode: bool = False,
 ) -> str:
-    """Call DeepSeek through the OpenAI-compatible Chat Completions API."""
+    """Generate text, optionally constraining JSON syntax; callers validate fields."""
     if not messages:
         raise DeepSeekClientError("Prompt 为空，无法生成内容。")
+    if json_mode and not any(
+        message.get("role") in {"system", "user"}
+        and "json" in str(message.get("content") or "").casefold()
+        for message in messages
+    ):
+        raise DeepSeekClientError("JSON 模式需要在 system 或 user 提示词中明确要求 JSON 输出并提供格式样例。")
 
     api_key = _get_api_key()
     client = OpenAI(api_key=api_key, base_url=_get_base_url())
@@ -177,6 +222,7 @@ def generate_text(
             messages=messages,
             temperature=float(temperature),
             max_tokens=int(max_tokens),
+            **({"response_format": {"type": "json_object"}} if json_mode else {}),
         )
     except AuthenticationError as exc:
         safe_message = _sanitize_error_message(exc, api_key)
@@ -202,9 +248,11 @@ def generate_text(
         safe_message = _sanitize_error_message(exc, api_key)
         raise DeepSeekClientError(f"生成失败：{safe_message}") from exc
 
+    _capture_usage(response, usage_metrics)
     if not getattr(response, "choices", None):
         raise DeepSeekClientError("模型没有返回候选结果。")
 
+    _raise_if_truncated(_finish_reason(response.choices[0]))
     content = _extract_message_text(response.choices[0].message)
     if not content:
         raise DeepSeekClientError("模型返回内容为空，请调整 Prompt 或稍后重试。")
@@ -217,6 +265,7 @@ def stream_generate_text_events(
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4000,
+    usage_metrics: dict[str, Any] | None = None,
 ) -> Iterator[dict[str, str]]:
     """流式生成，产出结构化事件（不直接透出底层 chunk）。
 
@@ -232,6 +281,7 @@ def stream_generate_text_events(
     api_key = _get_api_key()
     client = OpenAI(api_key=api_key, base_url=_get_base_url())
 
+    stream = None
     try:
         stream = client.chat.completions.create(
             model=(model or DEFAULT_MODEL).strip() or DEFAULT_MODEL,
@@ -241,26 +291,33 @@ def stream_generate_text_events(
             stream=True,
         )
         seen_content = False
-        reasoning_fallback_chunks: list[str] = []
+        truncated = False
         for chunk in stream:
+            # DeepSeek attaches usage to the final choice; compatible providers
+            # may instead send a usage-only chunk with no choices.
+            _capture_usage(chunk, usage_metrics)
+            choices = chunk.get("choices") if isinstance(chunk, dict) else getattr(chunk, "choices", None)
+            if choices and _finish_reason(choices[0]) == "length":
+                truncated = True
             delta = _stream_chunk_delta(chunk)
             content = _extract_delta_field_text(delta, "content")
             if content:
-                if not seen_content:
+                if content.strip():
                     seen_content = True
-                    reasoning_fallback_chunks.clear()
                 yield {"kind": "content", "text": content}
                 continue
 
             reasoning_content = _extract_delta_field_text(delta, "reasoning_content")
             if reasoning_content:
-                reasoning_fallback_chunks.append(reasoning_content)
                 yield {"kind": "reasoning", "text": reasoning_content}
 
-        if not seen_content and reasoning_fallback_chunks:
+        _raise_if_truncated("length" if truncated else "")
+        if not seen_content:
             raise DeepSeekClientError(
                 "Model stream ended without final content. Increase max_tokens or use a non-reasoning model for streaming generation."
             )
+    except DeepSeekClientError:
+        raise
     except AuthenticationError as exc:
         safe_message = _sanitize_error_message(exc, api_key)
         detail = f" Details: {safe_message}" if safe_message else ""
@@ -287,6 +344,13 @@ def stream_generate_text_events(
     except Exception as exc:
         safe_message = _sanitize_error_message(exc, api_key)
         raise DeepSeekClientError(f"Generation failed: {safe_message}") from exc
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
 
 
 def stream_generate_text(

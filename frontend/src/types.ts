@@ -63,6 +63,43 @@ export type ChapterContent = {
   content: string;
 };
 
+export type ChapterWorkflow = {
+  project_ref: string;
+  chapter_number: number;
+  revision: string;
+  chapter_file: string;
+  content: string;
+  status: "awaiting_confirmation" | "confirmed";
+  summary_status: "not_requested" | "pending" | "running" | "ready" | "failed";
+  review_status: "not_requested" | "pending" | "running" | "ready" | "failed";
+  review_scope?: "rules_only" | "semantic_and_rules";
+  summary_file: string;
+  summary: string;
+  error: string;
+  review_error: string;
+  warnings: ConsistencyWarning[];
+  editable: boolean;
+  locked_by_chapter: number | null;
+  lock_reason: string;
+};
+
+export type BatchGenerationStatus = {
+  id: string;
+  status: "idle" | "running" | "stopping" | "completed" | "stopped" | "failed";
+  start_chapter: number;
+  end_chapter: number;
+  current_chapter: number | null;
+  completed_chapters: number[];
+  message: string;
+  error: string;
+  stage: string;
+};
+
+export type BatchGenerationRequest = Pick<GenerationRequest, "model" | "temperature" | "max_tokens"> & {
+  start_chapter: number;
+  end_chapter: number;
+};
+
 export type WorkflowGuardWarning = {
   code: string;
   severity: string;
@@ -165,6 +202,19 @@ export type WorkflowGuardCheckResponse = {
 };
 
 export type ApiStatus = "loading" | "online" | "offline";
+
+export type GenerationReadiness = {
+  project_ref: string;
+  chapter_number: number;
+  ready: boolean;
+  can_generate_assets: boolean;
+  blockers: Array<{
+    code: string;
+    message: string;
+    chapter_number?: number;
+    action: "wait" | "read_chapter" | "confirm_chapter" | "retry_summary" | "generate_assets" | "project_settings" | "model_settings";
+  }>;
+};
 
 export type GenerationStatus = {
   running: boolean;
@@ -725,7 +775,8 @@ export type ChapterStreamDoneEvent = {
   chapter_number: number;
   title: string;
   chapter_file: string;
-  summary_file: string;
+  summary_file?: string;
+  workflow?: ChapterWorkflow;
   index_file?: string;
   message: string;
   summary_error?: string;

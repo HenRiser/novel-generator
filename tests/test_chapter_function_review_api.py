@@ -46,6 +46,7 @@ class ChapterFunctionReviewApiTests(unittest.TestCase):
         self.context_patchers = [
             patch("services.chapter_task_service.resolve_project_context", side_effect=self._resolve_project_context),
             patch("services.chapter_function_review_service.resolve_project_context", side_effect=self._resolve_project_context),
+            patch("services.chapter_workflow_service.resolve_project_context", side_effect=self._resolve_project_context),
             patch("file_manager.resolve_project_context", side_effect=self._resolve_project_context),
             patch("services.ai_run_service.resolve_project_context", side_effect=self._resolve_project_context),
             patch("services.event_log_service.resolve_project_context", side_effect=self._resolve_project_context),

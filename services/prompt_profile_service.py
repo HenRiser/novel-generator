@@ -10,16 +10,16 @@ from .common import clean_text
 PROMPT_PREVIEW_LIMIT = 800
 PROMPT_PROFILES = {
     "chapter_generation": {
-        "profile_id": "chapter_generation_v1",
+        "profile_id": "chapter_generation_v2",
         "template_name": "chapter_generation",
-        "template_version": "v1",
-        "description": "Chapter generation prompt with optional Narrative Context Pack.",
+        "template_version": "v2",
+        "description": "Chapter generation prompt with stable rules and references before dynamic chapter context.",
     },
     "story_delta_analysis": {
-        "profile_id": "story_delta_analysis_v1",
+        "profile_id": "story_delta_analysis_v2",
         "template_name": "story_delta_analysis",
-        "template_version": "v1",
-        "description": "Story Delta analysis prompt that may also produce Next Chapter Proposal and Knowledge Draft candidates.",
+        "template_version": "v2",
+        "description": "JSON-constrained Story Delta analysis with validated planning and Knowledge Draft candidates.",
     },
 }
 SENSITIVE_LINE_PATTERN = re.compile(

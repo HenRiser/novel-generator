@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { Badge, Button, Drawer, Select, Space } from "antd";
 import { AppstoreOutlined, EditOutlined, NodeIndexOutlined, ReadOutlined, SafetyCertificateOutlined, SettingOutlined, DatabaseOutlined, MenuOutlined, ArrowUpOutlined, PlayCircleOutlined, ExperimentOutlined } from "@ant-design/icons";
 import { selectGenerationBusy, useAppStore } from "../../store/useAppStore";
 import PageBoundary from "./PageBoundary";
+import { useBatchGeneration } from "../../hooks/useBatchGeneration";
 
 const NAV_ITEMS = [
   { path: "/dashboard", icon: <AppstoreOutlined />, label: "创作概览", number: "01" },
@@ -24,13 +25,21 @@ export function BrandMark() {
 }
 
 export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void }) {
+  useBatchGeneration();
   const location = useLocation();
+  const navigate = useNavigate();
   const { apiStatus, projects, projectsLoading, selectedProjectRef, selectProject } = useAppStore();
   const busy = useAppStore(selectGenerationBusy);
   const [menuOpen, setMenuOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const title = NAV_ITEMS.find(item => item.path === location.pathname)?.label ?? "偏好设置";
   const status = API_STATUS[apiStatus];
+  const changeProject = (ref: string | undefined) => {
+    if ((ref ?? null) === selectedProjectRef) return;
+    selectProject(ref ?? null);
+    // 章节链接属于旧项目，主动切换作品时恢复新项目自己的工作位置。
+    if (location.pathname === "/reader" || location.pathname === "/writing") navigate(location.pathname, { replace: true });
+  };
 
   useEffect(() => { setMenuOpen(false); document.title = `${title} · Braipen`; window.scrollTo(0, 0); }, [location.pathname, title]);
 
@@ -57,7 +66,7 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
       <header className="app-header">
         <div className="header-location"><Button className="mobile-menu-button" type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setMenuOpen(true)} /><span className="header-section">工作空间</span><span className="header-slash">/</span><strong>{title}</strong></div>
         <div className="header-tools">
-          <Select aria-label="当前项目" className="header-project" placeholder="选择一个故事" showSearch allowClear loading={projectsLoading} disabled={busy} value={selectedProjectRef ?? undefined} optionFilterProp="label" onChange={value => selectProject(value ?? null)} options={projects.map(p => ({ value: p.project_ref, label: p.title }))} notFoundContent={projectsLoading ? "正在读取项目…" : "还没有故事，从概览新建"} />
+          <Select aria-label="当前项目" className="header-project" placeholder="选择一个故事" showSearch allowClear loading={projectsLoading} disabled={busy} value={selectedProjectRef ?? undefined} optionFilterProp="label" onChange={changeProject} options={projects.map(p => ({ value: p.project_ref, label: p.title }))} notFoundContent={projectsLoading ? "正在读取项目…" : "还没有故事，从概览新建"} />
           <span className="connection-status" title={status.text}><Badge status={status.status} /><span>{status.text}</span></span>
         </div>
       </header>

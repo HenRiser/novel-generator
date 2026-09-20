@@ -1,5 +1,8 @@
 import type {
   AcceptKnowledgeDraftChangeRequest,
+  BatchGenerationRequest,
+  BatchGenerationStatus,
+  ChapterWorkflow,
   ChapterContent,
   ChapterGenerationResponse,
   ChapterSummary,
@@ -26,6 +29,7 @@ import type {
   SaveApiConfigResponse,
   GenerationSettingsResponse,
   GenerationRequest,
+  GenerationReadiness,
   GenerationStatus,
   HealthResponse,
   KnowledgeDraftListResponse,
@@ -55,7 +59,7 @@ import type {
 } from "./types";
 
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "") || "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "") ?? (import.meta.env.PROD ? "" : "http://127.0.0.1:8000");
 
 function projectPath(projectRef: string): string {
   return encodeURIComponent(projectRef);
@@ -498,6 +502,33 @@ export function getChapter(projectRef: string, chapterNumber: number): Promise<C
   return apiFetch<ChapterContent>(
     `/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}`,
   );
+}
+
+export function getChapterWorkflow(projectRef: string, chapterNumber: number, signal?: AbortSignal): Promise<ChapterWorkflow> {
+  return apiFetch<ChapterWorkflow>(`/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/workflow`, { signal });
+}
+
+export function getGenerationReadiness(projectRef: string, chapterNumber: number, signal?: AbortSignal): Promise<GenerationReadiness> {
+  return apiFetch<GenerationReadiness>(`/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generation-readiness`, { signal });
+}
+
+export function confirmChapter(projectRef: string, chapterNumber: number, content: string, expectedRevision: string, signal?: AbortSignal): Promise<ChapterWorkflow> {
+  return apiFetch<ChapterWorkflow>(`/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/confirm`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, expected_revision: expectedRevision }), signal,
+  });
+}
+
+export function getBatchGeneration(projectRef: string, signal?: AbortSignal): Promise<BatchGenerationStatus> {
+  return apiFetch<BatchGenerationStatus>(`/api/projects/${projectPath(projectRef)}/generation/batch`, { signal });
+}
+
+export function startBatchGeneration(projectRef: string, request: BatchGenerationRequest): Promise<BatchGenerationStatus> {
+  return postJson<BatchGenerationStatus>(`/api/projects/${projectPath(projectRef)}/generation/batch`, request);
+}
+
+export function stopBatchGeneration(projectRef: string): Promise<BatchGenerationStatus> {
+  return postJson<BatchGenerationStatus>(`/api/projects/${projectPath(projectRef)}/generation/batch/stop`, {});
 }
 
 export function getChapterStatus(projectRef: string, chapterNumber: number): Promise<ChapterStatusResponse> {

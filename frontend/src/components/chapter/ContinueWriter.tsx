@@ -12,6 +12,7 @@ type ContinueWriterProps = {
   /** 用户选中的文本（可选），用于续写参考；保存仍追加到章末。 */
   anchorText?: string | null;
   onClearAnchor?: () => void;
+  disabled?: boolean;
 };
 
 type StreamStatus = "idle" | "streaming" | "done" | "error";
@@ -26,6 +27,7 @@ export default function ContinueWriter({
   contextText,
   anchorText,
   onClearAnchor,
+  disabled = false,
 }: ContinueWriterProps) {
   const [instruction, setInstruction] = useState("");
   const [output, setOutput] = useState("");
@@ -39,7 +41,7 @@ export default function ContinueWriter({
   const activeRef = useRef(false);
   const instanceVersion = useRef(0);
 
-  const canStart = Boolean(projectRef && contextText) && apiStatus === "online" && !saving && status !== "streaming" && !generationBusy.chapterStreaming && !generationBusy.chapterGenerating && !generationBusy.outlineGenerating;
+  const canStart = !disabled && Boolean(projectRef && contextText) && apiStatus === "online" && !saving && status !== "streaming" && !generationBusy.chapterStreaming && !generationBusy.chapterGenerating && !generationBusy.outlineGenerating && !generationBusy.batchGenerating;
 
   useEffect(() => {
     ++instanceVersion.current;
@@ -184,7 +186,7 @@ export default function ContinueWriter({
   }, [anchorText, canStart, chapterNumber, contextText, instruction, projectRef, setBusy]);
 
   const handleInsert = useCallback(async () => {
-    if (!output || !projectRef || saving || saved) {
+    if (!output || !projectRef || saving || saved || disabled) {
       return;
     }
     setSaving(true);
@@ -207,7 +209,7 @@ export default function ContinueWriter({
     } finally {
       if (version === instanceVersion.current) setSaving(false);
     }
-  }, [chapterNumber, output, projectRef, saved, saving]);
+  }, [chapterNumber, output, projectRef, saved, saving, disabled]);
 
   return (
     <div
@@ -263,7 +265,7 @@ export default function ContinueWriter({
           </Button>
         )}
         {output && status === "done" && (
-          <Button type="primary" icon={<SaveOutlined />} onClick={() => void handleInsert()} loading={saving} disabled={saved}>
+          <Button type="primary" icon={<SaveOutlined />} onClick={() => void handleInsert()} loading={saving} disabled={saved || disabled}>
             {saved ? "已追加到章末" : "追加到章节末尾"}
           </Button>
         )}

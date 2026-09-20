@@ -433,8 +433,22 @@ def read_all_summaries(title: str, before_chapter: int | None = None) -> str:
             if (_summary_number_from_path(path) or 0) < int(before_chapter)
         ]
 
-    parts = []
+    # A confirmed edit supersedes earlier summaries. Never feed both revisions
+    # (or a stale summary of an unconfirmed edit) into the next chapter.
+    from services.chapter_workflow_service import current_summary_for_context
+
+    latest_by_chapter: dict[int, Path] = {}
     for path in sorted(files, key=_summary_sort_key):
+        latest_by_chapter[int(_summary_number_from_path(path))] = path
+    existing_chapters = {_chapter_number_from_path(path) for path in list_chapter_files(title)}
+    parts = []
+    for number, path in sorted(latest_by_chapter.items()):
+        if number in existing_chapters:
+            managed, summary = current_summary_for_context(title, number)
+            if managed:
+                if summary:
+                    parts.append(f"### chapter_{number:03d}_summary\n{summary}")
+                continue
         parts.append(f"### {path.stem}\n{_read_text(path).strip()}")
 
     return "\n\n".join(parts)

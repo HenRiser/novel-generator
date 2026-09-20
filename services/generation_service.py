@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+import logging
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Iterator
 
 from deepseek_client import DeepSeekClientError, generate_text, stream_generate_text, stream_generate_text_events
@@ -24,13 +29,14 @@ from prompt_templates import (
 )
 
 from .chapter_service import extract_chapter_title
+from .chapter_workflow_service import project_workflow_lock, register_generated_chapter
 from .chapter_task_service import format_approved_task_for_prompt
 from .scene_plan_service import format_approved_scene_plan_for_prompt
 from .ai_run_service import create_ai_run_record_best_effort
 from .chapter_function_review_service import create_no_reveal_compliance_review
 from .consistency_check_service import check_generated_chapter_consistency
 from .event_log_service import append_event_best_effort
-from .prompt_profile_service import build_prompt_profile
+from .prompt_profile_service import build_prompt_profile, get_prompt_profile
 from .schemas import ChapterGenerationResult, OutlineCharacterGenerationResult
 
 
@@ -74,6 +80,50 @@ LOW_INTENSITY_GOAL_MARKERS = (
     "no new revelation",
 )
 LOW_INTENSITY_NEGATION_MARKERS = ("不要低强度", "不低强度")
+
+
+# ponytail: one JSON line per chapter in backend stderr; add storage only if
+# longitudinal analysis outgrows the deployment's existing log retention.
+_metrics_logger = logging.getLogger("braipen.generation_metrics")
+if not _metrics_logger.handlers:
+    _metrics_logger.addHandler(logging.StreamHandler())
+_metrics_logger.setLevel(logging.INFO)
+_metrics_logger.propagate = False
+
+
+@contextmanager
+def _chapter_metrics(project_ref: str, chapter_number: int, model: str, streaming: bool):
+    started = perf_counter()
+    metrics: dict[str, Any] = {
+        "event": "chapter_generation_metrics",
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "project_ref": project_ref,
+        "chapter_number": chapter_number,
+        "model": model,
+        "template_version": get_prompt_profile("chapter_generation")["template_version"],
+        "streaming": streaming,
+        "status": "error",
+        "first_content_ms": None,
+        "body_complete_ms": None,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+        "prompt_cache_hit_tokens": None,
+        "prompt_cache_miss_tokens": None,
+        "reasoning_tokens": None,
+    }
+    try:
+        yield metrics, started
+    except GeneratorExit:
+        if "total_ms" not in metrics:
+            metrics["status"] = "interrupted"
+        raise
+    finally:
+        metrics.setdefault("total_ms", round((perf_counter() - started) * 1000, 1))
+        try:
+            # Do not log prompts, prose, credentials, provider payloads or errors.
+            _metrics_logger.info(json.dumps(metrics, ensure_ascii=False))
+        except Exception:
+            pass  # Diagnostics must never prevent a chapter from being saved.
 
 
 def _model(task_models: dict[str, str], key: str) -> str:
@@ -364,6 +414,28 @@ def _finalize_generated_chapter(
     chapter_task: dict[str, Any] | None = None,
     allowed_scene_contract: str | None = None,
     scene_plan: dict[str, Any] | None = None,
+    defer_summary: bool = True,
+) -> ChapterGenerationResult:
+    with project_workflow_lock(project_ref):
+        return _persist_generated_chapter(
+            project_ref, chapter_number, chapter_content, task_models, notices,
+            ai_run_metadata, narrative_context_text, chapter_task,
+            allowed_scene_contract, scene_plan, defer_summary,
+        )
+
+
+def _persist_generated_chapter(
+    project_ref: str,
+    chapter_number: int,
+    chapter_content: str,
+    task_models: dict[str, str],
+    notices: list[str] | None,
+    ai_run_metadata: dict[str, Any] | None,
+    narrative_context_text: str | None,
+    chapter_task: dict[str, Any] | None,
+    allowed_scene_contract: str | None,
+    scene_plan: dict[str, Any] | None,
+    defer_summary: bool,
 ) -> ChapterGenerationResult:
     notices = list(notices or [])
     chapter_model = _model(task_models, "chapter")
@@ -390,14 +462,15 @@ def _finalize_generated_chapter(
     summary_path = ""
     summary_error = None
     try:
-        summary_messages = build_summary_prompt(chapter_content, chapter_number)
-        summary = generate_text(
-            messages=summary_messages,
-            model=summary_model,
-            temperature=0.2,
-            max_tokens=512,
-        )
-        summary_path = str(save_summary(project_ref, chapter_number, summary))
+        if not defer_summary:
+            summary_messages = build_summary_prompt(chapter_content, chapter_number)
+            summary = generate_text(
+                messages=summary_messages,
+                model=summary_model,
+                temperature=0.2,
+                max_tokens=512,
+            )
+            summary_path = str(save_summary(project_ref, chapter_number, summary))
     except DeepSeekClientError as exc:
         summary_error = str(exc)
     except Exception as exc:
@@ -511,6 +584,13 @@ def _finalize_generated_chapter(
     except Exception:
         consistency_warnings = []
 
+    workflow = register_generated_chapter(
+        project_ref, chapter_number, chapter_path, chapter_content, summary_model,
+        narrative_context_text=narrative_context_text,
+        chapter_task=chapter_task, scene_plan=scene_plan,
+        allowed_scene_contract=allowed_scene_contract,
+        confirmed=not defer_summary, summary=summary, summary_path=summary_path,
+    )
     return ChapterGenerationResult(
         True,
         chapter_number=chapter_number,
@@ -522,6 +602,7 @@ def _finalize_generated_chapter(
         index_path=str(index_path),
         notices=notices,
         summary_error=summary_error,
+        workflow=workflow,
         chapter_model=chapter_model,
         chapter_title_model=chapter_title_model,
         summary_model=summary_model,
@@ -563,6 +644,8 @@ def _stream_done_event(result: ChapterGenerationResult) -> dict[str, Any]:
         event["consistency_warnings"] = list(result.consistency_warnings)
     if result.function_review:
         event["function_review"] = dict(result.function_review)
+    if result.workflow:
+        event["workflow"] = dict(result.workflow)
     return event
 
 
@@ -580,6 +663,7 @@ def generate_single_chapter(
     chapter_task_relative_path: str | None = None,
     scene_plan: dict[str, Any] | None = None,
     scene_plan_relative_path: str | None = None,
+    defer_summary: bool = True,
 ) -> ChapterGenerationResult:
     valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
     if not valid:
@@ -587,52 +671,59 @@ def generate_single_chapter(
 
     chapter_model = _model(task_models, "chapter")
 
-    try:
-        messages, notices = build_generation_messages(
-            project_ref=ref,
-            mode=CHAPTER_MODE,
-            project_config=project_config,
-            chapter_number=number,
-            use_previous_context=use_previous_context,
-            narrative_context_text=narrative_context_text,
-            chapter_task=chapter_task,
-            allowed_scene_contract=allowed_scene_contract,
-            scene_plan=scene_plan,
-        )
-        chapter_content = generate_text(
-            messages=messages,
-            model=chapter_model,
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-        )
-        ai_run_metadata = _chapter_ai_run_metadata(
-            messages,
-            temperature,
-            max_tokens,
-            use_previous_context,
+    with _chapter_metrics(ref, number, chapter_model, streaming=False) as (metrics, started):
+        metrics["summary_deferred"] = defer_summary
+        try:
+            messages, notices = build_generation_messages(
+                project_ref=ref,
+                mode=CHAPTER_MODE,
+                project_config=project_config,
+                chapter_number=number,
+                use_previous_context=use_previous_context,
+                narrative_context_text=narrative_context_text,
+                chapter_task=chapter_task,
+                allowed_scene_contract=allowed_scene_contract,
+                scene_plan=scene_plan,
+            )
+            chapter_content = generate_text(
+                messages=messages,
+                model=chapter_model,
+                temperature=temperature,
+                max_tokens=int(max_tokens),
+                usage_metrics=metrics,
+            )
+            metrics["body_complete_ms"] = round((perf_counter() - started) * 1000, 1)
+            ai_run_metadata = _chapter_ai_run_metadata(
+                messages,
+                temperature,
+                max_tokens,
+                use_previous_context,
+                narrative_context_text,
+                chapter_task,
+                chapter_task_relative_path,
+                scene_plan,
+                scene_plan_relative_path,
+            )
+        except DeepSeekClientError as exc:
+            return _chapter_failure(number, str(exc), task_models)
+        except Exception as exc:
+            return _chapter_failure(number, f"Chapter generation failed: {exc}", task_models)
+
+        result = _finalize_generated_chapter(
+            ref,
+            number,
+            chapter_content,
+            task_models,
+            notices,
+            ai_run_metadata,
             narrative_context_text,
             chapter_task,
-            chapter_task_relative_path,
+            allowed_scene_contract,
             scene_plan,
-            scene_plan_relative_path,
+            defer_summary,
         )
-    except DeepSeekClientError as exc:
-        return _chapter_failure(number, str(exc), task_models)
-    except Exception as exc:
-        return _chapter_failure(number, f"Chapter generation failed: {exc}", task_models)
-
-    return _finalize_generated_chapter(
-        ref,
-        number,
-        chapter_content,
-        task_models,
-        notices,
-        ai_run_metadata,
-        narrative_context_text,
-        chapter_task,
-        allowed_scene_contract,
-        scene_plan,
-    )
+        metrics["status"] = "success" if result.ok else "error"
+        return result
 
 
 def stream_generate_single_chapter(
@@ -649,6 +740,7 @@ def stream_generate_single_chapter(
     chapter_task_relative_path: str | None = None,
     scene_plan: dict[str, Any] | None = None,
     scene_plan_relative_path: str | None = None,
+    defer_summary: bool = True,
 ) -> Iterator[dict[str, Any]]:
     valid, number, ref, validation_message = _validate_chapter_request(project_ref, chapter_number, task_models)
     if not valid:
@@ -658,72 +750,90 @@ def stream_generate_single_chapter(
     chapter_model = _model(task_models, "chapter")
     chunks: list[str] = []
 
-    try:
-        messages, notices = build_generation_messages(
-            project_ref=ref,
-            mode=CHAPTER_MODE,
-            project_config=project_config,
-            chapter_number=number,
-            use_previous_context=use_previous_context,
-            narrative_context_text=narrative_context_text,
-            chapter_task=chapter_task,
-            allowed_scene_contract=allowed_scene_contract,
-            scene_plan=scene_plan,
-        )
-        for event in stream_generate_text_events(
-            messages=messages,
-            model=chapter_model,
-            temperature=temperature,
-            max_tokens=int(max_tokens),
-        ):
-            if event["kind"] == "content":
-                delta = event["text"]
-                chunks.append(delta)
-                yield {"type": "delta", "text": delta}
-            else:
-                # 推理过程：仅透传展示，绝不进入正文/文件
-                yield {"type": "reasoning", "text": event["text"]}
-    except DeepSeekClientError as exc:
-        yield _stream_error_event(str(exc), number, partial_length=len("".join(chunks)))
-        return
-    except Exception as exc:
-        yield _stream_error_event(f"Chapter generation failed: {exc}", number, partial_length=len("".join(chunks)))
-        return
+    with _chapter_metrics(ref, number, chapter_model, streaming=True) as (metrics, started):
+        metrics["summary_deferred"] = defer_summary
+        try:
+            messages, notices = build_generation_messages(
+                project_ref=ref,
+                mode=CHAPTER_MODE,
+                project_config=project_config,
+                chapter_number=number,
+                use_previous_context=use_previous_context,
+                narrative_context_text=narrative_context_text,
+                chapter_task=chapter_task,
+                allowed_scene_contract=allowed_scene_contract,
+                scene_plan=scene_plan,
+            )
+            events = stream_generate_text_events(
+                messages=messages,
+                model=chapter_model,
+                temperature=temperature,
+                max_tokens=int(max_tokens),
+                usage_metrics=metrics,
+            )
+            try:
+                for event in events:
+                    if event["kind"] == "content":
+                        delta = event["text"]
+                        if metrics["first_content_ms"] is None and delta.strip():
+                            metrics["first_content_ms"] = round((perf_counter() - started) * 1000, 1)
+                        chunks.append(delta)
+                        yield {"type": "delta", "text": delta}
+                    else:
+                        # 推理过程：仅透传展示，绝不进入正文/文件
+                        yield {"type": "reasoning", "text": event["text"]}
+            finally:
+                close = getattr(events, "close", None)
+                if callable(close):
+                    close()
+        except DeepSeekClientError as exc:
+            metrics["total_ms"] = round((perf_counter() - started) * 1000, 1)
+            yield _stream_error_event(str(exc), number, partial_length=len("".join(chunks)))
+            return
+        except Exception as exc:
+            metrics["total_ms"] = round((perf_counter() - started) * 1000, 1)
+            yield _stream_error_event(f"Chapter generation failed: {exc}", number, partial_length=len("".join(chunks)))
+            return
 
-    chapter_content = "".join(chunks).strip()
-    if not chapter_content:
-        yield _stream_error_event(
-            "Model returned empty content. Adjust the prompt or try again later.",
+        chapter_content = "".join(chunks).strip()
+        if not chapter_content:
+            metrics["total_ms"] = round((perf_counter() - started) * 1000, 1)
+            yield _stream_error_event(
+                "Model returned empty content. Adjust the prompt or try again later.",
+                number,
+                partial_length=0,
+            )
+            return
+
+        metrics["body_complete_ms"] = round((perf_counter() - started) * 1000, 1)
+        ai_run_metadata = _chapter_ai_run_metadata(
+            messages,
+            temperature,
+            max_tokens,
+            use_previous_context,
+            narrative_context_text,
+            chapter_task,
+            chapter_task_relative_path,
+            scene_plan,
+            scene_plan_relative_path,
+        )
+        result = _finalize_generated_chapter(
+            ref,
             number,
-            partial_length=0,
+            chapter_content,
+            task_models,
+            notices,
+            ai_run_metadata,
+            narrative_context_text,
+            chapter_task,
+            allowed_scene_contract,
+            scene_plan,
+            defer_summary,
         )
-        return
+        metrics["total_ms"] = round((perf_counter() - started) * 1000, 1)
+        if not result.ok:
+            yield _stream_error_event(result.message, number, partial_length=len(chapter_content))
+            return
 
-    ai_run_metadata = _chapter_ai_run_metadata(
-        messages,
-        temperature,
-        max_tokens,
-        use_previous_context,
-        narrative_context_text,
-        chapter_task,
-        chapter_task_relative_path,
-        scene_plan,
-        scene_plan_relative_path,
-    )
-    result = _finalize_generated_chapter(
-        ref,
-        number,
-        chapter_content,
-        task_models,
-        notices,
-        ai_run_metadata,
-        narrative_context_text,
-        chapter_task,
-        allowed_scene_contract,
-        scene_plan,
-    )
-    if not result.ok:
-        yield _stream_error_event(result.message, number, partial_length=len(chapter_content))
-        return
-
-    yield _stream_done_event(result)
+        metrics["status"] = "success"
+        yield _stream_done_event(result)

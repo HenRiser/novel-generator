@@ -61,6 +61,7 @@ class ChapterGenerationResult:
     summary_model: str = ""
     consistency_warnings: list[dict[str, str]] = field(default_factory=list)
     function_review: dict[str, Any] | None = None
+    workflow: dict[str, Any] | None = None
 
     def to_legacy_dict(self) -> dict[str, Any]:
         return {

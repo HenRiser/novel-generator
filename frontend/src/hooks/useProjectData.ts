@@ -177,20 +177,24 @@ export function useChapterContent(
 ): {
   content: string | null;
   title: string;
+  filename: string;
   loading: boolean;
   error: string;
 } {
   const [content, setContent] = useState<string | null>(null);
   const [title, setTitle] = useState("");
+  const [filename, setFilename] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const requestKey = `${projectRef ?? ""}#${chapterNumber ?? ""}#${refreshToken}`;
   const requestKeyRef = useRef(requestKey);
+  const [settledRequestKey, setSettledRequestKey] = useState("");
 
   useEffect(() => {
     requestKeyRef.current = requestKey;
     setContent(null);
     setTitle("");
+    setFilename("");
     setError("");
     if (!projectRef || chapterNumber === null) {
       setLoading(false);
@@ -206,12 +210,15 @@ export function useChapterContent(
         }
         setContent(chapter.content);
         setTitle(chapter.title);
+        setFilename(chapter.filename);
+        setSettledRequestKey(requestKey);
       })
       .catch((e) => {
         if (cancelled || requestKeyRef.current !== requestKey) {
           return;
         }
         setError(e instanceof Error ? e.message : "加载章节正文失败。");
+        setSettledRequestKey(requestKey);
       })
       .finally(() => {
         if (!cancelled && requestKeyRef.current === requestKey) {
@@ -224,5 +231,13 @@ export function useChapterContent(
     };
   }, [chapterNumber, projectRef, requestKey]);
 
-  return { content, title, loading, error };
+  // 切项目/章节的首帧不能把旧正文当作新章节交给阅读位置记忆。
+  const current = settledRequestKey === requestKey;
+  return {
+    content: current ? content : null,
+    title: current ? title : "",
+    filename: current ? filename : "",
+    loading: Boolean(projectRef && chapterNumber !== null) && (!current || loading),
+    error: current ? error : "",
+  };
 }

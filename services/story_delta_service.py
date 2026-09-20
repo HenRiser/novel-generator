@@ -445,6 +445,7 @@ Rules:
 - Do not add comments, trailing commas, Python literals, or prose outside the JSON object.
 - Every string must use double quotes, and double quotes inside strings must be escaped.
 - Every array item and object field must be separated by a comma.
+- Include every field shown in story_delta and next_chapter_proposal. Their arrays contain objects, except next_chapter_proposal.risks, which contains strings. warnings also contains strings.
 - story_delta describes facts that actually happened in chapter {chapter_number}.
 - next_chapter_proposal describes proposed planning for chapter {target_chapter_number}; it is not confirmed canon.
 - Put uncertain facts in warnings, not in story_delta.
@@ -656,20 +657,94 @@ def _repair_common_json_issues(text: str) -> str:
     return repaired
 
 
-def _parse_story_delta_json(raw_text: str) -> StoryDeltaParseResult:
-    text = _repair_common_json_issues(raw_text)
-    if not text:
-        return StoryDeltaParseResult(error="Model response did not contain a JSON object.")
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        return StoryDeltaParseResult(
-            error=f"Story Delta JSON parse failed: {exc.msg} at line {exc.lineno}, column {exc.colno}.",
-            json_text=text,
-        )
-    if not isinstance(data, dict):
-        return StoryDeltaParseResult(error="Story Delta response must be a JSON object.", json_text=text)
-    return StoryDeltaParseResult(data=data, json_text=text)
+def _validate_model_story_delta(data: dict[str, Any]) -> None:
+    """Validate model output before permissive legacy normalization can hide errors."""
+    def require(value: Any, expected: type, path: str) -> None:
+        if type(value) is not expected:
+            raise ValueError(f"{path} must be {expected.__name__}.")
+
+    records: list[tuple[str, dict[str, Any]]] = []
+    for section, defaults in (("story_delta", DEFAULT_STORY_DELTA), ("next_chapter_proposal", DEFAULT_NEXT_CHAPTER_PROPOSAL)):
+        value = data.get(section)
+        require(value, dict, section)
+        for key, default in defaults.items():
+            path = f"{section}.{key}"
+            item = value.get(key)
+            require(item, type(default), path)
+            if isinstance(default, list):
+                for index, entry in enumerate(item):
+                    entry_path = f"{path}[{index}]"
+                    require(entry, str if key == "risks" else dict, entry_path)
+                    if isinstance(entry, dict):
+                        records.append((entry_path, entry))
+        if section == "next_chapter_proposal" and value["target_chapter_number"] < 1:
+            raise ValueError("next_chapter_proposal.target_chapter_number must be positive.")
+
+    require(data.get("warnings"), list, "warnings")
+    for index, warning in enumerate(data["warnings"]):
+        require(warning, str, f"warnings[{index}]")
+    require(data.get("candidate_changes"), list, "candidate_changes")
+    for index, change in enumerate(data["candidate_changes"]):
+        path = f"candidate_changes[{index}]"
+        require(change, dict, path)
+        require(change.get("operation"), str, f"{path}.operation")
+        if change["operation"] not in ALLOWED_OPERATIONS:
+            raise ValueError(f"{path}.operation is unsupported.")
+        require(change.get("payload"), dict, f"{path}.payload")
+        for key in ("id", "target", "source", "evidence", "rationale"):
+            if key in change:
+                require(change[key], str, f"{path}.{key}")
+        if "requires_review" in change:
+            require(change["requires_review"], bool, f"{path}.requires_review")
+        if "confidence" in change and (type(change["confidence"]) not in (int, float) or not 0 <= change["confidence"] <= 1):
+            raise ValueError(f"{path}.confidence must be a number from 0 to 1.")
+        records.append((f"{path}.payload", change["payload"]))
+
+    # These fields are read as text by the existing candidate builders.
+    text_fields = (
+        "type", "node_type", "label", "name", "character", "character_name", "title",
+        "summary", "description", "changes", "change", "fact", "evidence", "rationale",
+        "foreshadowing", "direction", "status", "suggested_status", "layer",
+        "source", "target", "source_node_id", "target_node_id", "source_change_id", "target_change_id",
+    )
+    for path, item in records:
+        for key in text_fields:
+            if key in item:
+                require(item[key], str, f"{path}.{key}")
+        if "importance" in item:
+            require(item["importance"], int, f"{path}.importance")
+            if not 1 <= item["importance"] <= 10:
+                raise ValueError(f"{path}.importance must be from 1 to 10.")
+        if "characters" in item:
+            require(item["characters"], list, f"{path}.characters")
+            for index, character in enumerate(item["characters"]):
+                require(character, str, f"{path}.characters[{index}]")
+
+
+def _parse_story_delta_json(raw_text: str, *, validate_structure: bool = False) -> StoryDeltaParseResult:
+    # Try valid JSON unchanged: repair substitutions must not alter quoted facts.
+    candidates = dict.fromkeys((clean_text(raw_text), _strip_markdown_code_fence(raw_text),
+                               _extract_json_object(raw_text), _repair_common_json_issues(raw_text)))
+    last_error = "Model response did not contain a JSON object."
+    text = ""
+    for candidate in candidates:
+        if not candidate:
+            continue
+        text = candidate
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            last_error = f"Story Delta JSON parse failed: {exc.msg} at line {exc.lineno}, column {exc.colno}."
+            continue
+        if not isinstance(data, dict):
+            return StoryDeltaParseResult(error="Story Delta response must be a JSON object.", json_text=text)
+        if validate_structure:
+            try:
+                _validate_model_story_delta(data)
+            except ValueError as exc:
+                return StoryDeltaParseResult(error=f"Story Delta structure invalid: {exc}", json_text=text)
+        return StoryDeltaParseResult(data=data, json_text=text)
+    return StoryDeltaParseResult(error=last_error, json_text=text)
 
 
 def parse_story_delta_response(raw_text: str) -> tuple[dict[str, Any] | None, str]:
@@ -677,19 +752,31 @@ def parse_story_delta_response(raw_text: str) -> tuple[dict[str, Any] | None, st
     return result.data, result.error
 
 
-def build_story_delta_json_repair_prompt(raw_output: str, parse_error: str) -> list[dict[str, str]]:
+def build_story_delta_json_repair_prompt(raw_output: str, parse_error: str, chapter_number: int) -> list[dict[str, str]]:
     system_prompt = (
         "You repair malformed JSON only. Do not analyze the story again. "
         "Return exactly one valid JSON object and no Markdown, code fences, comments, or explanations."
     )
+    shape = {
+        "story_delta": DEFAULT_STORY_DELTA,
+        "next_chapter_proposal": {**DEFAULT_NEXT_CHAPTER_PROPOSAL, "target_chapter_number": chapter_number + 1},
+        "candidate_changes": [],
+        "warnings": [],
+    }
     user_prompt = f"""
 Repair the following Story Delta model output into strict valid JSON.
+
+Required shape (empty arrays illustrate types; preserve all supplied facts):
+{json.dumps(shape, ensure_ascii=False, indent=2)}
 
 Rules:
 - Do not add new story facts.
 - Do not remove existing story facts.
 - Only fix JSON syntax, field structure, missing commas, invalid quotes, invalid literals, or Markdown wrapping.
 - Output one JSON object with top-level keys: story_delta, next_chapter_proposal, candidate_changes, warnings.
+- Include every field shown in story_delta and next_chapter_proposal. Their arrays contain objects, except next_chapter_proposal.risks, which contains strings. warnings also contains strings.
+- suggested_goal must be a string. target_chapter_number must be the next chapter number shown above.
+- candidate_changes contains objects with a string operation and an object payload. Keep supplied string fields as strings, importance as an integer from 1 to 10, and confidence as a number from 0 to 1.
 - Use double quotes for all strings.
 - Escape internal double quotes inside strings.
 - Use commas between all array items and object fields.
@@ -715,7 +802,7 @@ def _parse_or_repair_story_delta_response(
     model: str | None,
     max_tokens: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str]:
-    initial = _parse_story_delta_json(raw_output)
+    initial = _parse_story_delta_json(raw_output, validate_structure=True)
     metadata: dict[str, Any] = {
         "parse_status": "success" if initial.data is not None else "failed",
         "repair_used": False,
@@ -739,13 +826,14 @@ def _parse_or_repair_story_delta_response(
     if failure_save_error:
         metadata["failure_artifact_error"] = failure_save_error
 
-    repair_messages = build_story_delta_json_repair_prompt(raw_output, initial.error)
+    repair_messages = build_story_delta_json_repair_prompt(raw_output, initial.error, chapter_number)
     try:
         repair_output = generate_text(
             messages=repair_messages,
             model=model,
             temperature=0,
             max_tokens=max_tokens,
+            json_mode=True,
         )
     except DeepSeekClientError as exc:
         error_parts = [f"Story Delta JSON parse failed and repair request failed: {exc}"]
@@ -758,7 +846,7 @@ def _parse_or_repair_story_delta_response(
             error_parts.append(f"failure_ref={failure_ref}")
         return None, metadata, " ".join(error_parts)
 
-    repaired = _parse_story_delta_json(repair_output)
+    repaired = _parse_story_delta_json(repair_output, validate_structure=True)
     if repaired.data is not None:
         metadata["parse_status"] = "success"
         metadata["repair_used"] = True
@@ -1276,6 +1364,7 @@ def analyze_chapter_delta(project_ref: str, chapter_number: Any, request: dict[s
                 model=model,
                 temperature=0.2,
                 max_tokens=resolved_max_tokens,
+                json_mode=True,
             )
         except DeepSeekClientError as exc:
             return StoryDeltaResult(False, project_ref=project_ref, chapter_number=number, message=str(exc))

@@ -5,12 +5,18 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { exportFullBookUrl } from "../api";
 import { useAppStore } from "../store/useAppStore";
 import { useProjectData } from "../hooks/useProjectData";
+import { getProjectWorkspace, rememberProjectWorkspace } from "../workspacePreferences";
 import ChapterListPanel from "../components/chapter/ChapterListPanel";
 import ChapterReader from "../components/chapter/ChapterReader";
 import "../components/chapter/reader.css";
 
 export default function ReaderPage() {
-  const { selectedProjectRef, apiStatus, chapters, chaptersLoading, selectedProject } = useAppStore();
+  const { selectedProjectRef } = useAppStore();
+  return <ReaderWorkspace key={selectedProjectRef ?? "no-project"} />;
+}
+
+function ReaderWorkspace() {
+  const { selectedProjectRef, apiStatus, chapters, chaptersLoading, chaptersLoaded, selectedProject } = useAppStore();
   const [selectedChapterNumber, setSelectedChapterNumber] = useState<number | null>(null);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
@@ -18,12 +24,14 @@ export default function ReaderPage() {
   const sorted = [...chapters].sort((a, b) => a.chapter_number - b.chapter_number);
   const requestedChapter = Number(params.get("chapter"));
 
-  useEffect(() => { setSelectedChapterNumber(null); }, [selectedProjectRef]);
   useEffect(() => {
-    if (!chaptersLoading && sorted.length && !sorted.some((item) => item.chapter_number === selectedChapterNumber)) {
-      setSelectedChapterNumber(sorted.some((item) => item.chapter_number === requestedChapter) ? requestedChapter : sorted[0].chapter_number);
-    }
-  }, [chapters, chaptersLoading, selectedChapterNumber, requestedChapter]);
+    if (!chaptersLoaded || chaptersLoading) return;
+    const has = (number: number | null | undefined) => chapters.some((item) => item.chapter_number === number);
+    const remembered = getProjectWorkspace(selectedProjectRef).chapterNumber;
+    const desired = has(requestedChapter) ? requestedChapter : has(selectedChapterNumber) ? selectedChapterNumber : has(remembered) ? remembered! : sorted[0]?.chapter_number ?? null;
+    setSelectedChapterNumber(desired);
+    if (selectedProjectRef && desired !== null) rememberProjectWorkspace(selectedProjectRef, { chapterNumber: desired });
+  }, [chapters, chaptersLoaded, chaptersLoading, selectedChapterNumber, selectedProjectRef, requestedChapter]);
 
   const selectChapter = (chapter: number | null) => {
     setSelectedChapterNumber(chapter);
@@ -37,7 +45,7 @@ export default function ReaderPage() {
     {chaptersError && <Alert type="error" showIcon message={chaptersError} action={<Button size="small" onClick={() => void refreshChapters()}>重新加载</Button>} />}
     {!selectedProjectRef ? <Card><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一本作品，开始阅读。"><Button type="primary" onClick={() => navigate("/dashboard")}>前往作品概览</Button></Empty></Card> : <div className="reader-workspace">
       <aside className="reader-directory"><div className="reader-directory-heading"><span className="eyebrow">CONTENTS</span><h2>{selectedProject?.title || "作品目录"}</h2><span>{chapters.length} 章 · 当前正文</span></div><ChapterListPanel selectedChapterNumber={selectedChapterNumber} onSelectChapter={selectChapter} /></aside>
-      <section className="reader-sheet"><ChapterReader chapterNumber={selectedChapterNumber} /><footer className="reader-pagination"><Button type="text" icon={<ArrowLeftOutlined />} disabled={index <= 0} onClick={() => selectChapter(sorted[index - 1].chapter_number)}>上一章</Button><span>{index >= 0 ? `${index + 1} / ${sorted.length}` : "BRAIPEN · READER"}</span><Button type="text" disabled={index < 0 || index >= sorted.length - 1} onClick={() => selectChapter(sorted[index + 1].chapter_number)}>下一章 <ArrowRightOutlined /></Button></footer></section>
+      <section className="reader-sheet"><ChapterReader chapterNumber={selectedChapterNumber} footer={<footer className="reader-pagination"><Button type="text" icon={<ArrowLeftOutlined />} disabled={index <= 0} onClick={() => selectChapter(sorted[index - 1].chapter_number)}>上一章</Button><span>{index >= 0 ? `${index + 1} / ${sorted.length}` : "BRAIPEN · READER"}</span><Button type="text" disabled={index < 0 || index >= sorted.length - 1} onClick={() => selectChapter(sorted[index + 1].chapter_number)}>下一章 <ArrowRightOutlined /></Button></footer>} /></section>
     </div>}
   </div>;
 }
