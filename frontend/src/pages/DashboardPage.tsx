@@ -32,7 +32,7 @@ export default function DashboardPage() {
   const visibleProjects = useMemo(() => projects.filter(p => `${p.title} ${p.description}`.toLowerCase().includes(search.trim().toLowerCase())), [projects, search]);
   const selected = projects.find(p => p.project_ref === selectedProjectRef);
   const chapterCount = new Set(chapters.map(c => c.chapter_number)).size;
-  const ready = apiStatus === "online";
+  const ready = true; // Project reads and creation only require browser storage.
 
   const openProject = (project: ProjectSummary, path = "/writing") => {
     if (busy || deletingRef) return;
@@ -67,7 +67,7 @@ export default function DashboardPage() {
       <div className="hero-bottom-line"><span>HUMAN INTENT <i /> AI EXPLORATION</span><span>一个关于可控创作的独立实验 ↗</span></div>
     </section>
 
-    {apiStatus === "offline" && <Alert className="connection-alert" type="warning" showIcon title="创作服务暂未连接" description="你的故事保存在本地。连接服务后，即可读取项目并继续创作。" action={<Button onClick={() => navigate("/settings")}>查看连接设置</Button>} />}
+    {apiStatus === "offline" && <Alert className="connection-alert" type="warning" showIcon title="创作服务暂未连接" description="已保存作品仍可读取、备份和编辑。模型计算需等待服务恢复。" action={<Button onClick={() => navigate("/settings")}>查看连接设置</Button>} />}
     {(error || detailError || chaptersError) && ready && <Alert type="error" showIcon title={error || detailError || chaptersError} action={<Button size="small" onClick={() => void refresh()}>重新读取</Button>} style={{ marginBottom: 20 }} />}
 
     {selected && <section className="continue-strip" aria-label="当前故事">

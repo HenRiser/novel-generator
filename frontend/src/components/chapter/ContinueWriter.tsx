@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Collapse, Input, Space, Typography, message } from "antd";
 import { CommentOutlined, SaveOutlined, ThunderboltOutlined } from "@ant-design/icons";
-import { API_BASE_URL, safePublicMessage, saveContinueResult } from "../../api";
+import { continueChapterStream, safePublicMessage, saveContinueResult } from "../../api";
 import { useAppStore } from "../../store/useAppStore";
 
 type ContinueWriterProps = {
@@ -37,6 +37,7 @@ export default function ContinueWriter({
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const { apiStatus, generationBusy, setBusy } = useAppStore();
+  const runId = useRef<string>("");
   const abortRef = useRef<AbortController | null>(null);
   const activeRef = useRef(false);
   const instanceVersion = useRef(0);
@@ -68,7 +69,7 @@ export default function ContinueWriter({
     if (!canStart) {
       return;
     }
-    activeRef.current = true;
+    activeRef.current = true; runId.current = "";
     setOutput("");
     setReasoning("");
     setError("");
@@ -81,98 +82,13 @@ export default function ContinueWriter({
     const current = () => abortRef.current === controller && !controller.signal.aborted;
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/projects/${encodeURIComponent(projectRef)}/chapters/${chapterNumber}/continue`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
-          body: JSON.stringify({
-            context_text: contextText,
-            instruction: instruction,
-            anchor_text: anchorText || undefined,
-          }),
-          signal: controller.signal,
-        },
-      );
-      if (!current()) return;
-
-      if (!response.ok) {
-        let payload: unknown = null;
-        try {
-          payload = await response.json();
-        } catch {
-          payload = null;
-        }
-        const message =
-          payload && typeof payload === "object" && "error" in payload
-            ? safePublicMessage((payload as { error: { message?: string } }).error?.message, "续写请求失败。")
-            : `续写请求失败（${response.status}）。`;
-        throw new Error(message);
-      }
-
-      if (!response.body) {
-        throw new Error("流式响应不可用。");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let receivedDone = false;
-
-      const consume = (final = false) => {
-        let newlineIndex = buffer.indexOf("\n");
-        while (newlineIndex >= 0 && activeRef.current && current()) {
-          const line = buffer.slice(0, newlineIndex).trim();
-          buffer = buffer.slice(newlineIndex + 1);
-          if (line) {
-            handleEvent(line);
-          }
-          newlineIndex = buffer.indexOf("\n");
-        }
-        if (final && buffer.trim() && activeRef.current && current()) {
-          handleEvent(buffer.trim());
-          buffer = "";
-        }
-      };
-
-      const handleEvent = (line: string) => {
-        let payload: { type?: string; text?: string; message?: string; code?: string };
-        try {
-          payload = JSON.parse(line);
-        } catch {
-          throw new Error("续写响应格式不完整，请重试。");
-        }
-        if (payload.type === "delta" && typeof payload.text === "string") {
-          setOutput((current) => current + payload.text);
-        } else if (payload.type === "reasoning" && typeof payload.text === "string") {
-          setReasoning((current) => current + payload.text);
-        } else if (payload.type === "done") {
-          receivedDone = true;
-          setStatus("done");
-          activeRef.current = false;
-        } else if (payload.type === "error") {
-          setError(safePublicMessage(payload.message, "续写失败。"));
-          setStatus("error");
-          activeRef.current = false;
-        }
-      };
-
-      while (activeRef.current && current()) {
-        const { value, done } = await reader.read();
-        if (done) {
-          break;
-        }
-        if (!current()) return;
-        buffer += decoder.decode(value, { stream: true });
-        consume();
-      }
-      if (activeRef.current && current()) {
-        buffer += decoder.decode();
-        consume(true);
-        if (!receivedDone && activeRef.current) throw new Error("连接提前结束，续写尚未完成，请重试。");
-      }
-      await reader.cancel();
-      if (current()) activeRef.current = false;
+      const response = await continueChapterStream(projectRef, chapterNumber, {
+        context_text: contextText, instruction, anchor_text: anchorText || undefined,
+      }, {
+        onDelta: text => { if (current()) setOutput(value => value + text); },
+        onReasoning: text => { if (current()) setReasoning(value => value + text); },
+      }, controller.signal);
+      if (current()) { runId.current = String(response.run_id || ""); setStatus("done"); activeRef.current = false; }
     } catch (e) {
       if (!current()) {
         return; // 用户主动取消
@@ -186,14 +102,14 @@ export default function ContinueWriter({
   }, [anchorText, canStart, chapterNumber, contextText, instruction, projectRef, setBusy]);
 
   const handleInsert = useCallback(async () => {
-    if (!output || !projectRef || saving || saved || disabled) {
+    if (!output || !projectRef || saving || saved || disabled || !runId.current) {
       return;
     }
     setSaving(true);
     const version = instanceVersion.current;
     try {
       const result = await saveContinueResult(projectRef, chapterNumber, {
-        content: output,
+        content: output, run_id: runId.current,
         mode: "append",
       });
       if (version !== instanceVersion.current || useAppStore.getState().selectedProjectRef !== projectRef) return;

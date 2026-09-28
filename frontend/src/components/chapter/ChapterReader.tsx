@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Alert, Button, ConfigProvider, Drawer, Empty, Space, Spin, Tooltip, theme as antdTheme } from "antd";
 import { DownloadOutlined, EditOutlined, MinusOutlined, PlusOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
-import { exportChapterUrl, getChapters } from "../../api";
+import { downloadChapter, getChapters } from "../../api";
 import { selectGenerationBusy, useAppStore } from "../../store/useAppStore";
 import { useChapterContent } from "../../hooks/useProjectData";
 import { useReaderPreferences, useReadingPosition } from "../../hooks/useReaderPreferences";
@@ -177,7 +177,7 @@ export default function ChapterReader({ chapterNumber, onWorkflowChange, footer 
         <label className="reader-preference-label">字体<select className="reader-preference-select" aria-label="阅读字体" value={font} onChange={(event) => changeTypography(() => setFont(event.target.value as ReaderFont))}><option value="serif">书页 · 宋体</option><option value="sans">清晰 · 黑体</option></select></label>
         <Space.Compact><Tooltip title="缩小字号"><Button type="text" size="small" aria-label="缩小阅读字号" disabled={fontSize <= 14} icon={<MinusOutlined />} onClick={() => changeTypography(() => setFontSize((size) => size - 1))} /></Tooltip><output className="reader-font-value" aria-label="阅读字号" aria-live="polite">{fontSize}</output><Tooltip title="放大字号"><Button type="text" size="small" aria-label="放大阅读字号" disabled={fontSize >= 28} icon={<PlusOutlined />} onClick={() => changeTypography(() => setFontSize((size) => size + 1))} /></Tooltip></Space.Compact>
         <label className="reader-preference-label">底色<select className="reader-preference-select" aria-label="阅读底色" value={theme} onChange={(event) => setTheme(event.target.value as ReaderTheme)}><option value="auto">随系统</option><option value="paper">暖纸</option><option value="white">清白</option><option value="night">夜读</option></select></label>
-        <Button size="small" type="text" icon={<DownloadOutlined />} href={exportChapterUrl(selectedProjectRef, chapterNumber)} target="_blank" rel="noreferrer">下载</Button><Button size="small" icon={<EditOutlined />} disabled={!canContinue} onClick={() => { setAnchorText(null); setWritePanelOpen(true); }}>续写</Button>
+        <Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => void downloadChapter(selectedProjectRef, chapterNumber)}>下载</Button><Button size="small" icon={<EditOutlined />} disabled={!canContinue} onClick={() => { setAnchorText(null); setWritePanelOpen(true); }}>续写</Button>
       </div>
     </header>}
 

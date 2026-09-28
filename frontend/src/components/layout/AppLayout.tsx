@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { Badge, Button, Drawer, Select, Space } from "antd";
 import { AppstoreOutlined, EditOutlined, NodeIndexOutlined, ReadOutlined, SafetyCertificateOutlined, SettingOutlined, DatabaseOutlined, MenuOutlined, ArrowUpOutlined, PlayCircleOutlined, ExperimentOutlined } from "@ant-design/icons";
 import { selectGenerationBusy, useAppStore } from "../../store/useAppStore";
+import LocalTasksPanel from "../LocalTasksPanel";
 import PageBoundary from "./PageBoundary";
 import { useBatchGeneration } from "../../hooks/useBatchGeneration";
 
@@ -70,6 +71,7 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
           <span className="connection-status" title={status.text}><Badge status={status.status} /><span>{status.text}</span></span>
         </div>
       </header>
+      <LocalTasksPanel />
       <main id="main-content" tabIndex={-1}><PageBoundary key={location.pathname}><Outlet /></PageBoundary></main>
       <footer className="app-footer"><span>BRAIPEN <span className="footer-divider">/</span> 人定方向，AI 参与创作。</span><button onClick={onReplayIntro}><PlayCircleOutlined /> 重播开场</button></footer>
     </div>
@@ -78,7 +80,7 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
         <div className="about-principle"><b>01 / 先表达意图</b><p>用创作种子建立大纲与角色，再用章节任务和场景计划明确这一章要推进什么。</p></div>
         <div className="about-principle"><b>02 / 让上下文可见</b><p>把角色、场景、伏笔与关系组织进叙事图谱，为章节生成提供可选择的叙事素材。</p></div>
         <div className="about-principle"><b>03 / 把判断留给人</b><p>模型提出故事变化与知识候选，由作者审核后沉淀到图谱。章节规则检查提供线索，最终判断仍由作者完成。</p></div>
-        <p className="about-caption">当前实现采用本地文件存储，支持流式生成、章节版本、任务审批与知识审核。它是一份可继续演进的工程作品。</p>
+        <p className="about-caption">当前实现采用浏览器本地数据与无状态计算，支持流式生成、章节版本、任务审批与知识审核。它是一份可继续演进的工程作品。</p>
         <Space><Button onClick={() => { setAboutOpen(false); onReplayIntro(); }} icon={<PlayCircleOutlined />}>观看开场</Button><Button type="primary" onClick={() => setAboutOpen(false)}>回到创作</Button></Space>
       </div>
     </Drawer>

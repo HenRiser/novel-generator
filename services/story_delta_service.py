@@ -379,9 +379,17 @@ def build_story_delta_prompt(
     chapter_content: str,
     chapter_summary: str = "",
     context_pack_summary: str = "",
+    *,
+    supplied_assets: dict[str, Any] | None = None,
+    graph_summary_text: str | None = None,
 ) -> list[dict[str, str]]:
-    outline, _ = read_latest_outline(project_ref)
-    characters, _ = read_latest_characters(project_ref)
+    if supplied_assets is None:
+        outline, _ = read_latest_outline(project_ref)
+        characters, _ = read_latest_characters(project_ref)
+    else:
+        outline = str(supplied_assets.get("outline") or "")
+        characters = str(supplied_assets.get("characters") or "")
+    graph_text = _graph_summary(project_ref) if graph_summary_text is None else graph_summary_text
     target_chapter_number = int(chapter_number) + 1
     system_prompt = (
         "You are a story continuity analyst. You are not continuing the prose. "
@@ -547,7 +555,7 @@ Existing character cards summary:
 {_truncate(characters or "", 3000)}
 
 Narrative Graph summary:
-{_truncate(_graph_summary(project_ref), 5000)}
+{_truncate(graph_text, 5000)}
 
 Context Pack summary:
 {_truncate(context_pack_summary, 3000) or "No Context Pack summary provided."}

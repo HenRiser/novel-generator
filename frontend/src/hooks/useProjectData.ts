@@ -58,6 +58,7 @@ export function useProjects(): {
     }
   }, [setProjects, setProjectsLoading]);
 
+  useEffect(() => { const changed = () => void refresh(); window.addEventListener('braipen:projects-changed', changed); return () => window.removeEventListener('braipen:projects-changed', changed); }, [refresh]);
   return { error, refresh };
 }
 

@@ -4,3 +4,8 @@ openai==2.36.0
 pydantic==2.13.4
 python-dotenv==1.2.2
 uvicorn==0.46.0
+
+# Public, pinned-IP HTTP transport (already present transitive versions, now directly used)
+httpx==0.28.1
+httpcore==1.0.9
+anyio==4.13.0

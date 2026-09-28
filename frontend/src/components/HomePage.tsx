@@ -12,7 +12,7 @@ const CAPABILITIES = [
   "流式章节生成",
   "阅读与导出",
   "未来 Narrative Graph",
-  "本地 workspace 存储",
+  "浏览器本地存储",
 ];
 
 const QUICK_START_STEPS = [
@@ -52,7 +52,7 @@ export function HomePage({ apiStatus, selectedProject, onNavigate }: HomePagePro
               ? `当前项目：${selectedProject.title || selectedProject.project_ref}`
               : apiStatus === "online"
                 ? "选择或创建项目后，工作区会在各页面间保留当前上下文。"
-                : "API 离线时仍可浏览首页；启动 FastAPI 后即可加载项目。"}
+                : "API 离线时仍可浏览和读取本地项目；连接服务后即可继续调用模型。"}
           </p>
         </div>
 

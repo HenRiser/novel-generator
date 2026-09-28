@@ -1,5 +1,7 @@
 # novel-generator
 
+> 浏览器本地数据模式已支持多模型连接：八类服务商预设＋Custom（OpenAI Chat Completions / Anthropic Messages）。连接与项目保存在浏览器，Key默认仅标签页内存使用，可本地加密记住。使用方式、v2迁移与Custom公开部署条件见 [模型连接说明](docs/provider-connections.html)。下文的共享 `.env` / 文件项目说明仅适用于原本地兼容服务。
+
 
 
 [中文](README.md) | [English](README.en.md)

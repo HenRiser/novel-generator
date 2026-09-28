@@ -173,6 +173,7 @@ export class ApiRequestError extends Error {
 }
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  if (path !== "/api/health") return (await (await import("./localApi")).localRequest(path, init)) as T;
   let response: Response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, init);
@@ -278,12 +279,14 @@ function handleStreamLine(
   return payload;
 }
 
-export function exportFullBookUrl(projectRef: string): string {
-  return `${API_BASE_URL}/api/projects/${projectPath(projectRef)}/exports/full.txt`;
+export async function downloadFullBook(projectRef: string): Promise<void> {
+  return (await import("./localApi")).downloadLocalBook(projectRef);
 }
-
-export function exportChapterUrl(projectRef: string, chapterNumber: number): string {
-  return `${API_BASE_URL}/api/projects/${projectPath(projectRef)}/exports/chapters/${chapterNumber}.txt`;
+export async function downloadChapter(projectRef: string, chapterNumber: number): Promise<void> {
+  return (await import("./localApi")).downloadLocalBook(projectRef, chapterNumber);
+}
+export async function continueChapterStream(projectRef: string, chapterNumber: number, request: Record<string, unknown>, handlers: ChapterStreamHandlers, signal?: AbortSignal) {
+  return (await import("./localApi")).localContinue(projectRef, chapterNumber, request, handlers, signal);
 }
 
 export function getHealth(): Promise<HealthResponse> {
@@ -301,6 +304,7 @@ export function deleteProject(projectRef: string): Promise<DeleteProjectResponse
 export function createProject(request: CreateProjectRequest): Promise<CreateProjectResponse> {
   return postJson<CreateProjectResponse>("/api/projects", {
     title: request.title,
+    connection_id: request.connection_id,
     seed_prompt: request.seedPrompt,
     genre: request.genre || undefined,
     style: request.style || undefined,
@@ -656,104 +660,10 @@ export function generateChapter(
 }
 
 export async function generateChapterStream(
-  projectRef: string,
-  chapterNumber: number,
-  request: GenerationRequest,
-  handlers: ChapterStreamHandlers = {},
-  signal?: AbortSignal,
+  projectRef: string, chapterNumber: number, request: GenerationRequest,
+  handlers: ChapterStreamHandlers = {}, signal?: AbortSignal,
 ): Promise<ChapterStreamDoneEvent> {
-  let response: Response;
-  try {
-    response = await fetch(
-      `${API_BASE_URL}/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generate/stream`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/x-ndjson",
-        },
-        body: JSON.stringify(request),
-        signal,
-      },
-    );
-  } catch (error) {
-    throw new Error(safePublicMessage(error instanceof Error ? error.message : "", "API request failed."));
-  }
-
-  if (!response.ok) {
-    let payload: unknown = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
-    }
-    throw new ApiRequestError(
-      errorMessageFromPayload(payload, `API request failed with ${response.status}.`),
-      response.status,
-      errorCodeFromPayload(payload),
-    );
-  }
-
-  if (!response.body) {
-    throw new Error("Streaming response body is not available.");
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let doneEvent: ChapterStreamDoneEvent | null = null;
-  let errorEvent: ChapterStreamErrorEvent | null = null;
-
-  function consumeBuffer(final = false) {
-    let newlineIndex = buffer.indexOf("\n");
-    while (newlineIndex >= 0) {
-      const line = buffer.slice(0, newlineIndex);
-      buffer = buffer.slice(newlineIndex + 1);
-      const event = handleStreamLine(line, handlers);
-      if (event?.type === "done") {
-        doneEvent = event;
-      }
-      if (event?.type === "error") {
-        errorEvent = event;
-      }
-      newlineIndex = buffer.indexOf("\n");
-    }
-
-    if (final && buffer.trim()) {
-      const event = handleStreamLine(buffer, handlers);
-      if (event?.type === "done") {
-        doneEvent = event;
-      }
-      if (event?.type === "error") {
-        errorEvent = event;
-      }
-      buffer = "";
-    }
-  }
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    buffer += decoder.decode(value, { stream: true });
-    consumeBuffer();
-    if (errorEvent) {
-      throw streamErrorFromEvent(errorEvent);
-    }
-  }
-
-  buffer += decoder.decode();
-  consumeBuffer(true);
-
-  if (errorEvent) {
-    throw streamErrorFromEvent(errorEvent);
-  }
-  if (!doneEvent) {
-    throw new Error("Streaming response ended before a done event.");
-  }
-
-  return doneEvent;
+  return (await import("./localWorkflow")).generateLocalChapter(projectRef, chapterNumber, request, handlers, signal);
 }
 
 export function saveContinueResult(
@@ -777,4 +687,12 @@ export function saveApiConfig(request: SaveApiConfigRequest): Promise<SaveApiCon
 
 export function testApiConnection(request: ApiConfigTestRequest): Promise<ApiConfigTestResponse> {
   return postJson<ApiConfigTestResponse>("/api/settings/api-config/test", request);
+}
+
+export function expandProjectSetting(projectRef: string, rawStoryIdea: string, signal?: AbortSignal) {
+  return apiFetch<{ ok: boolean; expanded_data: Record<string, unknown> }>(`/api/projects/${projectPath(projectRef)}/setting-expansion`,
+    { method: 'POST', body: JSON.stringify({ raw_story_idea: rawStoryIdea }), signal });
+}
+export function updateProjectConfig(projectRef: string, config: Record<string, unknown>) {
+  return patchJson<{ ok: boolean }>(`/api/projects/${projectPath(projectRef)}/config`, config);
 }

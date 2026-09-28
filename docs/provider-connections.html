@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Braipen 模型连接使用与部署说明</title><style>body{font:16px/1.8 system-ui,"Microsoft YaHei",sans-serif;color:#233b30;background:#f4f6ef;margin:0}main{max-width:940px;margin:30px auto;padding:35px;background:white}h1{font-size:29px}h2{font-size:21px;margin-top:30px}code,pre{font:14px/1.6 Consolas,monospace;background:#edf2e8;padding:3px 6px;overflow-wrap:anywhere}pre{padding:16px;white-space:pre-wrap}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d9e3d2;padding:10px;text-align:left;vertical-align:top}.note{padding:15px;border-left:4px solid #315c43;background:#f0f6eb}li{margin:7px 0}@media(max-width:680px){main{margin:0;padding:20px}}</style></head><body><main>
+<h1>模型连接：官方预设与 Custom</h1><p>适用于浏览器本地数据模式，连接协议 v2。最后核对：2026-09-28。</p>
+<div class="note">项目与连接配置保存在本浏览器。API Key 默认只在当前标签页内存中；可用独立口令加密记住。执行模型操作时，Key 经 HTTPS 进入 Braipen 请求内存，再发送到你选择的模型服务，服务器不保存、记录或回显。</div>
+<h2>添加一个连接</h2><ol><li>打开“偏好设置 → 模型连接 → 添加连接”。选择 DeepSeek、百炼/Qwen、Kimi、智谱/GLM、OpenAI、Gemini、Claude、OpenRouter，或者 Custom。</li><li>官方预设自动填写地址与协议。百炼需要选择匹配 Key 的地域，也可填控制台提供的北京/新加坡 Workspace 专属地址。修改预设地址请复制为新的 Custom，Key 不随复制。</li><li>Custom 默认使用 OpenAI Chat Completions，也可选择 Anthropic Messages。填写服务商的 API Base URL；例如 <code>https://gateway.example/v1</code>。不要填写网页登录地址、把 Key 放入 URL，或包含 <code>/chat/completions</code> 等完整操作路径。页面会显示实际请求地址并提示转换。</li><li>填写 Key。模型 ID 可以先留空，保存后“获取模型列表”；不提供目录的服务也可手填，例如组织/模型别名。</li><li>保存只提交浏览器数据，不调用模型。点击“检测文字与结构化能力”才会执行最多两次短样本模型请求，可能计费；不会上传小说正文。检测成功只表示本次样例通过。</li><li>为新作品设为默认，或在创作台／故事偏好里将现有作品明确绑定到此连接。既有作品不会随着全局默认而换服务。</li></ol>
+<h2>兼容设置</h2><table><thead><tr><th>选项</th><th>使用方式</th></tr></thead><tbody><tr><td>输出额度字段</td><td>Chat Completions 可选 max_tokens / max_completion_tokens；Claude Messages 用 max_tokens。依模型文档选择。</td></tr><tr><td>温度</td><td>未知模型默认不发送；可指定允许范围或固定值。超范围会在模型调用前阻止。</td></tr><tr><td>结构化模式</td><td>有限的已核实模型采用官方规则；其他模型默认未启用。可按服务实际能力明确选择 JSON Schema、JSON Object，或接受风险后选择提示词兼容模式。</td></tr><tr><td>流式 usage</td><td>只有服务明确支持才启用 include_usage；未提供统计保持未知。</td></tr></tbody></table>
+<p>正文、续写、大纲和普通摘要是文字路径；设定扩写、修改后逻辑检查、Story Delta 和导入提取/合成需要结构化能力。程序始终校验结构，不能因为正文能生成就默认全部操作可用。首期不支持 Responses-only、Azure/Bedrock专用认证、任意额外Headers或网页登录Cookie。</p>
+<h2>Key、迁移与恢复</h2><ul><li>每个连接独立管理 Key；非 sk- 前缀也支持。独立口令至少8字符，只用于本地 PBKDF2-SHA256/AES-GCM，不上传口令或派生加密密钥。忘记口令需要清除密文、重新填写 Key。</li><li>“锁定并中断任务”“忘记Key”“禁用／删除连接”会撤销活动凭据，其他标签页同时取消相关请求。已经提交的完整模型结果仍能不带 Key 直接应用。</li><li>地址或协议变更需要新连接。默认模型／能力设置生成新修订；进行中的批次、已有任务和自动摘要保留原连接快照，不能悄悄更换目的地。</li><li>原连接删除后，在“任务与恢复”明确关联到目的地、模型、策略完全相同的新连接。如果是修复结构化能力或有意换模型，可选择“采用所选连接新建摘要检查”：新建运行，正文与冻结叙事约束保留。</li><li>导入草稿提供显式连接修复，只允许相同目的地、协议和模型，记录历史连接；已保存的提取步骤和原文保留。</li><li>IndexedDB/项目/备份升级到版本2。旧标签页会关闭数据库连接，无法降级写入；请刷新旧标签页。旧 DeepSeek 保险箱在首次输入原口令后迁移，事务失败时旧密文保留。</li><li>完整项目备份不含 Key 或加密保险箱。恢复的 Custom 连接默认禁用，需要确认描述、启用并输入 Key 才能联网。旧v1备份可以转换为恢复副本。</li></ul>
+<h2>公开部署的必要设置</h2><p>Custom 只连接服务器可访问的公网 HTTPS API；localhost 和局域网地址不代表用户本机，因此拒绝。服务器校验全部 DNS 地址并固定实际 TCP 地址，TLS 仍检查原域名，禁止重定向、环境代理及关闭证书验证。</p>
+<pre># 在服务进程环境配置，应用不会从共享 .env 读取这两个开关
+BRAIPEN_PUBLIC_MODE=1
+BRAIPEN_SELF_ADDRESSES=&lt;服务器自身所有公网/NAT入口IPv4/IPv6，以逗号分隔&gt;</pre>
+<p>没有配置或配置无效时只禁用 Custom，官方固定预设仍可用。管理员必须核对完整的自身地址，包括公网 NAT/反向代理入口，不能用请求 Host 推断。应继续关闭代理请求体/响应缓存和缓冲，不记录请求体，核查 swap 和崩溃转储。</p>
+<p>模型计算并发上限为每进程2，部署保持单 worker；每次模型调用最多120秒、一个计算步骤最多180秒。多 worker 需要共享限流。请求体最多1 MiB，普通响应/模型目录4 MiB，流总量8 MiB、单SSE事件256 KiB；服务返回压缩响应将被拒绝，请网关使用 identity 响应。</p>
+<h2>验证与回滚</h2><p>协议与浏览器自动测试采用假 Key、模拟上游及本机受控 TLS，未使用八家真实账户逐一试跑。真实Key、额度、地域和特定模型是否可用，应由用户的明确检测确认。</p><pre>python -m unittest discover -s tests -p 'test_*.py' -q
+node --test frontend/scripts/test-api-base-url.mjs frontend/scripts/test-reader-preferences.mjs
+# 若Playwright未在项目安装，BRAIPEN_PLAYWRIGHT_PATH 指向已有运行时包目录
+node frontend/scripts/test-provider-connections.mjs
+node frontend/scripts/test-local-workflows.mjs
+# frontend 目录内
+npm run build</pre><p>回滚时不清空、降级 IndexedDB，也不把 Custom Key 解释成旧 DeepSeek Key。可以暂停远程计算入口并保留浏览器数据；旧前端不能写v2数据库。</p>
+</main></body></html>

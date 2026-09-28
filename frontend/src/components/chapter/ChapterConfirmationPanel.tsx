@@ -79,7 +79,6 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
   }, [chapterNumber, projectRef, sessionKey]);
 
   useEffect(() => {
-    if (apiStatus !== "online") { setLoading(false); return; }
     let disposed = false;
     let timer: number | undefined;
     const controller = new AbortController();
@@ -109,7 +108,7 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
 
   const sameFile = Boolean(workflow && displayedFilename && basename(displayedFilename) === basename(workflow.chapter_file));
   const staleDraft = editing && workflow?.revision !== baseRevision;
-  const blocked = !workflow || !workflow.editable || !sameFile || loading || readingLoading || saving || busy || batchStatusLoading || Boolean(batchStatusError) || apiStatus !== "online";
+  const blocked = !workflow || !workflow.editable || !sameFile || loading || readingLoading || saving || busy || batchStatusLoading || Boolean(batchStatusError);
   const beginEdit = () => {
     if (!workflow || blocked) return;
     setDraft(workflow.content); setBaseContent(workflow.content); setBaseRevision(workflow.revision); setEditing(true);
@@ -152,7 +151,7 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
     <div className="chapter-confirmation-heading"><strong>正文确认</strong><Space wrap>
       {loading && <Spin size="small" />}
       {workflow && <Tag color={workflow.status === "confirmed" ? "success" : "gold"}>{workflow.status === "confirmed" ? "已确认正文" : "待你确认"}</Tag>}
-      <Button type="text" size="small" icon={<ReloadOutlined />} aria-label="刷新正文确认状态" disabled={saving || apiStatus !== "online"} onClick={() => setReload((value) => value + 1)} />
+      <Button type="text" size="small" icon={<ReloadOutlined />} aria-label="刷新正文确认状态" disabled={saving} onClick={() => setReload((value) => value + 1)} />
     </Space></div>
     {error && <Alert showIcon type="error" message={error} />}
     {workflow && <>
@@ -164,7 +163,7 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
         <span>{workflow.review_scope === "semantic_and_rules" ? "逻辑与规则检查" : "规则检查"}：{({ not_requested: "尚未检查", pending: "等待后台检查", running: "后台检查中", ready: workflow.warnings.length ? `发现 ${workflow.warnings.length} 条疑似冲突` : "本轮未发现疑似冲突", failed: "检查失败，尚无结论" })[workflow.review_status]}</span>
       </div>
       {workflow.review_status === "ready" && <p className="chapter-confirmation-hint">{workflow.review_scope === "semantic_and_rules" ? "检查依据修改后的正文和已有约束给出提示，请结合原文判断。" : "本轮执行规则检查，未进行全面语义判断；修改正文后会增加逻辑检查。"}</p>}
-      {workflow.error && <Alert type="error" showIcon message="摘要未完成" description={workflow.error} />}
+      {workflow.error && <Alert type="error" showIcon message="摘要未完成" description={<>{workflow.error}<p>如已修复模型连接能力，请在页面上方“任务与恢复”选择连接，再点击“采用所选连接新建摘要检查”。正文与原叙事约束会保留。</p></>} />}
       {workflow.review_error && <Alert type="warning" showIcon message="逻辑检查未完成" description={workflow.review_error} />}
       {workflow.warnings.map((warning, index) => <Alert key={`${warning.code}-${index}`} type="warning" showIcon message={warning.message} description={<div className="chapter-warning-details">{warning.evidence && <><p><strong>正文依据：</strong>{warning.evidence}</p><Button size="small" disabled={!sameFile || readingLoading || loading} aria-label={`定位第 ${index + 1} 条提示的原文`} onClick={() => onLocateEvidence(warning.evidence, workflow.revision)}>定位原文</Button></>}{warning.constraint && <p><strong>相关约束：</strong>{warning.constraint}</p>}{warning.suggestion && <p><strong>修改建议：</strong>{warning.suggestion}</p>}</div>} />)}
       {editing ? <>

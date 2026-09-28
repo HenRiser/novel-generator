@@ -23,6 +23,7 @@ export type ProjectAssetsResponse = {
 };
 
 export type CreateProjectRequest = {
+  connection_id?: string;
   title: string;
   seedPrompt: string;
   genre?: string;
@@ -237,7 +238,7 @@ export type GenerationRequest = {
 };
 
 export type GenerationSettingsRequest = {
-  model: "deepseek-v4-flash" | "deepseek-v4-pro";
+  model: string;
   max_tokens: number;
   temperature: number;
 };
@@ -807,6 +808,7 @@ export type ChapterStreamHandlers = {
 };
 
 export type ContinueSaveRequest = {
+  run_id?: string;
   content: string;
   mode: "append" | "replace";
   chapter_title?: string;

@@ -5,15 +5,18 @@ import { ArrowRightOutlined, ExperimentOutlined, NodeIndexOutlined, ReloadOutlin
 import { analyzeStoryDelta, getNarrativeGraph, safePublicMessage } from "../api";
 import type { NarrativeGraphDocument } from "../types";
 import { useAppStore } from "../store/useAppStore";
-import { useProjectData } from "../hooks/useProjectData";
+import { useProjectData, useProjects } from "../hooks/useProjectData";
 import { KnowledgeDraftReviewPanel } from "../components/library/KnowledgeDraftReviewPanel";
 import "../components/library/library.css";
+import NovelImportPanel from "../components/NovelImportPanel";
 
 /** 从已保存正文提取候选，人工确认后再写入故事记忆。 */
 export default function LibraryPage() {
   const navigate = useNavigate();
   const { apiStatus, selectedProjectRef, projects, chapters, chaptersLoading } = useAppStore();
+  const selectProject = useAppStore((state) => state.selectProject);
   const { chaptersError } = useProjectData(selectedProjectRef);
+  const { refresh: refreshProjects } = useProjects();
   const [graph, setGraph] = useState<NarrativeGraphDocument | null>(null);
   const [graphLoading, setGraphLoading] = useState(false);
   const [graphError, setGraphError] = useState("");
@@ -89,6 +92,7 @@ export default function LibraryPage() {
         </div>
         <Button icon={<NodeIndexOutlined />} onClick={() => navigate("/graph")}>打开叙事图谱</Button>
       </div>
+      <NovelImportPanel onComplete={async (projectRef) => { await refreshProjects(); selectProject(projectRef); navigate("/writing"); }} />
       {!selectedProjectRef ? (
         <div className="library-empty"><Empty description="选择一个作品，开始整理它的故事记忆。" image={Empty.PRESENTED_IMAGE_SIMPLE} /><Button onClick={() => navigate("/dashboard")}>前往作品集</Button></div>
       ) : (

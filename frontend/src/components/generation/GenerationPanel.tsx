@@ -1,3 +1,5 @@
+import ConnectionPicker from '../ConnectionPicker';
+import { getProject } from '../../api';
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Collapse, Input, InputNumber, Progress, Segmented, Select, Space, Tag } from "antd";
 import { ArrowRightOutlined, FileSearchOutlined, SaveOutlined, ThunderboltOutlined } from "@ant-design/icons";
@@ -105,7 +107,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
       const response = await generateChapterStream(selectedProjectRef, chapterNumber, {
         ...settings, chapter_task_id: task?.id,
         scene_plan_id: usePlan && planMatchesTask ? plan?.id : undefined,
-        narrative_context_text: useContext && context ? context.prompt_text : undefined,
+        narrative_context_text: useContext && context ? context.prompt_text : "",
       }, {
         onDelta: (text) => { if (current()) setStreamingContent((value) => value + text); },
         onReasoning: (text) => { if (current()) setStreamingReasoning((value) => value + text); },
@@ -154,7 +156,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
     const projectRef = selectedProjectRef;
     setSaving(true); setError(""); setNotice("");
     try {
-      await updateGenerationSettings(projectRef, { ...settings, model: settings.model === "deepseek-v4-pro" ? "deepseek-v4-pro" : "deepseek-v4-flash" });
+      await updateGenerationSettings(projectRef, { ...settings, model: settings.model });
       if (useAppStore.getState().selectedProjectRef === projectRef) setNotice("生成参数已保存到当前项目。");
     } catch (e) {
       if (useAppStore.getState().selectedProjectRef === projectRef) setError(e instanceof Error ? e.message : "参数保存失败，请重试。");
@@ -174,7 +176,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
     finally { if (sequence === contextSequence.current) setContextLoading(false); }
   };
 
-  return <div className="generation-workspace">
+  return <div className="generation-workspace"><ConnectionPicker projectRef={selectedProjectRef} onChanged={async()=>{if(selectedProjectRef)useAppStore.getState().setSelectedProject(await getProject(selectedProjectRef));}}/>
     <div className="generation-intro"><span className="eyebrow">CO-WRITE WITH AI</span><h2>你定方向，模型落笔。</h2><p>先准备故事设定，再让已确认的章节规划与叙事知识参与创作。</p></div>
     <Segmented aria-label="生成模式" value={mode} onChange={(value) => setMode(value as "single" | "batch")} options={[{ label: "单章确认", value: "single" }, { label: "连续生成", value: "batch" }]} disabled={busy} />
     <p className="generation-mode-hint">{mode === "single" ? "正文生成后先由你确认；修改后的正文将在后台生成摘要并接受检查。" : "自动逐章生成并完成摘要，每次最多 10 章。开始下一章后，此前正文持续锁定，不再允许修改。"}</p>
@@ -222,7 +224,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
       </div> }] : []),
       { key: "settings", label: <Space><span>生成参数</span><span className="muted-note">{settings.model} · {settings.max_tokens.toLocaleString()} tokens</span></Space>, children: <div className="generation-option-content">
         <div className="generation-settings-grid">
-          <label className="field-label">模型<Select aria-label="生成模型" value={settings.model} onChange={(model) => setSettings((value) => ({ ...value, model }))} options={[{ value: "deepseek-v4-flash", label: "DeepSeek V4 Flash" }, { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro" }]} disabled={busy} /></label>
+          <label className="field-label">模型<Input aria-label="生成模型" value={settings.model} maxLength={100} onChange={event => setSettings(value => ({ ...value, model: event.target.value }))} disabled={busy} /></label>
           <label className="field-label">输出预算（tokens）<InputNumber aria-label="输出预算" min={512} max={32768} precision={0} step={1024} value={settings.max_tokens} onChange={(max_tokens) => setSettings((value) => ({ ...value, max_tokens: max_tokens ?? 16384 }))} disabled={busy} /></label>
           <label className="field-label">温度<InputNumber aria-label="温度" min={0} max={2} step={0.1} value={settings.temperature} onChange={(temperature) => setSettings((value) => ({ ...value, temperature: temperature ?? 1 }))} disabled={busy} /></label>
         </div><p className="muted-note">参数调整立即用于下一次生成；保存后会成为该项目的默认值。输出预算包含模型推理与正文消耗。</p><Button icon={<SaveOutlined />} loading={saving} onClick={() => void saveSettings()} disabled={!selectedProjectRef || busy || projectLoading}>保存为项目默认参数</Button>

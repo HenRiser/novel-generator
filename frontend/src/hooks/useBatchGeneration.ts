@@ -2,11 +2,11 @@ import { useEffect } from "react";
 import { getBatchGeneration, getChapters } from "../api";
 import { useAppStore } from "../store/useAppStore";
 
-/** Keep server-owned batch state available while navigating between workspaces. */
+/** Keep browser-owned batch state available while navigating between workspaces. */
 export function useBatchGeneration(): void {
   const { selectedProjectRef, apiStatus } = useAppStore();
   useEffect(() => {
-    if (!selectedProjectRef || apiStatus !== "online") return;
+    if (!selectedProjectRef) return;
     const projectRef = selectedProjectRef;
     let disposed = false;
     let sequence = 0;
@@ -53,7 +53,7 @@ export function useBatchGeneration(): void {
       controller?.abort();
       window.clearTimeout(timer);
       window.removeEventListener("braipen:batch-changed", handleChange);
-      // Unmounting never cancels a server task or clears its busy state.
+      // Unmounting never cancels a browser task or clears its busy state.
     };
   }, [apiStatus, selectedProjectRef]);
 }

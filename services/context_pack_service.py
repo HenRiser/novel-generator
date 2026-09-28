@@ -304,18 +304,22 @@ def _sort_scored(items: list[tuple[dict[str, Any], int, list[str]]]) -> list[tup
 
 
 def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPackResult:
+    graph_result = load_narrative_graph(project_ref)
+    if not graph_result.ok:
+        return ContextPackResult(False, project_ref=project_ref, message=graph_result.message)
+    return build_context_pack_from_graph(project_ref, request, graph_result.graph)
+
+
+def build_context_pack_from_graph(project_ref: str, request: dict[str, Any], document: dict[str, Any]) -> ContextPackResult:
+    """Use a supplied immutable snapshot; no filesystem access or state mutation."""
     options, error = _validate_request(request)
     if options is None:
         return ContextPackResult(False, project_ref=project_ref, message=error)
 
-    graph_result = load_narrative_graph(project_ref)
-    if not graph_result.ok:
-        return ContextPackResult(False, project_ref=project_ref, message=graph_result.message)
-
-    graph = _dict(graph_result.graph.get("graph"))
+    graph = _dict(document.get("graph"))
     nodes = [node for node in _list(graph.get("nodes")) if isinstance(node, dict)]
     edges = [edge for edge in _list(graph.get("edges")) if isinstance(edge, dict)]
-    tag_registry = _dict(graph_result.graph.get("tag_registry"))
+    tag_registry = _dict(document.get("tag_registry"))
     node_by_id = {clean_text(node.get("id")): node for node in nodes if clean_text(node.get("id"))}
     node_labels = {node_id: clean_text(node.get("label")) or node_id for node_id, node in node_by_id.items()}
     tokens = _tokenize(options["chapter_goal"])
@@ -393,7 +397,7 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
         warnings.append(f"Edge results were truncated by max_edges: {truncated_edges} edge(s) omitted.")
 
     context_pack = {
-        "project_ref": graph_result.project_ref,
+        "project_ref": project_ref,
         "chapter_number": int(options["chapter_number"]),
         "chapter_goal": options["chapter_goal"],
         "options": {
@@ -418,7 +422,7 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
     }
     return ContextPackResult(
         True,
-        project_ref=graph_result.project_ref,
+        project_ref=project_ref,
         context_pack=context_pack,
         prompt_text=render_context_pack_for_prompt(context_pack),
         message="Context pack preview built.",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +14,7 @@ from api.routers import (
     chapter_tasks,
     chapter_workflow,
     context_pack,
+    compute,
     continue_writing,
     generation,
     health,
@@ -26,13 +28,23 @@ from api.routers import (
 from services.chapter_workflow_service import WorkflowError
 
 
-app = FastAPI(title="novel-generator API")
+PUBLIC_MODE = os.getenv("BRAIPEN_PUBLIC_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+PUBLIC_PATHS = {"/api/health", "/api/capabilities"}
+
+app = FastAPI(
+    title="novel-generator API",
+    docs_url=None if PUBLIC_MODE else "/docs",
+    redoc_url=None if PUBLIC_MODE else "/redoc",
+    openapi_url=None if PUBLIC_MODE else "/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://127.0.0.1:5173",
         "http://localhost:5173",
+        "https://braipen.world",
+        "https://www.braipen.world",
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
@@ -40,6 +52,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(compute.router)
 app.include_router(projects.router)
 app.include_router(settings.router)
 app.include_router(audit.router)
@@ -54,6 +67,21 @@ app.include_router(story_delta.router)
 app.include_router(knowledge_drafts.router)
 app.include_router(generation.router)
 app.include_router(chapter_workflow.router)
+
+
+@app.middleware("http")
+async def public_boundary(request: Request, call_next):
+    if PUBLIC_MODE and request.url.path.startswith("/api/"):
+        path = request.url.path
+        allowed = path in PUBLIC_PATHS or path.startswith("/api/compute/")
+        if request.method == "OPTIONS":
+            allowed = True
+        if not allowed:
+            return JSONResponse(
+                status_code=404,
+                content={"error": {"code": "public_mode", "message": "该接口在浏览器本地数据模式下不可用。"}},
+            )
+    return await call_next(request)
 
 
 @app.exception_handler(WorkflowError)

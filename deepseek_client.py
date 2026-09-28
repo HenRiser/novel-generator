@@ -1,6 +1,10 @@
 import os
+import asyncio
+import logging
+from time import monotonic
 import re
-from typing import Any, Iterator
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator, Iterator
 
 from dotenv import load_dotenv
 from openai import (
@@ -8,6 +12,7 @@ from openai import (
     APIError,
     AuthenticationError,
     BadRequestError,
+    AsyncOpenAI,
     OpenAI,
     OpenAIError,
     RateLimitError,
@@ -18,6 +23,120 @@ from config import DEEPSEEK_BASE_URL, DEFAULT_MODEL
 
 class DeepSeekClientError(Exception):
     """Raised when the DeepSeek request cannot be completed safely."""
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    """Request-scoped browser credentials; never consult or modify the environment."""
+
+    api_key: str = field(repr=False)
+    model: str = "deepseek-v4-flash"
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"sk-[A-Za-z0-9_-]{16,256}", self.api_key):
+            raise DeepSeekClientError("请提供本次请求使用的有效 DeepSeek API Key。")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,100}", self.model):
+            raise DeepSeekClientError("模型名称不合法。")
+
+
+def _request_provider_error(exc: Exception) -> DeepSeekClientError:
+    # Public computations must not include provider bodies, URLs, prompts or keys.
+    if isinstance(exc, AuthenticationError):
+        return DeepSeekClientError("DeepSeek API Key 验证失败。")
+    if isinstance(exc, RateLimitError):
+        return DeepSeekClientError("DeepSeek 限流或额度不足，请检查后手动重试。")
+    return DeepSeekClientError("DeepSeek 请求未完成，请检查连接与模型配置后手动重试。")
+
+
+MODEL_TIMEOUT_SECONDS = 120.0
+
+
+def _quiet_provider_logging() -> None:
+    # SDK debug request options contain private prompts. Never enable wire logs for browser computations.
+    for name in {"openai", "openai._base_client", "openai._client", "httpx", "httpcore", *logging.Logger.manager.loggerDict}:
+        if name == "openai" or name.startswith("openai.") or name == "httpx" or name.startswith("httpx.") or name == "httpcore" or name.startswith("httpcore."):
+            logging.getLogger(name).disabled = True
+
+
+def _add_request_usage(metrics: dict[str, Any] | None, usage: dict[str, Any]) -> None:
+    if metrics is not None:
+        for key, value in usage.items():
+            metrics[key] = metrics.get(key, 0) + value
+
+
+async def request_text(provider: ProviderConfig, messages: list[dict[str, str]], *,
+                       temperature: float = 0.7, max_tokens: int = 4000,
+                       json_mode: bool = False, usage_metrics: dict[str, Any] | None = None) -> str:
+    """One request, no implicit retries or environment credentials."""
+    if not messages or (json_mode and not any("json" in str(m.get("content", "")).lower() for m in messages)):
+        raise DeepSeekClientError("请求缺少有效提示词或 JSON 格式说明。")
+    if usage_metrics is not None:
+        usage_metrics["call_count"] = int(usage_metrics.get("call_count", 0)) + 1
+    _quiet_provider_logging()
+    usage: dict[str, Any] = {}
+    try:
+        async with AsyncOpenAI(api_key=provider.api_key, base_url="https://api.deepseek.com", max_retries=0, timeout=MODEL_TIMEOUT_SECONDS) as client:
+            response = await asyncio.wait_for(client.chat.completions.create(
+                model=provider.model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                **({"response_format": {"type": "json_object"}} if json_mode else {})), MODEL_TIMEOUT_SECONDS)
+            _capture_usage(response, usage)
+            if not response.choices:
+                raise DeepSeekClientError("模型未返回结果。")
+            _raise_if_truncated(_finish_reason(response.choices[0]))
+            content = _extract_message_text(response.choices[0].message)
+            if not content.strip():
+                raise DeepSeekClientError("模型未返回正文。")
+            return content
+    except (DeepSeekClientError, asyncio.TimeoutError):
+        raise
+    except Exception as exc:
+        raise _request_provider_error(exc) from None
+    finally:
+        _add_request_usage(usage_metrics, usage)
+
+
+async def request_text_stream(provider: ProviderConfig, messages: list[dict[str, str]], *,
+                              temperature: float = 0.7, max_tokens: int = 4000,
+                              usage_metrics: dict[str, Any] | None = None) -> AsyncIterator[dict[str, str]]:
+    if not messages:
+        raise DeepSeekClientError("请求缺少有效提示词。")
+    if usage_metrics is not None:
+        usage_metrics["call_count"] = int(usage_metrics.get("call_count", 0)) + 1
+    _quiet_provider_logging()
+    usage: dict[str, Any] = {}
+    deadline = monotonic() + MODEL_TIMEOUT_SECONDS
+    try:
+        async with AsyncOpenAI(api_key=provider.api_key, base_url="https://api.deepseek.com", max_retries=0, timeout=MODEL_TIMEOUT_SECONDS) as client:
+            stream = await asyncio.wait_for(client.chat.completions.create(
+                model=provider.model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                stream=True, stream_options={"include_usage": True}), max(0, deadline - monotonic()))
+            async with stream:
+                seen_content = truncated = False
+                iterator = stream.__aiter__()
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(iterator.__anext__(), max(0, deadline - monotonic()))
+                    except StopAsyncIteration:
+                        break
+                    _capture_usage(chunk, usage)
+                    choices = chunk.get("choices") if isinstance(chunk, dict) else getattr(chunk, "choices", None)
+                    if choices and _finish_reason(choices[0]) == "length":
+                        truncated = True
+                    delta = _stream_chunk_delta(chunk)
+                    for field, kind in (("reasoning_content", "reasoning"), ("content", "content")):
+                        text = _extract_delta_field_text(delta, field)
+                        if text:
+                            seen_content = seen_content or (kind == "content" and bool(text.strip()))
+                            yield {"kind": kind, "text": text}
+                _raise_if_truncated("length" if truncated else "")
+                if not seen_content:
+                    raise DeepSeekClientError("模型流结束但未返回完整正文。")
+    except (DeepSeekClientError, asyncio.TimeoutError):
+        raise
+    except Exception as exc:
+        raise _request_provider_error(exc) from None
+    finally:
+        _add_request_usage(usage_metrics, usage)
 
 
 def _sanitize_error_message(exc: Exception, api_key: str) -> str:
