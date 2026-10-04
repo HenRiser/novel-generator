@@ -79,8 +79,8 @@ export async function localRequest(path: string, init: RequestInit = {}): Promis
     const id = typeof body.connection_id === 'string' ? body.connection_id : await defaultConnectionId();
     const profile = await getConnection(id);
     const model = body.model || profile.revisions.find(r=>r.revision===profile.head)?.model;
-    const p = emptyProject(title, { ...body, connection_id: id, model, genre: body.genre || '未指定', style: body.style || '未指定', protagonist: seed,
-      supporting_characters: seed, worldview: seed, core_conflict: seed, extra_requirements: seed, created_at: new Date().toISOString() });
+    const p = emptyProject(title, { ...body, seed_prompt: seed, raw_story_idea: seed, connection_id: id, model,
+      genre: body.genre || '未指定', style: body.style || '未指定', created_at: new Date().toISOString() });
     await putProject(p); return { ...success(p), title };
   }
   const ref = parts[2];

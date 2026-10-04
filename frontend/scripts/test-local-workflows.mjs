@@ -78,6 +78,87 @@ async function test(name, fn) {
 }
 
 try {
+await test('新建故事保留白话起点，空设定不复制且不调用模型', async ({ page, calls }) => {
+  const result = await page.evaluate(async () => {
+    const created = await api.localRequest('/api/projects', { method: 'POST', body: JSON.stringify({ title: '起点测试', seed_prompt: '  灵气复苏，主角能反转他人的能力。  ', genre: '都市', style: '轻松', max_tokens: 4096, temperature: 1 }) });
+    const project = await store.getProject(created.project_ref);
+    let blocked = '';
+    try { await api.localRequest(`/api/projects/${encodeURIComponent(created.project_ref)}/outline-characters`, { method: 'POST' }); }
+    catch (error) { blocked = error.message; }
+    return { project, readiness: await api.readiness(project, 1), blocked };
+  });
+  assert.equal(calls.length, 0);
+  for (const field of ['protagonist', 'supporting_characters', 'worldview', 'core_conflict', 'extra_requirements']) assert.equal(result.project.config[field] || '', '');
+  assert.equal(result.project.config.seed_prompt, '灵气复苏，主角能反转他人的能力。');
+  assert.equal(result.project.config.raw_story_idea, result.project.config.seed_prompt);
+  assert.equal(result.project.config.genre, '都市'); assert.equal(result.project.config.style, '轻松');
+  assert.equal(result.project.config.max_tokens, 4096); assert.equal(result.project.config.temperature, 1);
+  assert.equal(result.project.runs.length, 0); assert.equal(result.readiness.can_generate_assets, false);
+  assert.ok(result.readiness.blockers.some(blocker => blocker.code === 'project_settings_missing'));
+  assert.equal(result.blocked, '请先补全设定并解锁 Key。');
+});
+
+await test('实际创建页面引导手动扩写，模型分别填写四项设定', async ({ page, load, calls, setHandler, origin }) => {
+  const report = resolve(process.env.BRAIPEN_REPORT_DIR || resolve(root, '../reports/workflow-reliability-2026-09-24'));
+  await mkdir(report, { recursive: true });
+  const seed = '灵气复苏，主角能反转他人的能力。';
+  const expanded = { protagonist_setting: '模型主角：反转能力的普通青年', supporting_characters_setting: '模型配角：调查异常的同学', world_setting: '模型世界：现代城市出现能力者', core_conflict: '模型冲突：反转失控与保护同伴', title_candidates: ['反向能力'], recommended_title: '反向能力' };
+  setHandler(route => {
+    const payload = route.request().postDataJSON(); calls.push({ url: route.request().url(), data: payload });
+    return route.fulfill({ json: { ...v2Identity(payload), result: { expanded_data: expanded }, metrics: { call_count: 1 } } });
+  });
+  await page.evaluate(() => localStorage.setItem('braipen:intro-hidden', 'true'));
+  await page.goto(origin + '/dashboard'); await load();
+  await page.getByRole('button', { name: /新建故事/ }).click();
+  await page.getByLabel('故事的名字', { exact: true }).fill('设想页面测试');
+  await page.getByLabel('故事的起点', { exact: true }).fill(seed);
+  await page.getByRole('button', { name: '建立故事', exact: true }).click();
+  await page.waitForURL('**/writing');
+  await page.getByRole('button', { name: '前往故事设定', exact: true }).click();
+  const field = name => page.locator('label').filter({ hasText: new RegExp('^' + name) }).locator('textarea');
+  await field('白话故事设想').waitFor({ state: 'visible' });
+  assert.equal(await field('白话故事设想').inputValue(), seed);
+  for (const name of ['主角', '配角', '世界观', '核心冲突']) assert.equal(await field(name).inputValue(), '');
+  assert.equal(calls.length, 0);
+  await page.screenshot({ path: resolve(report, 'story-created-empty.png'), fullPage: true });
+  await page.getByRole('button', { name: '扩写并保存设定 · 调用模型', exact: true }).click();
+  await page.waitForFunction(() => document.querySelector('textarea') && Array.from(document.querySelectorAll('textarea')).some(input => input.value === '模型主角：反转能力的普通青年'));
+  assert.equal(calls.length, 1); assert.ok(calls[0].url.endsWith('/expand_setting'));
+  assert.equal(calls[0].data.input.request.raw_story_idea, seed);
+  for (const [label, key] of [['主角', 'protagonist_setting'], ['配角', 'supporting_characters_setting'], ['世界观', 'world_setting'], ['核心冲突', 'core_conflict']]) assert.equal(await field(label).inputValue(), expanded[key]);
+  assert.equal(await field('白话故事设想').inputValue(), seed);
+  const saved = await page.evaluate(async () => {
+    const { useAppStore } = await import('/src/store/useAppStore.ts');
+    const project = await (await import('/src/localStore.ts')).getProject(useAppStore.getState().selectedProjectRef);
+    return { project, readiness: await (await import('/src/localApi.ts')).readiness(project, 1) };
+  });
+  assert.equal(saved.project.title, '设想页面测试'); assert.equal(saved.project.config.seed_prompt, seed);
+  assert.equal(saved.project.config.genre, '未指定'); assert.equal(saved.project.config.style, '未指定');
+  assert.equal(saved.project.runs[0].status, 'completed'); assert.equal(saved.readiness.can_generate_assets, true);
+  await page.screenshot({ path: resolve(report, 'story-model-expanded.png'), fullPage: true });
+});
+
+await test('手动扩写失败或返回缺字段时，不用白话设想伪造设定', async ({ page, setHandler }) => {
+  for (const invalid of ['HTTP', 'fields']) {
+    setHandler(route => {
+      const payload = route.request().postDataJSON();
+      return invalid === 'HTTP' ? route.fulfill({ status: 429, json: { error: { message: '模拟限流' } } })
+        : route.fulfill({ json: { ...v2Identity(payload), result: { expanded_data: { protagonist_setting: '不完整候选' } }, metrics: { call_count: 1 } } });
+    });
+    const saved = await page.evaluate(async () => {
+      const created = await api.localRequest('/api/projects', { method: 'POST', body: JSON.stringify({ title: '失败测试', seed_prompt: '原始白话设想' }) });
+      let error = '';
+      try { await api.localRequest(`/api/projects/${encodeURIComponent(created.project_ref)}/setting-expansion`, { method: 'POST', body: JSON.stringify({ raw_story_idea: '原始白话设想' }) }); }
+      catch (e) { error = e.message; }
+      return { project: await store.getProject(created.project_ref), error };
+    });
+    assert.equal(saved.error, invalid === 'HTTP' ? '模拟限流' : '扩写结果字段不完整。');
+    for (const field of ['protagonist', 'supporting_characters', 'worldview', 'core_conflict']) assert.equal(saved.project.config[field] || '', '');
+    assert.equal(saved.project.config.raw_story_idea, '原始白话设想');
+    assert.equal(saved.project.assets.setting_expansion, ''); assert.equal(saved.project.runs[0].status, 'interrupted');
+  }
+});
+
 await test('正文→修改确认→冻结约束摘要；重复确认不重复调用', async ({ page, calls }) => {
   await page.evaluate(async () => {
     const ref = await makeProject(); window.ref = ref;

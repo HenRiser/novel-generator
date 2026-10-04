@@ -194,12 +194,12 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
     {readiness.loading && <Alert type="info" showIcon message="正在检查生成准备情况…" />}
     {readiness.error && apiStatus === "online" && <Alert type="warning" showIcon message="暂时无法确认生成条件，正文生成已暂停。" description={readiness.error} action={<Button size="small" onClick={readiness.refresh}>重试检查</Button>} />}
     {readiness.value?.blockers.map((blocker) => <Alert key={`${blocker.code}-${blocker.chapter_number ?? "project"}`} type={blocker.action === "wait" ? "info" : "warning"} showIcon message={blocker.message}
-      description={blocker.action === "project_settings" ? "当前页面暂不支持修复旧项目设定，可回项目概览新建故事并填写起点；原项目仍会保留。" : undefined}
+      description={blocker.action === "project_settings" ? "在「故事设定 → 创作设定」填写设定，或点击「扩写并保存设定 · 调用模型」让模型补全白话故事设想。" : undefined}
       action={blocker.action === "confirm_chapter" || blocker.action === "retry_summary" || blocker.action === "read_chapter"
         ? <Link to={`/reader?chapter=${blocker.chapter_number}`}><Button size="small">{blocker.action === "confirm_chapter" ? "去确认正文" : blocker.action === "retry_summary" ? "查看并重试摘要" : "查看章节"}</Button></Link>
         : blocker.action === "generate_assets" ? <Space wrap><Button size="small" onClick={() => void handleGenerateOutline()} disabled={!canGenerate || !readiness.value?.can_generate_assets} loading={outlineGenerating}>生成大纲与人物卡</Button><Button size="small" onClick={onAssetsGenerated}>查看故事设定</Button></Space>
         : blocker.action === "model_settings" ? <Link to="/settings"><Button size="small">配置模型连接</Button></Link>
-        : blocker.action === "project_settings" ? <Link to="/dashboard"><Button size="small">前往项目概览</Button></Link> : undefined} />)}
+        : blocker.action === "project_settings" ? <Button size="small" onClick={onAssetsGenerated}>前往故事设定</Button> : undefined} />)}
     {mode === "single" && <div className="generation-inputs" aria-live="polite">
       <span className="field-caption">本次创作依据</span><Tag>{plansLoading ? "正在读取规划" : task ? `已批准任务单 · v${task.revision}` : "未设置任务单"}</Tag>
       {plan && planMatchesTask ? <Checkbox checked={usePlan} onChange={(e) => setUsePlan(e.target.checked)} disabled={busy}>场景计划 v{plan.revision}</Checkbox> : <span className="muted-note">{plan ? "场景计划需按最新任务单重新批准" : "未设置场景计划"}</span>}
