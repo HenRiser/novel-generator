@@ -8,13 +8,14 @@ import {providerFixtures,identity} from './provider-test-helpers.mjs';
 const require=createRequire(import.meta.url),runtime=process.env.BRAIPEN_PLAYWRIGHT_PATH;
 const {chromium}=runtime?await import(pathToFileURL(join(runtime,'index.mjs')).href):require('playwright');
 const root=fileURLToPath(new URL('../',import.meta.url)).replace(/[\\/]+$/,'');
-const fixtures=providerFixtures(root),report=resolve(root,'../reports/provider-connections-2026-09-28');await mkdir(report,{recursive:true});
+const fixtures=providerFixtures(root),report=resolve(process.env.BRAIPEN_REPORT_DIR||resolve(root,'../reports/provider-connections-2026-09-28'));await mkdir(report,{recursive:true});
 const server=await createServer({root,define:{'import.meta.env.VITE_API_BASE_URL':'""'},logLevel:'error',server:{host:'127.0.0.1',port:0},plugins:[{name:'provider-test',configureServer(s){s.middlewares.use('/__provider_test',(_,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>provider tests</title>');});}}]});
 await server.listen();const origin=server.resolvedUrls.local[0].replace(/\/$/,'');
 const browser=await chromium.launch({channel:'msedge',headless:true});let results=[];
-async function test(name,fn){
+async function visibleTooltip(page,text){await page.getByRole('tooltip').filter({hasText:text}).waitFor({state:'visible'});await page.waitForFunction(text=>Array.from(document.querySelectorAll('.ant-tooltip')).some(e=>{const r=e.getBoundingClientRect();return e.textContent.includes(text)&&getComputedStyle(e).opacity==='1'&&r.width>0&&r.top>=0&&r.bottom<=innerHeight;}),text);}
+async function test(name,fn,contextOptions={}){
  if(process.env.BRAIPEN_TEST_FILTER&&!name.includes(process.env.BRAIPEN_TEST_FILTER))return;
- const ctx=await browser.newContext({acceptDownloads:true}),calls=[];let handler;
+ const ctx=await browser.newContext({acceptDownloads:true,...contextOptions}),calls=[];let handler;
  await ctx.route('**/api/**',async route=>{const req=route.request();
   if(req.url().endsWith('/health'))return route.fulfill({json:{status:'ok'}});
   if(req.url().endsWith('/capabilities'))return route.fulfill({json:fixtures.catalog});
@@ -68,11 +69,11 @@ await test('实际设定扩写页面显示具体密钥原因，失败后按钮�
   },remembered);
   await page.goto(origin+'/writing?tab=assets');await load();
   await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
-  const button=page.getByRole('button',{name:'扩写并保存设定 · 调用模型',exact:true});
+  const button=page.getByRole('button',{name:'用白话生成世界观',exact:true});
   await button.click();
   const expected=remembered?'模型连接「测试连接」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。':'模型连接「测试连接」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。';
   await page.getByText(expected,{exact:true}).waitFor({state:'visible'});
-  await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.textContent?.trim()==='扩写并保存设定 · 调用模型'&&!button.classList.contains('ant-btn-loading')&&!button.disabled));
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.getAttribute('aria-label')==='用白话生成世界观'&&!button.classList.contains('ant-btn-loading')&&!button.disabled));
   assert.equal(calls.length,0);
   const saved=await page.evaluate(ref=>store.getProject(ref),ref);assert.equal(saved.runs.length,0);assert.equal(saved.assets.setting_expansion,'');
   await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:join(output,remembered?'key-locked.png':'key-missing.png'),fullPage:true});
@@ -145,6 +146,57 @@ await test('实际设置界面八预设＋Custom，保存不调用模型，列�
  await page.setViewportSize({width:390,height:844});await page.screenshot({path:join(report,'connections-mobile.png'),fullPage:true});
  const width=await page.evaluate(()=>({w:document.documentElement.scrollWidth,v:innerWidth}));assert.ok(width.w<=width.v+2,JSON.stringify(width));
 });
+
+await test('模型连接可用性：目录立即显示数量、显式选择保存、空目录和截断仍可手填',async({page,load,calls,setHandler})=>{
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/settings');await load();
+ await page.getByRole('button',{name:'添加连接',exact:true}).click();await page.getByLabel('连接名称',{exact:true}).fill('目录验收连接');await page.getByLabel('API Base URL',{exact:true}).fill('https://catalog.example/v1');await page.getByLabel('连接 API Key',{exact:true}).fill('SYNTHETIC_CATALOG_KEY');
+ const model=page.getByRole('combobox',{name:'默认模型ID'});await model.fill('org/existing:keep');await page.getByRole('button',{name:'保存连接',exact:true}).click();
+ await page.evaluate(()=>wait(async()=>(await pc.connections()).some(p=>p.name==='目录验收连接')));
+ const before=await page.evaluate(async()=>{const p=(await pc.connections()).find(p=>p.name==='目录验收连接');return{id:p.id,snapshot:p.revisions.find(r=>r.revision===p.head),defaultId:await pc.defaultConnectionId()};});assert.equal(before.snapshot.policy.structured,'prompt_only');assert.equal(calls.length,0);
+ const longId='org/'+('long-model-name-'.repeat(9))+'fast';
+ setHandler((route,p)=>route.fulfill({json:{...identity(p),result:{models:[{id:'org/fiction:fast',name:'Fiction Fast'},{id:longId,name:'长名称模型'}],truncated:true},metrics:{}}}));
+ await page.getByRole('button',{name:'获取模型列表',exact:true}).click();
+ const catalog=page.getByRole('region',{name:'可选模型列表'});await catalog.getByText('已获取 2 个模型',{exact:true}).waitFor({state:'visible'});await catalog.getByRole('button',{name:'选择模型 org/fiction:fast',exact:true}).waitFor({state:'visible'});await catalog.getByText('模型目录已截断，仍可手动填写其他模型 ID。',{exact:true}).waitFor({state:'visible'});
+ assert.equal(await model.inputValue(),'org/existing:keep');assert.deepEqual(await page.evaluate(async id=>(await pc.getConnection(id)).revisions[0],before.id),before.snapshot);
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='保存连接'&&!b.disabled));await page.waitForFunction(()=>document.querySelectorAll('.ant-message-notice').length===0);await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:join(report,'models-visible.png'),fullPage:true});await page.setViewportSize({width:390,height:844});await page.screenshot({path:join(report,'models-visible-mobile.png'),fullPage:true});
+ const width=await page.evaluate(()=>({w:document.documentElement.scrollWidth,v:innerWidth}));assert.ok(width.w<=width.v+2,JSON.stringify(width));
+ await catalog.getByRole('button',{name:'选择模型 org/fiction:fast',exact:true}).click();assert.equal(await model.inputValue(),'org/fiction:fast');
+ assert.equal(await page.evaluate(async id=>(await pc.getConnection(id)).head,before.id),1);
+ await page.getByRole('button',{name:'保存连接',exact:true}).click();await page.evaluate(id=>wait(async()=>{const p=await pc.getConnection(id);return p.head===2&&p.revisions[1].model==='org/fiction:fast';}),before.id);
+ await catalog.getByText('模型目录已截断，仍可手动填写其他模型 ID。',{exact:true}).waitFor({state:'visible'});
+ setHandler((route,p)=>route.fulfill({json:{...identity(p),result:{models:[],truncated:false},metrics:{}}}));await page.getByRole('button',{name:'获取模型列表',exact:true}).click();
+ await catalog.getByText('已获取 0 个模型',{exact:true}).waitFor({state:'visible'});await catalog.getByText('服务商没有返回可选模型，可直接手动填写模型 ID。',{exact:true}).waitFor({state:'visible'});assert.equal(await model.inputValue(),'org/fiction:fast');
+ await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(b=>b.textContent==='保存连接'&&!b.disabled));await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:join(report,'models-empty.png'),fullPage:true});await model.fill('org/manual-after-empty');await page.getByRole('button',{name:'保存连接',exact:true}).click();await page.evaluate(id=>wait(async()=>(await pc.getConnection(id)).head===3),before.id);
+ const after=await page.evaluate(async id=>({profile:await pc.getConnection(id),defaultId:await pc.defaultConnectionId()}),before.id);assert.equal(after.profile.revisions[2].model,'org/manual-after-empty');assert.equal(after.profile.revisions[2].policy.structured,'prompt_only');assert.deepEqual(after.profile.revisions[0],before.snapshot);assert.equal(after.defaultId,before.defaultId);assert.equal(calls.length,2);
+});
+
+await test('模型连接可用性：推荐方案只改表单、官方与已有策略保留，问号支持悬停及键盘',async({page,load,calls})=>{
+ await load();const before=await page.evaluate(async()=>{const original=await newProfile();const p=await pc.saveConnection('已有关闭连接',{...original.revisions[0],policy:{...original.revisions[0].policy,structured:'unsupported'}});return{id:p.id,revisions:p.revisions,legacy:await pc.getConnection('legacy-deepseek')};});
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/settings');await load();
+ const addressHelp=page.getByRole('button',{name:'API 服务地址说明',exact:true});await addressHelp.hover();await visibleTooltip(page,'填写服务商提供的基础地址');await page.getByRole('heading',{name:'偏好设置',exact:true}).hover();await page.getByRole('tooltip').filter({hasText:'填写服务商提供的基础地址'}).waitFor({state:'hidden'});
+ await page.locator('.provider-item').filter({hasText:'已有关闭连接'}).click();await page.getByText('尚不能自动生成设定',{exact:true}).waitFor({state:'visible'});await page.getByRole('button',{name:'使用推荐方案',exact:true}).click();await page.getByText('已选择推荐方案，点击「保存连接」后生效。',{exact:true}).waitFor({state:'visible'});
+ assert.deepEqual(await page.evaluate(async id=>(await pc.getConnection(id)).revisions,before.id),before.revisions);
+ await page.getByRole('button',{name:'保存连接',exact:true}).click();await page.evaluate(id=>wait(async()=>(await pc.getConnection(id)).head===3),before.id);
+ const updated=await page.evaluate(id=>pc.getConnection(id),before.id);assert.deepEqual(updated.revisions.slice(0,2),before.revisions);assert.equal(updated.revisions[2].policy.structured,'prompt_only');
+ await page.getByRole('button',{name:'添加连接',exact:true}).click();await page.getByText('高级设置（通常无需修改）',{exact:true}).click();await page.locator('.ant-select-content').getByText('通用兼容（提示词要求 JSON，程序校验）',{exact:true}).waitFor({state:'visible'});
+ await page.getByRole('combobox',{name:'接口协议'}).click();await page.getByTitle('Anthropic Messages',{exact:true}).last().click();await page.locator('.ant-select-content').getByText('通用兼容（提示词要求 JSON，程序校验）',{exact:true}).waitFor({state:'visible'});
+ await page.getByRole('combobox',{name:'接口协议'}).click();await page.getByTitle('OpenAI Chat Completions',{exact:true}).last().click();
+ await page.getByRole('combobox',{name:'结构化输出模式'}).click();await page.getByTitle('服务商支持 JSON 格式（JSON Object）',{exact:true}).last().click();await page.getByRole('combobox',{name:'额度字段'}).click();await page.getByTitle('新版长度参数（max_completion_tokens）',{exact:true}).last().click();await page.getByRole('checkbox',{name:'返回用量统计',exact:true}).check();
+ await page.getByRole('combobox',{name:'接口协议'}).click();await page.getByTitle('Anthropic Messages',{exact:true}).last().click();await page.locator('.ant-select-content').getByText('通用兼容（提示词要求 JSON，程序校验）',{exact:true}).waitFor({state:'visible'});await page.locator('.ant-select-content').getByText('通用长度参数（max_tokens）',{exact:true}).waitFor({state:'visible'});
+ assert.equal(await page.getByRole('checkbox',{name:'返回用量统计',exact:true}).isChecked(),false);assert.equal(await page.getByRole('checkbox',{name:'返回用量统计',exact:true}).isDisabled(),true);
+ await page.locator('label').filter({has:page.getByLabel('API Base URL',{exact:true})}).click({position:{x:4,y:6}});assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'API Base URL');
+ await page.getByRole('combobox',{name:'接口协议'}).focus();await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('aria-label')),'API 服务地址说明');await visibleTooltip(page,'填写服务商提供的基础地址');
+ const formatHelp=page.getByRole('button',{name:'结果格式说明',exact:true});await page.waitForFunction(()=>document.querySelectorAll('.ant-message-notice').length===0);await formatHelp.evaluate(e=>e.scrollIntoView({block:'center'}));await page.mouse.move(0,0);await formatHelp.focus();await visibleTooltip(page,'通用兼容方案只用提示词要求 JSON');await page.screenshot({path:join(report,'advanced-help-keyboard.png')});
+ await page.getByRole('combobox',{name:'模型服务商'}).click();await page.getByTitle('OpenAI',{exact:true}).last().click();await page.getByLabel('连接名称',{exact:true}).fill('官方预设验收');await page.getByRole('combobox',{name:'默认模型ID'}).fill('gpt-4o');await page.getByRole('button',{name:'保存连接',exact:true}).click();await page.evaluate(()=>wait(async()=>(await pc.connections()).some(p=>p.name==='官方预设验收')));
+ const official=await page.evaluate(async()=>(await pc.connections()).find(p=>p.name==='官方预设验收').revisions[0]);const expected=fixtures.normalize({...official,policy:fixtures.catalog.providers.find(p=>p.id==='openai').policy});assert.deepEqual(official.policy,expected.policy);assert.equal(official.policy.source,'official_catalog');assert.equal(official.policy.structured,'json_schema');
+ assert.deepEqual(await page.evaluate(()=>pc.getConnection('legacy-deepseek')),before.legacy);assert.equal(await page.evaluate(()=>pc.defaultPolicy().structured),'unsupported');assert.equal(calls.length,0);
+});
+
+await test('模型连接可用性：手机首次轻点问号可见且不修改字段',async({page,load,calls})=>{
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/settings');await load();await page.getByRole('button',{name:'添加连接',exact:true}).click();
+ const address=page.getByLabel('API Base URL',{exact:true});const before=await address.inputValue();const help=page.getByRole('button',{name:'API 服务地址说明',exact:true});await help.evaluate(e=>e.scrollIntoView({block:'center'}));await help.tap();await visibleTooltip(page,'填写服务商提供的基础地址');const tip=await page.getByRole('tooltip').filter({hasText:'填写服务商提供的基础地址'}).boundingBox();assert.ok(tip&&tip.x>=0&&tip.x+tip.width<=390&&tip.y>=0&&tip.y+tip.height<=844);assert.equal(await address.inputValue(),before);await page.screenshot({path:join(report,'help-touch.png')});assert.equal(calls.length,0);
+},{hasTouch:true,isMobile:true,viewport:{width:390,height:844}});
+
 await test('修复Custom结构化策略后，实际恢复入口创建新摘要而不重写正文',async({page,load,calls})=>{
  await load();const state=await page.evaluate(async()=>{
    let profile=await newProfile();profile=await pc.saveConnection('待修复',{...profile.revisions[0],policy:{...profile.revisions[0].policy,structured:'unsupported'}});const ref=await newProject(profile);

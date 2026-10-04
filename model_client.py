@@ -21,6 +21,7 @@ class ModelConfig:
     connection: dict
     api_key: str = field(repr=False)
     operation: str = ""
+    response_schema: dict | None = field(default=None, repr=False)
     def __post_init__(self):
         normalized = normalize_connection(self.connection, verify=True)
         object.__setattr__(self, 'connection', normalized)
@@ -73,7 +74,7 @@ def _body(config, messages, temperature, max_tokens, json_mode, stream):
         mode = policy['structured']
         if mode == 'unsupported': raise ValueError('此连接尚未启用结构化输出，请设置能力或显式启用提示词兼容模式。')
         if mode == 'json_schema':
-            schema = SCHEMAS.get(config.operation)
+            schema = config.response_schema if config.response_schema is not None else SCHEMAS.get(config.operation)
             if schema is None: raise ValueError('此操作缺少结构化格式。')
             validate_schema(schema)
             if c['protocol'] == 'messages': payload['output_config'] = {'format': {'type': 'json_schema', 'schema': schema}}

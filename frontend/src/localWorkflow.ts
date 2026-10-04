@@ -6,6 +6,7 @@ import type { LocalChapter, LocalProject, LocalRun } from './localTypes';
 import { validatePlanningResult } from './planningInput';
 import { selectPlanningTransport } from './planningStreamContract';
 import { planningTraceEntry, readPlanningTrace } from './planningTrace';
+import { applySettingGeneration } from './settingGeneration';
 import type { BatchGenerationRequest, ChapterStreamDoneEvent, ChapterStreamHandlers, ChapterWorkflow, GenerationRequest, NoRevealReview, KnowledgeDraft, NarrativeGraphDocument, NarrativeGraphViewsDocument, ChapterTaskResponse, ScenePlanResponse } from './types';
 
 const active = new Map<string, AbortController>();
@@ -77,11 +78,8 @@ export function applyResult(p: LocalProject, operation: string, result: Record<s
   else if (operation === 'generate_outline') p.assets.outline = requiredContent(result.content);
   else if (operation === 'generate_characters') p.assets.characters = requiredContent(result.content);
   else if (operation === 'expand_setting') {
-    const data = result.expanded_data as Record<string, unknown>;
-    if (!data || ['protagonist_setting', 'supporting_characters_setting', 'world_setting', 'core_conflict'].some(k => typeof data[k] !== 'string' || !String(data[k]).trim())) throw new Error('扩写结果字段不完整。');
-    p.config = { ...p.config, protagonist: data.protagonist_setting, supporting_characters: data.supporting_characters_setting,
-      worldview: data.world_setting, core_conflict: data.core_conflict };
-    p.assets.setting_expansion = JSON.stringify(data, null, 2);
+    p.config = applySettingGeneration(p.config, result, (input.request || {}) as Record<string, unknown>);
+    p.assets.setting_expansion = JSON.stringify(result.expanded_data, null, 2);
   } else if (operation === 'generate_chapter') {
     if (!String(result.content || '').trim()) throw new Error('正文为空，未保存。');
     lockPreviousChapters(p, n);

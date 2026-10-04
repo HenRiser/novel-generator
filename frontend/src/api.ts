@@ -57,6 +57,7 @@ import type {
   WorkflowGuardCheckRequest,
   WorkflowGuardCheckResponse,
 } from "./types";
+import type { SettingGenerationOptions } from './settingGeneration';
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, "") ?? (import.meta.env.PROD ? "" : "http://127.0.0.1:8000");
@@ -689,9 +690,9 @@ export function testApiConnection(request: ApiConfigTestRequest): Promise<ApiCon
   return postJson<ApiConfigTestResponse>("/api/settings/api-config/test", request);
 }
 
-export function expandProjectSetting(projectRef: string, rawStoryIdea: string, signal?: AbortSignal) {
+export function expandProjectSetting(projectRef: string, rawStoryIdea: string, signal?: AbortSignal, options?: SettingGenerationOptions) {
   return apiFetch<{ ok: boolean; expanded_data: Record<string, unknown> }>(`/api/projects/${projectPath(projectRef)}/setting-expansion`,
-    { method: 'POST', body: JSON.stringify({ raw_story_idea: rawStoryIdea }), signal });
+    { method: 'POST', body: JSON.stringify({ raw_story_idea: rawStoryIdea, ...options }), signal });
 }
 export function updateProjectConfig(projectRef: string, config: Record<string, unknown>) {
   return patchJson<{ ok: boolean }>(`/api/projects/${projectPath(projectRef)}/config`, config);

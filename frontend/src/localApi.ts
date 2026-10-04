@@ -4,6 +4,7 @@ import { deleteProject, getProject, getSetting, listProjects, putProject, setSet
 import { getSessionKey, setSessionKey } from './keyVault';
 import { emptyProject } from './localTypes';
 import type { LocalProject } from './localTypes';
+import { settingGenerationRequest } from './settingGeneration';
 import { changed, projectLock, stopLocalBatch, confirmLocalChapter, contextInput, ensureEditable, generateLocalChapter, localGenerationStatus, recoverInterrupted, runOperation, setChapter, startLocalBatch } from './localWorkflow';
 import type { BatchGenerationRequest, ChapterStatus, GenerationReadiness, GenerationRequest, NarrativeGraphDocument, NarrativeGraphViewsDocument, ChapterTaskResponse, ScenePlanResponse } from './types';
 
@@ -106,7 +107,10 @@ export async function localRequest(path: string, init: RequestInit = {}): Promis
     if (kind === 'assets') return { ...success(p), content: p.assets[parts[4] as keyof typeof p.assets] || '' };
     return { ...success(p), config: p.config };
   }
-  if (kind === 'setting-expansion') return { ...success(p), ...await runOperation(p, 'expand_setting', contextInput(p, 1, body), { signal: init.signal || undefined }) };
+  if (kind === 'setting-expansion') {
+    const request = settingGenerationRequest({ ...body, raw_story_idea: body.raw_story_idea ?? p.config.raw_story_idea ?? p.config.seed_prompt ?? '' });
+    return { ...success(p), ...await runOperation(p, 'expand_setting', contextInput(p, 1, request), { signal: init.signal || undefined }) };
+  }
   if (kind === 'context-pack') return { ...success(p), ...(await compute('context_pack', contextInput(p, Number(body.chapter_number || 1), body))).result };
   if (kind === 'narrative-graph') {
     if (method === 'GET') return { ...success(p), graph: p.graph, views: p.views };

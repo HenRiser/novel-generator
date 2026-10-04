@@ -115,13 +115,13 @@ await test('实际创建页面引导手动扩写，模型分别填写四项设�
   await page.getByRole('button', { name: '建立故事', exact: true }).click();
   await page.waitForURL('**/writing');
   await page.getByRole('button', { name: '前往故事设定', exact: true }).click();
-  const field = name => page.locator('label').filter({ hasText: new RegExp('^' + name) }).locator('textarea');
+  const field = name => page.getByLabel(name, { exact: true });
   await field('白话故事设想').waitFor({ state: 'visible' });
   assert.equal(await field('白话故事设想').inputValue(), seed);
   for (const name of ['主角', '配角', '世界观', '核心冲突']) assert.equal(await field(name).inputValue(), '');
   assert.equal(calls.length, 0);
   await page.screenshot({ path: resolve(report, 'story-created-empty.png'), fullPage: true });
-  await page.getByRole('button', { name: '扩写并保存设定 · 调用模型', exact: true }).click();
+  await page.getByRole('button', { name: '生成所选设定 · 调用模型', exact: true }).click();
   await page.waitForFunction(() => document.querySelector('textarea') && Array.from(document.querySelectorAll('textarea')).some(input => input.value === '模型主角：反转能力的普通青年'));
   assert.equal(calls.length, 1); assert.ok(calls[0].url.endsWith('/expand_setting'));
   assert.equal(calls[0].data.input.request.raw_story_idea, seed);
@@ -157,6 +157,102 @@ await test('手动扩写失败或返回缺字段时，不用白话设想伪造�
     assert.equal(saved.project.config.raw_story_idea, '原始白话设想');
     assert.equal(saved.project.assets.setting_expansion, ''); assert.equal(saved.project.runs[0].status, 'interrupted');
   }
+});
+
+await test('世界观单项生成保留手写人物和冲突，并一次保存新白话', async ({page,load,calls,setHandler,origin})=>{
+ const report=resolve(process.env.BRAIPEN_REPORT_DIR||resolve(root,'../reports/workflow-reliability-2026-09-24'));await mkdir(report,{recursive:true});
+ setHandler(route=>{const payload=route.request().postDataJSON();calls.push({url:route.request().url(),data:payload});return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'仅生成的世界观',protagonist_setting:'不应覆盖主角',core_conflict:'不应覆盖冲突'}},metrics:{call_count:1}}});});
+ const state=await page.evaluate(async()=>{const ref=await makeProject();const p=await store.getProject(ref);return{ref,revision:p.revision};});
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
+ await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},state.ref);
+ await page.getByLabel('白话故事设想',{exact:true}).fill('新白话：青年收到未来来信。');
+ await page.getByLabel('主角',{exact:true}).fill('作者手写主角');await page.getByLabel('配角',{exact:true}).fill('作者手写配角');await page.getByLabel('核心冲突',{exact:true}).fill('作者手写冲突');
+ await page.getByLabel('风格',{exact:true}).fill('作者新文风');
+ await page.getByRole('button',{name:'用白话生成世界观',exact:true}).click();
+ await page.waitForFunction(()=>document.querySelector('[aria-label="世界观"]').value==='仅生成的世界观');
+ const p=await page.evaluate(ref=>store.getProject(ref),state.ref);assert.equal(p.revision,state.revision+1);
+ assert.equal(p.config.protagonist,'作者手写主角');assert.equal(p.config.supporting_characters,'作者手写配角');assert.equal(p.config.core_conflict,'作者手写冲突');assert.equal(p.config.style,'作者新文风');assert.equal(p.config.raw_story_idea,'新白话：青年收到未来来信。');
+ assert.equal(calls.length,1);assert.deepEqual(calls[0].data.input.request.selected_fields,['worldview']);assert.equal(p.runs[0].input.request.draft.protagonist,'作者手写主角');
+ await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:resolve(report,'selected-world-generated.png'),fullPage:true});
+});
+
+await test('选择多项整体应用，非法选择和草稿在调用前拒绝',async({page,calls,setHandler})=>{
+ setHandler(route=>{const payload=route.request().postDataJSON();calls.push(payload);return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'生成世界',core_conflict:'生成冲突'}},metrics:{}}});});
+ const result=await page.evaluate(async()=>{
+  const ref=await makeProject(),before=await store.getProject(ref),path=`/api/projects/${encodeURIComponent(ref)}/setting-expansion`;
+  const request={raw_story_idea:'新白话',selected_fields:['worldview','core_conflict'],draft:{protagonist:'未选手写主角',genre:'新题材'}};
+  await api.localRequest(path,{method:'POST',body:JSON.stringify(request)});const saved=await store.getProject(ref),errors=[];
+  for(const patch of [{selected_fields:[]},{selected_fields:['bad']},{draft:{api_key:'SYNTHETIC_NOT_FORWARD'}}])try{await api.localRequest(path,{method:'POST',body:JSON.stringify({...request,...patch})});}catch(error){errors.push(error.message);}
+  return{before,saved,errors,after:await store.getProject(ref)};
+ });
+ assert.equal(result.saved.config.worldview,'生成世界');assert.equal(result.saved.config.core_conflict,'生成冲突');assert.equal(result.saved.config.protagonist,'未选手写主角');assert.equal(result.saved.config.genre,'新题材');assert.equal(result.saved.revision,result.before.revision+1);assert.equal(result.errors.length,3);assert.equal(result.after.runs.length,1);assert.equal(calls.length,1);
+});
+
+await test('实际页面勾选多项才启用批量生成，未选手稿保留',async({page,load,calls,setHandler,origin})=>{
+ setHandler(route=>{const payload=route.request().postDataJSON();calls.push(payload);return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'批量生成世界',core_conflict:'批量生成冲突'}},metrics:{}}});});
+ const ref=await page.evaluate(()=>makeProject());await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
+ await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+ await page.getByLabel('白话故事设想',{exact:true}).fill('批量生成的新设想');await page.getByLabel('主角',{exact:true}).fill('批量前的手写主角');
+ const button=page.getByRole('button',{name:'生成所选设定 · 调用模型',exact:true});assert.equal(await button.isDisabled(),true);
+ await page.getByRole('checkbox',{name:'选择生成世界观',exact:true}).check();await page.getByRole('checkbox',{name:'选择生成核心冲突',exact:true}).check();
+ await button.click();await page.waitForFunction(()=>document.querySelector('[aria-label="核心冲突"]').value==='批量生成冲突');
+ assert.equal(await page.getByLabel('世界观',{exact:true}).inputValue(),'批量生成世界');assert.equal(await page.getByLabel('主角',{exact:true}).inputValue(),'批量前的手写主角');assert.equal(calls.length,1);assert.deepEqual(calls[0].input.request.selected_fields,['worldview','core_conflict']);
+});
+
+await test('所选字段缺失失败不改配置，页面草稿在往返设置后保留',async({page,load,calls,setHandler,origin})=>{
+ setHandler(route=>{const payload=route.request().postDataJSON();calls.push(payload);return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{protagonist_setting:'错误字段'}},metrics:{}}});});
+ const state=await page.evaluate(async()=>{const ref=await makeProject();return{ref,before:await store.getProject(ref)};});
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
+ await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},state.ref);
+ await page.getByLabel('白话故事设想',{exact:true}).fill('未保存的新白话');await page.getByLabel('主角',{exact:true}).fill('未保存的手写主角');
+ await page.getByRole('button',{name:'用白话生成世界观',exact:true}).click();await page.getByText('扩写结果字段不完整。',{exact:true}).waitFor({state:'visible'});
+ assert.equal(await page.getByLabel('主角',{exact:true}).inputValue(),'未保存的手写主角');
+ const failed=await page.evaluate(ref=>store.getProject(ref),state.ref);assert.deepEqual(failed.config,state.before.config);assert.equal(failed.revision,state.before.revision);assert.equal(failed.runs[0].status,'interrupted');assert.equal(calls.length,1);
+ await page.getByRole('link',{name:/偏好设置/}).click();await page.getByRole('heading',{name:'偏好设置',exact:true}).waitFor({state:'visible'});
+ await page.getByRole('link',{name:/创作台/}).click();await page.getByRole('tab',{name:'故事设定',exact:true}).click();
+ await page.getByLabel('主角',{exact:true}).waitFor({state:'visible'});assert.equal(await page.getByLabel('主角',{exact:true}).inputValue(),'未保存的手写主角');assert.equal(await page.getByLabel('白话故事设想',{exact:true}).inputValue(),'未保存的新白话');
+});
+
+await test('保存结果恢复按原选择和草稿零调用应用，过期修订拒绝覆盖',async({page,calls})=>{
+ const result=await page.evaluate(async()=>{
+  const ref=await makeProject(),p=await store.getProject(ref),id=client.newIdentity(p.revision),input=workflow.contextInput(p,1,{raw_story_idea:'恢复的白话',selected_fields:['worldview'],draft:{protagonist:'恢复的手稿'}});
+  await store.updateProject(ref,d=>d.runs.push({...id,operation:'expand_setting',status:'interrupted',input,partial:'',error:'',started_at:new Date().toISOString(),result:{expanded_data:{world_setting:'已存世界',protagonist_setting:'不应应用'}},result_revision:p.revision}),undefined,false);
+  vault.setSessionKey('');await workflow.resumeLocalRun(ref,id.run_id);const restored=await store.getProject(ref);
+  const next=await makeProject(),base=await store.getProject(next),expired=client.newIdentity(base.revision);
+  await store.updateProject(next,d=>{d.config.worldview='作者最新世界';d.runs.push({...expired,operation:'expand_setting',status:'interrupted',input:workflow.contextInput(base,1,input.request),partial:'',error:'',started_at:new Date().toISOString(),result:{expanded_data:{world_setting:'过期世界'}},result_revision:base.revision});});
+  let error='';try{await workflow.resumeLocalRun(next,expired.run_id);}catch(e){error=e.message;}
+  return{restored,expired:await store.getProject(next),error};
+ });
+ assert.equal(result.restored.config.worldview,'已存世界');assert.equal(result.restored.config.protagonist,'恢复的手稿');assert.equal(result.restored.config.raw_story_idea,'恢复的白话');assert.equal(calls.length,0);assert.ok(result.error);assert.equal(result.expired.config.worldview,'作者最新世界');
+});
+
+await test('等待生成时切换作品，旧请求不污染新作品且新表单可编辑',async({page,load,setHandler,origin})=>{
+ let release;const gate=new Promise(resolve=>{release=resolve;});
+ setHandler(async route=>{const payload=route.request().postDataJSON();await gate;await route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'迟到旧世界'}},metrics:{}}}).catch(()=>{});});
+ const refs=await page.evaluate(async()=>[await makeProject(),await makeProject()]);await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
+ await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},refs[0]);
+ await page.getByLabel('白话故事设想',{exact:true}).fill('旧作品白话');await page.getByRole('button',{name:'用白话生成世界观',exact:true}).click();
+ await page.evaluate(ref=>waitUntil(async()=>(await store.getProject(ref)).runs.some(run=>run.status==='running')),refs[0]);
+ await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},refs[1]);release();
+ await page.getByLabel('白话故事设想',{exact:true}).fill('新作品白话');assert.equal(await page.getByLabel('世界观',{exact:true}).inputValue(),'已有设定');
+ assert.equal(await page.getByRole('button',{name:'用白话生成世界观',exact:true}).isEnabled(),true);const saved=await page.evaluate(ref=>store.getProject(ref),refs[1]);assert.equal(saved.runs.length,0);assert.equal(saved.config.worldview,'已有设定');
+});
+
+await test('实际恢复按钮同步设定表单，再保存不会覆盖已恢复的模型结果',async({page,load,calls,origin})=>{
+ const ref=await page.evaluate(()=>makeProject());await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
+ await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+ await page.getByLabel('世界观',{exact:true}).fill('不应覆盖恢复结果的旧草稿');
+ await page.evaluate(async ref=>{
+  const p=await store.getProject(ref),id=client.newIdentity(p.revision);
+  await store.updateProject(ref,d=>d.runs.push({...id,operation:'expand_setting',status:'interrupted',input:workflow.contextInput(p,1,{raw_story_idea:'待恢复的白话',selected_fields:['worldview'],draft:{protagonist:'恢复的作者手稿'}}),partial:'',error:'',started_at:new Date().toISOString(),result:{expanded_data:{world_setting:'恢复到表单的世界'}},result_revision:p.revision}),undefined,false);
+  vault.setSessionKey('');workflow.changed(ref);
+ },ref);
+ await page.getByText(/任务与恢复/).first().click();await page.getByRole('button',{name:'应用已保存结果',exact:true}).click();await page.getByRole('button',{name:/确.*定|OK/}).last().click();
+ await page.waitForFunction(()=>document.querySelector('[aria-label="世界观"]').value==='恢复到表单的世界');
+ assert.equal(await page.getByLabel('主角',{exact:true}).inputValue(),'恢复的作者手稿');
+ await page.getByRole('button',{name:'保存设定',exact:true}).click();
+ await page.evaluate(ref=>waitUntil(async()=>(await store.getProject(ref)).revision===2),ref);
+ const p=await page.evaluate(ref=>store.getProject(ref),ref);assert.equal(p.config.worldview,'恢复到表单的世界');assert.equal(calls.length,0);
 });
 
 await test('正文→修改确认→冻结约束摘要；重复确认不重复调用', async ({ page, calls }) => {
