@@ -10,6 +10,7 @@ from time import monotonic
 from typing import Any, AsyncIterator, Awaitable, Callable, TypedDict
 
 from anyio import CancelScope
+from langgraph.errors import NodeCancelledError
 from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
@@ -74,6 +75,8 @@ async def _isolated_invoke(graph, initial: PlanningState) -> PlanningState:
     task = Context().run(asyncio.create_task, invoke())
     try:
         return await asyncio.wait_for(task, MAX_PLANNING_SECONDS)
+    except NodeCancelledError:
+        raise asyncio.CancelledError() from None
     finally:
         if not task.done():
             task.cancel()
@@ -236,6 +239,8 @@ async def stream_plan_chapter(data: dict[str, Any], call_model: ModelCall, *,
                 finally:
                     await _cancel_and_wait(graph_task)
                 queue.put_nowait({"type": "done", "result": result})
+            except NodeCancelledError:
+                raise asyncio.CancelledError() from None
             except Exception as exc:
                 queue.put_nowait(exc)  # Transport maps errors safely; never serialize the raw exception.
             finally:

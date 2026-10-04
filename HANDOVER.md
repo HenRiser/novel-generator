@@ -11,7 +11,7 @@
 - 最新章节策划、三阶段节点进度、前端执行轨迹与公网中间件修复已完成本地验收。本次文档更新处于发布准备阶段，仍有已跟踪修改和未跟踪新文件；**不能从本文推定已完成 commit、push 或部署**，最终结果以 Git、`RELEASE` 和发布报告核验为准。
 - **不要清理工作区、回退文件或丢弃未跟踪文件。** 新对话须先运行 `git status --short`，保护已有成果。
 - 当前主产品路径是 **React 浏览器本地项目 + IndexedDB + FastAPI 请求内计算**。旧 `.env` / JSON / Markdown 文件项目服务仍保留作兼容，不是公网产品的正式存储路径。
-- 最新本地验证：后端 **345/345**、Node **101/101**、Edge **66/66**（策划30、原工作流18、连接11、节点进度7）及类型检查、生产构建通过。均使用模拟模型，**不能据此声称真实模型质量、真实服务商性能或线上部署已通过**。
+- 最新本地验证：后端 **346/346**、Node **101/101**、Edge **66/66**（策划30、原工作流18、连接11、节点进度7）及类型检查、生产构建通过。均使用模拟模型，**不能据此声称真实模型质量、真实服务商性能或线上部署已通过**。
 - 当前目标是发布已验收成果。**基于已有大纲预测后续章节、可考虑 JEV** 保留为另行待办；JEV 指代未确认，尚未研究或实施。
 - 用户已于2026-10-04明确授权：提交当前 `codex/chapter-planning` 分支现有成果、推送至现有远端并部署。该授权不等于新增真实付费模型试验授权；发布是否成功仍须实际核验，后续不重复询问已授权步骤。
 
@@ -58,6 +58,7 @@ FastAPI /api/compute/*：临时计算，不持久化正式项目、Key或后台�
 - 断连和取消传播到上游，清理后释放 admission。JSON/NDJSON 响应设置 `no-store`、`no-transform` 和 `X-Accel-Buffering: no`；真实反代缓存/缓冲行为仍需部署验收。不得添加依赖用户小说数据的服务器后台任务。
 - v2 计算路径使用请求级配置，不回退服务器共享 Key。应用代码不主动将完整 prompt、原始 provider 错误、Key 或小说项目副本持久化到服务器日志/文件；反代日志、系统转储和其他中间层是否留存，本轮未在线核验。
 - 发布准备修复：`api/main.py` 的公网边界改为纯 ASGI `PublicBoundaryMiddleware`，直接传递真实 `receive/send`，避免函数式HTTP中间件引入内部缓冲后使发送超时与槽位释放脱离真实连接。公网路径隔离、OPTIONS/CORS、非公网旧接口及异常JSON语义保留；已新增完整 `api.main.app` 的慢响应头/慢body与取消清理回归，线上反代仍需发布验收。
+- Linux Python3.12候选验收发现锁定LangGraph会把节点取消包装为`NodeCancelledError`；JSON与流两条路径均精准转回`asyncio.CancelledError`，保持清理、一次调用和不重试语义。新增跨版本包装取消回归；Linux候选仍须在最终提交上实际验收，不能用本地结果代替。
 
 ## 3. 模型连接与 Key
 
@@ -248,14 +249,14 @@ tests/test_chapter_planning_service.py
 
 | 验证 | 结果 | 证据 |
 |---|---|---|
-| Python全量（含完整公网应用发送/清理回归） | 345/345，通过 | reports/release-2026-10-03/backend.log |
+| Python全量（含完整公网应用发送/清理与包装取消回归） | 346/346，通过 | reports/release-2026-10-03/backend-final.log |
 | Node契约、客户端、轨迹及既有测试 | 101/101，通过 | reports/langgraph-stage3-2026-10-03/node.log |
 | 策划与交互真实Edge | 30/30，通过 | 同目录browser-planning.log |
 | 原工作流/连接真实Edge | 18/18 + 11/11，通过 | 同目录browser-workflows.log、browser-connections.log |
 | 新节点进度真实Edge、IndexedDB/Web Locks、分块HTTP | 7/7，通过 | reports/planning-progress-2026-10-03/browser-planning-progress.json |
 | TypeScript + Vite构建 | 通过，既有chunk/import警告保留 | reports/langgraph-stage3-2026-10-03/build.log |
 
-Edge合计66个场景。三阶段初次验收与发布准备复验的范围不同：阶段三backend.log记录340项，发布准备全量记录345项，不应将前一份日志当作当前总数。上述模型均为mock；新的节点浏览器验收使用真实分块本地HTTP，封禁外部URL，**不代表真实模型质量或公网反代已验证**。
+Edge合计66个场景。三阶段初次验收与发布准备复验的范围不同：阶段三backend.log记录340项，公网修复后345项，增加包装取消回归后最新346项，不应将前一份日志当作当前总数。上述模型均为mock；新的节点浏览器验收使用真实分块本地HTTP，封禁外部URL，**不代表真实模型质量或公网反代已验证**。
 
 ### 8.2 前轮验收与历史证据
 
@@ -378,7 +379,7 @@ node scripts/test-provider-connections.mjs
 工作目录是 D:\vibecoding\novel-generator。请先阅读 HANDOVER.md，并核对当前源码和git status。
 当前开发分支 codex/chapter-planning，开发基线dc902ca；最终HEAD、远端及线上SHA须核对Git与RELEASE，勿把基线当成发布版本。请保护已有修改与未跟踪成果。
 现有产品以浏览器IndexedDB为正式存储，服务器请求内计算；已有多服务商、小说导入、连续生成和确认后摘要。LangGraph只负责可选章节策划，作者分别批准任务与场景。
-已完成三阶段节点契约、请求内节点流与本地trace，以及公网纯ASGI边界修复；作者审核与恢复仍由浏览器负责。最近本地验收是345后端、101Node、66Edge及构建通过，模型均模拟；线上发布须另核验。
+已完成三阶段节点契约、请求内节点流与本地trace，以及公网纯ASGI边界与Python3.12包装取消修复；作者审核与恢复仍由浏览器负责。最近本地验收是346后端、101Node、66Edge及构建通过，模型均模拟；线上发布须另核验。
 2026-10-04用户已授权当前分支commit/push/deploy，完成状态以发布报告和实际版本为准，不提前宣称成功。基于大纲预测/JEV仍是另行讨论待办，JEV指代未确认。
 请根据我随后给出的目标继续，不要把旧README/历史部署消息当作当前源码或线上版本；真实付费模型试验需明确的新授权。
 ```

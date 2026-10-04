@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from anyio import CancelScope
 from langchain_core.tracers.context import tracing_v2_callback_var, tracing_v2_enabled
+from langgraph.errors import NodeCancelledError
 from langgraph.graph.state import CompiledStateGraph
 from langsmith import tracing_context
 from langsmith.run_helpers import get_tracing_context
@@ -561,6 +562,40 @@ class ChapterPlanningServiceTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(type(error)):
                     await asyncio.wait_for(collect(caller), 2)
                 self.assertEqual(caller.await_count, 1)
+
+    async def test_wrapped_node_cancel_propagates_after_cleanup_without_retry(self):
+        for transport in ("json", "stream"):
+            with self.subTest(transport=transport):
+                entered, cleaned = asyncio.Event(), asyncio.Event()
+                rows = []
+
+                async def model(*args, **kwargs):
+                    entered.set()
+                    try:
+                        raise NodeCancelledError("initial_proposal")
+                    finally:
+                        await asyncio.sleep(.01)
+                        cleaned.set()
+
+                caller = AsyncMock(side_effect=model)
+
+                async def collect():
+                    try:
+                        if transport == "json":
+                            await service.plan_chapter(planning_input(), caller)
+                        else:
+                            async for row in service.stream_plan_chapter(planning_input(), caller):
+                                rows.append(row)
+                    except asyncio.CancelledError:
+                        self.assertTrue(cleaned.is_set(), "Model cleanup must finish before cancellation reaches the caller.")
+                        raise
+
+                with self.assertRaises(asyncio.CancelledError):
+                    await asyncio.wait_for(collect(), 2)
+                self.assertTrue(entered.is_set())
+                self.assertTrue(cleaned.is_set())
+                caller.assert_awaited_once()
+                self.assertFalse(any(row["type"] == "done" or row.get("node") == "repair_once" for row in rows))
 
     async def test_stream_projects_task_payloads_and_invalid_model_fields(self):
         proposal = {**candidate(), "credentials": {"api_key": "RAW_STATE_SECRET_SENTINEL"}}
