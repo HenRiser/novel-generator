@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Button, Empty, InputNumber, Select, Space, Tabs } from "antd";
 import { ArrowRightOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Link, useSearchParams } from "react-router-dom";
@@ -9,9 +9,11 @@ import { useChapterStatus, useProjectData } from "../hooks/useProjectData";
 import { NoRevealReviewPanel } from "../components/NoRevealReviewPanel";
 import { ChapterTaskSheetPanel } from "../components/ChapterTaskSheetPanel";
 import { ScenePlanPanel } from "../components/ScenePlanPanel";
+import { ChapterPlanningPanel, type PlanningAction, type PlanningEditorState } from "../components/ChapterPlanningPanel";
 import "../styles/writing.css";
 
 const ignoreScenePlanStateChange = () => undefined;
+const EMPTY_EDITOR: PlanningEditorState = { dirty: false, busy: false, loaded: false };
 
 export default function ReviewPage() {
   const { selectedProjectRef, chapters } = useAppStore();
@@ -39,6 +41,34 @@ function ReviewChapter({ projectRef, chapterNumber }: { projectRef: string; chap
   const [reviewError, setReviewError] = useState("");
   const [revision, setRevision] = useState(0);
   const [approvedTask, setApprovedTask] = useState<ChapterTaskSheet | null>(null);
+  const [tab, setTab] = useState("task");
+  const [taskRefresh, setTaskRefresh] = useState(0), [sceneRefresh, setSceneRefresh] = useState(0);
+  const [taskEditor, setTaskEditor] = useState(EMPTY_EDITOR), [sceneEditor, setSceneEditor] = useState(EMPTY_EDITOR);
+  const [planningAction, setPlanningAction] = useState<PlanningAction>('');
+  const taskEditorRef = useRef<HTMLDivElement>(null), sceneEditorRef = useRef<HTMLDivElement>(null);
+  const [editorTarget, setEditorTarget] = useState<{ kind: 'task' | 'scene' } | null>(null);
+  const taskEditorChanged = useCallback((next: PlanningEditorState) => setTaskEditor(current => current.dirty === next.dirty && current.busy === next.busy && current.loaded === next.loaded ? current : next), []);
+  const sceneEditorChanged = useCallback((next: PlanningEditorState) => setSceneEditor(current => current.dirty === next.dirty && current.busy === next.busy && current.loaded === next.loaded ? current : next), []);
+  const openEditor = useCallback((kind: 'task' | 'scene') => {
+    setTab(kind); setEditorTarget({ kind });
+  }, []);
+  const planningSaved = useCallback((kind: 'task' | 'scene') => {
+    if (kind === 'task') setTaskRefresh(value => value + 1);
+    else setSceneRefresh(value => value + 1);
+    openEditor(kind); setRevision(value => value + 1);
+  }, [openEditor]);
+  useEffect(() => {
+    if (!editorTarget || tab !== editorTarget.kind) return;
+    const editor = editorTarget.kind === 'task' ? taskEditor : sceneEditor;
+    if (!editor.loaded || editor.busy) return;
+    const frame = requestAnimationFrame(() => {
+      const target = editorTarget.kind === 'task' ? taskEditorRef.current : sceneEditorRef.current;
+      target?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+      target?.focus({ preventScroll: true });
+      setEditorTarget(null);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editorTarget, tab, taskEditor, sceneEditor]);
   const status = useChapterStatus(projectRef, chapterNumber, revision);
   const canUseApi = projectRef.startsWith("book:") && apiStatus === "online";
   useEffect(() => {
@@ -53,9 +83,10 @@ function ReviewChapter({ projectRef, chapterNumber }: { projectRef: string; chap
   }, [canUseApi, chapterNumber, projectRef, revision]);
   return <div className="review-content">
     {!canUseApi && <Alert type="info" showIcon message={apiStatus === "online" ? "章节规划适用于工作区项目。" : "连接后端后，可读取并保存章节规划。"} style={{ marginTop: 16 }} />}
-    <Tabs items={[
-      { key: "task", label: "01  章节任务单", children: <><p className="review-note">先定义本章功能与允许的信息推进。保存草稿后，批准的版本才会参与章节生成。</p><ChapterTaskSheetPanel projectRef={projectRef} chapterNumber={chapterNumber} apiStatus={apiStatus} disabled={!canUseApi} onApprovedTaskChange={setApprovedTask} /></> },
-      { key: "scene", label: "02  场景计划", children: <><p className="review-note">把本章任务拆成具体场景。批准后，可在创作台选择将这份计划带入生成。</p><ScenePlanPanel projectRef={projectRef} chapterNumber={chapterNumber} apiStatus={apiStatus} disabled={!canUseApi} approvedChapterTask={approvedTask} onScenePlanStateChange={ignoreScenePlanStateChange} /></> },
+    <ChapterPlanningPanel projectRef={projectRef} chapterNumber={chapterNumber} disabled={!canUseApi} taskEditor={taskEditor} sceneEditor={sceneEditor} onSaved={planningSaved} onOpenEditor={openEditor} onActionChange={setPlanningAction} />
+    <Tabs activeKey={tab} onChange={setTab} items={[
+      { key: "task", label: "01  章节任务单", forceRender: true, children: <div ref={taskEditorRef} tabIndex={-1} role="region" aria-label="章节任务单审核编辑器" data-testid="planning-task-editor" className="planning-editor"><p className="review-note">先定义本章功能与允许的信息推进。保存草稿后，批准的版本才会参与章节生成。</p><ChapterTaskSheetPanel projectRef={projectRef} chapterNumber={chapterNumber} apiStatus={apiStatus} disabled={!canUseApi || planningAction === 'task'} onApprovedTaskChange={setApprovedTask} refreshToken={taskRefresh} onEditorStateChange={taskEditorChanged} /></div> },
+      { key: "scene", label: "02  场景计划", forceRender: true, children: <div ref={sceneEditorRef} tabIndex={-1} role="region" aria-label="场景计划审核编辑器" data-testid="planning-scene-editor" className="planning-editor"><p className="review-note">把本章任务拆成具体场景。批准后，可在创作台选择将这份计划带入生成。</p><ScenePlanPanel projectRef={projectRef} chapterNumber={chapterNumber} apiStatus={apiStatus} disabled={!canUseApi || planningAction === 'scene'} approvedChapterTask={approvedTask} onScenePlanStateChange={ignoreScenePlanStateChange} refreshToken={sceneRefresh} onEditorStateChange={sceneEditorChanged} /></div> },
       { key: "review", label: "03  信息边界审查", children: <><p className="review-note">No-Reveal 检查在章节保存后给出规则提示，用于辅助人工复核；不会阻止手稿保存。</p><NoRevealReviewPanel review={review} loading={reviewLoading} error={reviewError} onRefresh={() => setRevision((value) => value + 1)} disabled={!canUseApi} /></> },
       { key: "status", label: "流程记录", children: <div className="studio-status"><div className="studio-status-heading"><h2>第 {chapterNumber} 章</h2><Button icon={<ReloadOutlined />} loading={status.loading} onClick={() => void status.refresh()} disabled={!canUseApi}>刷新记录</Button></div>{status.error && <Alert type="error" showIcon message={status.error} />}{chapterStatus ? <><div className="studio-status-grid"><div><strong>{chapterStatus.chapter_status.chapter.exists ? "已保存" : "未生成"}</strong><span>章节状态</span></div><div><strong>{chapterStatus.chapter_status.review.pending_count}</strong><span>等待复核</span></div><div><strong>{chapterStatus.chapter_status.review.accepted_count}</strong><span>已接受变更</span></div><div><strong>{chapterStatus.chapter_status.review.rejected_count}</strong><span>已拒绝变更</span></div></div>{chapterStatus.chapter_status.warnings.map((warning) => <Alert key={warning.code} type="warning" showIcon message={warning.message} />)}<Link to="/library">前往知识审核 <ArrowRightOutlined /></Link></> : !status.loading && !status.error && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无流程记录。" />}</div> },
     ]} />

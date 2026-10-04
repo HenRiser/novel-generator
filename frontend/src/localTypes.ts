@@ -1,7 +1,11 @@
 import type { ConnectionSnapshot, ConnectionGuard } from './providerTypes';
+import type { PlanningTraceEntry } from './planningTrace';
 import type { BatchGenerationRequest, BatchGenerationStatus, ChapterTaskResponse, ChapterWorkflow, KnowledgeDraft, NarrativeGraphDocument, NarrativeGraphViewsDocument, NoRevealReview, ScenePlanResponse } from './types';
 
 export type LocalRun = {
+  planning_trace?: PlanningTraceEntry[];
+  planning_trace_invalid?: boolean;
+  planning_application?: { source_fingerprint: string; task_id: string; task_revision: number; scene_plan_id?: string; scene_plan_revision?: number };
   connection?: ConnectionSnapshot; connection_guard?: ConnectionGuard;
   run_id: string; step_id: string; attempt_id: string; operation: string;
   input_revision: number; status: 'running' | 'completed' | 'interrupted' | 'failed' | 'discarded';

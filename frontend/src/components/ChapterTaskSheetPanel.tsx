@@ -159,6 +159,8 @@ export function ChapterTaskSheetPanel({
   disabled,
   onApprovedTaskChange,
   onTaskStateChange,
+  refreshToken = 0,
+  onEditorStateChange,
 }: {
   projectRef: string;
   chapterNumber: number;
@@ -166,6 +168,8 @@ export function ChapterTaskSheetPanel({
   disabled: boolean;
   onApprovedTaskChange: (task: ChapterTaskSheet | null) => void;
   onTaskStateChange?: (approved: ChapterTaskSheet | null, latestDraft: ChapterTaskSheet | null) => void;
+  refreshToken?: number;
+  onEditorStateChange?: (state: { dirty: boolean; busy: boolean; loaded: boolean }) => void;
 }) {
   const [data, setData] = useState<ChapterTaskResponse | null>(null);
   const [form, setForm] = useState<ChapterTaskDraftRequest>({ ...EMPTY_FORM });
@@ -176,13 +180,19 @@ export function ChapterTaskSheetPanel({
   const [message, setMessage] = useState("");
   const lifecycleRef = useRef(0);
   const loadedScopeRef = useRef<string | null>(null);
+  const loadedRefreshRef = useRef<number | null>(null);
   const savedFormRef = useRef(JSON.stringify(EMPTY_FORM));
-  const callbacksRef = useRef({ onApprovedTaskChange, onTaskStateChange });
-  callbacksRef.current = { onApprovedTaskChange, onTaskStateChange };
+  const callbacksRef = useRef({ onApprovedTaskChange, onTaskStateChange, onEditorStateChange });
+  callbacksRef.current = { onApprovedTaskChange, onTaskStateChange, onEditorStateChange };
   const scope = `${projectRef}:${chapterNumber}`;
   const activeScopeRef = useRef(scope);
   activeScopeRef.current = scope;
   const hasUnsavedChanges = JSON.stringify(form) !== savedFormRef.current;
+  const editorLoaded = loadedScopeRef.current === scope && loadedRefreshRef.current === refreshToken && data !== null;
+
+  useEffect(() => {
+    callbacksRef.current.onEditorStateChange?.({ dirty: loadedScopeRef.current === scope && hasUnsavedChanges, busy: loading || saving || approving, loaded: editorLoaded });
+  }, [scope, hasUnsavedChanges, loading, saving, approving, editorLoaded]);
 
   const editableSource = data?.latest_draft ?? data?.approved ?? null;
   const isWorkspaceProject = projectRef.startsWith("book:");
@@ -196,6 +206,7 @@ export function ChapterTaskSheetPanel({
   useEffect(() => {
     lifecycleRef.current += 1;
     loadedScopeRef.current = null;
+    loadedRefreshRef.current = null;
     callbacksRef.current.onApprovedTaskChange(null);
     callbacksRef.current.onTaskStateChange?.(null, null);
     setData(null);
@@ -216,9 +227,10 @@ export function ChapterTaskSheetPanel({
       return;
     }
     // A health-check reconnect must not replace an already loaded local draft.
-    if (loadedScopeRef.current === scope) {
+    if (loadedScopeRef.current === scope && loadedRefreshRef.current === refreshToken) {
       return;
     }
+    if (loadedScopeRef.current === scope && (hasUnsavedChanges || saving || approving)) return;
     setLoading(true);
     setError("");
     void getChapterTask(projectRef, chapterNumber)
@@ -227,6 +239,7 @@ export function ChapterTaskSheetPanel({
           return;
         }
         loadedScopeRef.current = scope;
+        loadedRefreshRef.current = refreshToken;
         setData(result);
         const nextForm = toForm(result.latest_draft ?? result.approved);
         savedFormRef.current = JSON.stringify(nextForm);
@@ -245,7 +258,7 @@ export function ChapterTaskSheetPanel({
         }
       });
     return () => { ignore = true; };
-  }, [canUseApi, chapterNumber, projectRef, scope]);
+  }, [canUseApi, chapterNumber, projectRef, scope, refreshToken, hasUnsavedChanges, saving, approving]);
 
   function updateList(field: ListField, value: string) {
     setForm((current) => ({ ...current, [field]: splitLines(value) }));

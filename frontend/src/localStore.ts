@@ -1,5 +1,6 @@
 import type { ConnectionGuard, ConnectionProfile } from './providerTypes';
 import type { LocalProject } from './localTypes';
+import { readPlanningTrace } from './planningTrace';
 
 const DATABASE = 'braipen.local.v1';
 let connection: Promise<IDBDatabase> | undefined;
@@ -102,6 +103,13 @@ export function validateProject(value: unknown): asserts value is LocalProject {
   }
   for (const run of value.runs as unknown[]) {
     if (!object(run) || typeof run.run_id !== 'string' || typeof run.status !== 'string' || !object(run.input)) return invalid();
+    if ('planning_trace_invalid' in run && typeof run.planning_trace_invalid !== 'boolean') run.planning_trace_invalid = true;
+    if ('planning_trace' in run) {
+      const trace = readPlanningTrace(run.planning_trace);
+      if (trace.invalid || run.operation !== 'plan_chapter') {
+        delete run.planning_trace; run.planning_trace_invalid = true;
+      } else run.planning_trace = trace.entries;
+    }
   }
 }
 

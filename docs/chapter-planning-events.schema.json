@@ -1,0 +1,920 @@
+{
+  "$comment": "Frame shape only. PlanningEventContract validates sequence, target identity, visits, elapsed monotonicity and terminal result/path consistency.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "chapter_number": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "destination_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "event_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "execution_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "input_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "protocol_version": {
+          "const": 2,
+          "type": "integer"
+        },
+        "request_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "seq": {
+          "maximum": 34,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "step_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "type": {
+          "const": "started",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "chapter_number",
+        "destination_fingerprint",
+        "event_version",
+        "execution_fingerprint",
+        "input_revision",
+        "protocol_version",
+        "request_fingerprint",
+        "run_id",
+        "seq",
+        "step_id",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "node": {
+                "enum": [
+                  "context_pack",
+                  "initial_proposal",
+                  "repair_once"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "visit": {
+                "const": 1
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "attempt_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "chapter_number": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "destination_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "number"
+        },
+        "event_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "execution_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "input_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "node": {
+          "enum": [
+            "context_pack",
+            "initial_proposal",
+            "validate",
+            "repair_once"
+          ],
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 2,
+          "type": "integer"
+        },
+        "request_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "seq": {
+          "maximum": 34,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "started",
+            "finished",
+            "failed"
+          ],
+          "type": "string"
+        },
+        "step_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "type": {
+          "const": "progress",
+          "type": "string"
+        },
+        "visit": {
+          "enum": [
+            1,
+            2
+          ],
+          "type": "integer"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "chapter_number",
+        "destination_fingerprint",
+        "elapsed_ms",
+        "event_version",
+        "execution_fingerprint",
+        "input_revision",
+        "node",
+        "protocol_version",
+        "request_fingerprint",
+        "run_id",
+        "seq",
+        "status",
+        "step_id",
+        "type",
+        "visit"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "chapter_number": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "destination_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "event_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "execution_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "input_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "metrics": {
+          "additionalProperties": false,
+          "properties": {
+            "body_complete_ms": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "call_count": {
+              "maximum": 2,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "completion_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "elapsed_ms": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "number"
+            },
+            "first_content_ms": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "operation": {
+              "const": "plan_chapter",
+              "type": "string"
+            },
+            "prompt_cache_hit_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_cache_miss_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prompt_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "protocol_version": {
+              "const": 2,
+              "type": "integer"
+            },
+            "reasoning_tokens": {
+              "anyOf": [
+                {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "repair_used": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "operation",
+            "protocol_version",
+            "elapsed_ms"
+          ],
+          "type": "object"
+        },
+        "protocol_version": {
+          "const": 2,
+          "type": "integer"
+        },
+        "request_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "result": {
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "draft_ready"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "issues": {
+                    "maxItems": 0
+                  },
+                  "scene_proposal": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "scenes": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "allowed_information": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "emotional_shift": {
+                              "type": "string"
+                            },
+                            "ending_state": {
+                              "type": "string"
+                            },
+                            "forbidden_information": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "location": {
+                              "type": "string"
+                            },
+                            "participants": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "scene_function": {
+                              "type": "string"
+                            },
+                            "scene_no": {
+                              "maximum": 4,
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "title": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "scene_no",
+                            "title",
+                            "location",
+                            "participants",
+                            "scene_function",
+                            "allowed_information",
+                            "forbidden_information",
+                            "emotional_shift",
+                            "ending_state"
+                          ],
+                          "type": "object"
+                        },
+                        "maxItems": 4,
+                        "minItems": 2,
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "scenes"
+                    ],
+                    "type": "object"
+                  },
+                  "task_payload": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "allowed_advances": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "allowed_scene_types": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "canon_budget": {
+                        "type": "string"
+                      },
+                      "decision_goal": {
+                        "type": "string"
+                      },
+                      "ending_state": {
+                        "type": "string"
+                      },
+                      "forbidden_advances": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "forbidden_scene_drivers": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "intensity": {
+                        "type": "string"
+                      },
+                      "must_carry": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "notes": {
+                        "type": "string"
+                      },
+                      "primary_function": {
+                        "type": "string"
+                      },
+                      "relationship_goal": {
+                        "type": "string"
+                      },
+                      "required_characters": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "secondary_functions": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      }
+                    },
+                    "required": [
+                      "primary_function",
+                      "secondary_functions",
+                      "intensity",
+                      "canon_budget",
+                      "must_carry",
+                      "allowed_advances",
+                      "forbidden_advances",
+                      "required_characters",
+                      "relationship_goal",
+                      "decision_goal",
+                      "allowed_scene_types",
+                      "forbidden_scene_drivers",
+                      "ending_state",
+                      "notes"
+                    ],
+                    "type": "object"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "needs_user_decision"
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "issues": {
+                    "minItems": 1
+                  },
+                  "repair_count": {
+                    "const": 1
+                  }
+                }
+              }
+            }
+          ],
+          "properties": {
+            "chapter_number": {
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            },
+            "excluded_records": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "graph_version": {
+              "const": "chapter-planning-v1",
+              "type": "string"
+            },
+            "issues": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "type": "string"
+                  },
+                  "message": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "path",
+                  "message"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "repair_count": {
+              "enum": [
+                0,
+                1
+              ],
+              "type": "integer"
+            },
+            "scene_proposal": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "scenes": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "allowed_information": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "emotional_shift": {
+                            "type": "string"
+                          },
+                          "ending_state": {
+                            "type": "string"
+                          },
+                          "forbidden_information": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "location": {
+                            "type": "string"
+                          },
+                          "participants": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "scene_function": {
+                            "type": "string"
+                          },
+                          "scene_no": {
+                            "maximum": 4,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "title": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "scene_no",
+                          "title",
+                          "location",
+                          "participants",
+                          "scene_function",
+                          "allowed_information",
+                          "forbidden_information",
+                          "emotional_shift",
+                          "ending_state"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 4,
+                      "minItems": 2,
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "scenes"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "status": {
+              "enum": [
+                "draft_ready",
+                "needs_user_decision"
+              ],
+              "type": "string"
+            },
+            "task_payload": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "allowed_advances": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "allowed_scene_types": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "canon_budget": {
+                      "type": "string"
+                    },
+                    "decision_goal": {
+                      "type": "string"
+                    },
+                    "ending_state": {
+                      "type": "string"
+                    },
+                    "forbidden_advances": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "forbidden_scene_drivers": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "intensity": {
+                      "type": "string"
+                    },
+                    "must_carry": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "notes": {
+                      "type": "string"
+                    },
+                    "primary_function": {
+                      "type": "string"
+                    },
+                    "relationship_goal": {
+                      "type": "string"
+                    },
+                    "required_characters": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "secondary_functions": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "primary_function",
+                    "secondary_functions",
+                    "intensity",
+                    "canon_budget",
+                    "must_carry",
+                    "allowed_advances",
+                    "forbidden_advances",
+                    "required_characters",
+                    "relationship_goal",
+                    "decision_goal",
+                    "allowed_scene_types",
+                    "forbidden_scene_drivers",
+                    "ending_state",
+                    "notes"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "chapter_number",
+            "excluded_records",
+            "graph_version",
+            "issues",
+            "nodes",
+            "repair_count",
+            "scene_proposal",
+            "status",
+            "task_payload",
+            "warnings"
+          ],
+          "type": "object"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "seq": {
+          "maximum": 34,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "step_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "type": {
+          "const": "done",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "chapter_number",
+        "destination_fingerprint",
+        "event_version",
+        "execution_fingerprint",
+        "input_revision",
+        "metrics",
+        "protocol_version",
+        "request_fingerprint",
+        "result",
+        "run_id",
+        "seq",
+        "step_id",
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "attempt_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "chapter_number": {
+          "maximum": 9007199254740991,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "code": {
+          "pattern": "^[A-Za-z0-9._:-]{1,80}(?![\\s\\S])",
+          "type": "string"
+        },
+        "destination_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "event_version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "execution_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "input_revision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message": {
+          "maxLength": 500,
+          "type": "string"
+        },
+        "protocol_version": {
+          "const": 2,
+          "type": "integer"
+        },
+        "request_fingerprint": {
+          "pattern": "^[0-9a-f]{64}(?![\\s\\S])",
+          "type": "string"
+        },
+        "run_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "seq": {
+          "maximum": 34,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "status": {
+          "maximum": 599,
+          "minimum": 400,
+          "type": "integer"
+        },
+        "step_id": {
+          "pattern": "^[A-Za-z0-9._:-]{1,128}(?![\\s\\S])",
+          "type": "string"
+        },
+        "type": {
+          "const": "error",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "chapter_number",
+        "code",
+        "destination_fingerprint",
+        "event_version",
+        "execution_fingerprint",
+        "input_revision",
+        "message",
+        "protocol_version",
+        "request_fingerprint",
+        "run_id",
+        "seq",
+        "status",
+        "step_id",
+        "type"
+      ],
+      "type": "object"
+    }
+  ],
+  "title": "Chapter planning NDJSON frame v1"
+}

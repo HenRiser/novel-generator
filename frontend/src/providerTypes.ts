@@ -13,5 +13,5 @@ export type ConnectionProfile = { id: string; name: string; enabled: boolean; de
   models?: Array<{ id: string; name: string }>; test?: { revision: number; key_version: string; at: string; result: Record<string, unknown> };
 };
 export type ProviderPreset = { id: string; name: string; protocol: ConnectionSnapshot['protocol']; url: string; policy: CapabilityPolicy; regions?: Array<{ id: string; name: string; url: string }> };
-export type ProviderCapabilities = { protocol_version: number; providers: ProviderPreset[]; supported_protocols: string[] };
+export type ProviderCapabilities = { protocol_version: number; providers: ProviderPreset[]; supported_protocols: string[]; stream_operations?: string[]; planning_stream_version?: number };
 export const LEGACY_CONNECTION = 'legacy-deepseek';

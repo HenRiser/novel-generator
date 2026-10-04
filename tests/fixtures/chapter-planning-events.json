@@ -1,0 +1,1024 @@
+{
+  "identity": {
+    "run_id": "planning-run",
+    "step_id": "planning-step",
+    "attempt_id": "planning-attempt",
+    "input_revision": 3,
+    "protocol_version": 2,
+    "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "chapter_number": 2,
+  "result": {
+    "graph_version": "chapter-planning-v1",
+    "chapter_number": 2,
+    "status": "draft_ready",
+    "task_payload": {
+      "primary_function": "emotional_aftermath",
+      "secondary_functions": [
+        "relationship_progress"
+      ],
+      "intensity": "low",
+      "canon_budget": "none",
+      "must_carry": [
+        "承接争执"
+      ],
+      "allowed_advances": [
+        "恢复有限信任"
+      ],
+      "forbidden_advances": [
+        "揭示组织秘密"
+      ],
+      "required_characters": [
+        "林默",
+        "周岚"
+      ],
+      "relationship_goal": "继续同行",
+      "decision_goal": "回家休整",
+      "allowed_scene_types": [
+        "低强度对话"
+      ],
+      "forbidden_scene_drivers": [
+        "查阅旧档案"
+      ],
+      "ending_state": "脆弱共识",
+      "notes": "保持低强度"
+    },
+    "scene_proposal": {
+      "scenes": [
+        {
+          "scene_no": 1,
+          "title": "场景 1",
+          "location": "厨房",
+          "participants": [
+            "林默",
+            "周岚"
+          ],
+          "scene_function": "relationship_dialogue",
+          "allowed_information": [
+            "恢复有限信任"
+          ],
+          "forbidden_information": [
+            "不释放新正典信息"
+          ],
+          "emotional_shift": "暂时信任",
+          "ending_state": "共同休整"
+        },
+        {
+          "scene_no": 2,
+          "title": "场景 2",
+          "location": "厨房",
+          "participants": [
+            "林默",
+            "周岚"
+          ],
+          "scene_function": "relationship_dialogue",
+          "allowed_information": [
+            "恢复有限信任"
+          ],
+          "forbidden_information": [
+            "不释放新正典信息"
+          ],
+          "emotional_shift": "暂时信任",
+          "ending_state": "共同休整"
+        }
+      ]
+    },
+    "issues": [],
+    "repair_count": 0,
+    "nodes": [
+      "context_pack",
+      "initial_proposal",
+      "validate"
+    ],
+    "excluded_records": 0,
+    "warnings": []
+  },
+  "metrics": {
+    "operation": "plan_chapter",
+    "protocol_version": 2,
+    "elapsed_ms": 100,
+    "call_count": 1,
+    "repair_used": false
+  },
+  "cases": [
+    {
+      "name": "normal completion",
+      "kind": "normal",
+      "accept": true,
+      "complete": true
+    },
+    {
+      "name": "one repair completion",
+      "kind": "repair",
+      "accept": true,
+      "complete": true
+    },
+    {
+      "name": "error before started",
+      "kind": "error_before",
+      "accept": true,
+      "complete": false
+    },
+    {
+      "name": "error during active node",
+      "kind": "error_during",
+      "accept": true,
+      "complete": false
+    },
+    {
+      "name": "failed node then error",
+      "kind": "failed_node",
+      "accept": true,
+      "complete": false
+    },
+    {
+      "name": "normal EOF without done",
+      "kind": "normal",
+      "drop_last": true,
+      "accept": true,
+      "complete": false
+    },
+    {
+      "name": "events after done",
+      "kind": "normal",
+      "append_index": 0,
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "events after error",
+      "kind": "error_before",
+      "append_index": 0,
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched run_id wrong-run",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "run_id"
+          ],
+          "value": "wrong-run"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched step_id wrong-step",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "step_id"
+          ],
+          "value": "wrong-step"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched attempt_id wrong-attempt",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "attempt_id"
+          ],
+          "value": "wrong-attempt"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched input_revision 4",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "input_revision"
+          ],
+          "value": 4
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched protocol_version 1",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "protocol_version"
+          ],
+          "value": 1
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched request_fingerprint dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "request_fingerprint"
+          ],
+          "value": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched destination_fingerprint eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "destination_fingerprint"
+          ],
+          "value": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched execution_fingerprint ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "execution_fingerprint"
+          ],
+          "value": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched chapter_number 3",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "chapter_number"
+          ],
+          "value": 3
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched chapter_number True",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "chapter_number"
+          ],
+          "value": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched event_version 2",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "event_version"
+          ],
+          "value": 2
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "mismatched event_version True",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "event_version"
+          ],
+          "value": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "missing event version",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "event_version"
+          ],
+          "remove": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "extra credential field",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "credentials"
+          ],
+          "value": {
+            "api_key": "OFFLINE_SENTINEL"
+          }
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "raw state is not a progress field",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "state"
+          ],
+          "value": {
+            "private_archive": "OFFLINE_SENTINEL"
+          }
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "unknown node",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "node"
+          ],
+          "value": "other_node"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "unknown phase",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "status"
+          ],
+          "value": "approved"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "boolean seq",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "seq"
+          ],
+          "value": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "seq gap",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "seq"
+          ],
+          "value": 3
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "duplicate seq",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 2,
+          "path": [
+            "seq"
+          ],
+          "value": 2
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "noninteger seq",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "seq"
+          ],
+          "value": 2.5
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "unsafe integer seq",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "seq"
+          ],
+          "value": 9007199254740992
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "negative observed time",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "elapsed_ms"
+          ],
+          "value": -1
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "boolean observed time",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "elapsed_ms"
+          ],
+          "value": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "observed time moved backwards",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 2,
+          "path": [
+            "elapsed_ms"
+          ],
+          "value": 0
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "wrong start visit",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "visit"
+          ],
+          "value": 2
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "finish visit mismatch",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 2,
+          "path": [
+            "visit"
+          ],
+          "value": 2
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "finish without matching start",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "status"
+          ],
+          "value": "finished"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "skip context node",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 1,
+          "path": [
+            "node"
+          ],
+          "value": "initial_proposal"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "repair before first check",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 3,
+          "path": [
+            "node"
+          ],
+          "value": "repair_once"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "second check visit must be two",
+      "kind": "repair",
+      "mutations": [
+        {
+          "index": 9,
+          "path": [
+            "visit"
+          ],
+          "value": 1
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "done result chapter mismatch",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "result",
+            "chapter_number"
+          ],
+          "value": 3
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "done path mismatch",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "result",
+            "nodes"
+          ],
+          "value": [
+            "context_pack",
+            "initial_proposal"
+          ]
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "done repair count mismatch",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "result",
+            "repair_count"
+          ],
+          "value": 1
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "extra result state",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "result",
+            "state"
+          ],
+          "value": {
+            "input": "OFFLINE_SENTINEL"
+          }
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "extra metric raw provider",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "metrics",
+            "provider_body"
+          ],
+          "value": "OFFLINE_SENTINEL"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "metric call count mismatch",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "metrics",
+            "call_count"
+          ],
+          "value": 2
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "boolean token count",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "metrics",
+            "prompt_tokens"
+          ],
+          "value": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "missing elapsed metric",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "metrics",
+            "elapsed_ms"
+          ],
+          "remove": true
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "final elapsed moved backwards",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "metrics",
+            "elapsed_ms"
+          ],
+          "value": 0
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "non-HTTP error status",
+      "kind": "error_before",
+      "mutations": [
+        {
+          "index": 0,
+          "path": [
+            "status"
+          ],
+          "value": 200
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "empty error code",
+      "kind": "error_before",
+      "mutations": [
+        {
+          "index": 0,
+          "path": [
+            "code"
+          ],
+          "value": ""
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "error code trailing newline",
+      "kind": "error_before",
+      "mutations": [
+        {
+          "index": 0,
+          "path": [
+            "code"
+          ],
+          "value": "compute_failed\n"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "oversized error message",
+      "kind": "error_before",
+      "mutations": [
+        {
+          "index": 0,
+          "path": [
+            "message"
+          ],
+          "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "error cannot carry state",
+      "kind": "error_before",
+      "mutations": [
+        {
+          "index": 0,
+          "path": [
+            "state"
+          ],
+          "value": {
+            "input": "OFFLINE_SENTINEL"
+          }
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "repaired candidate needs author decision",
+      "kind": "repair",
+      "mutations": [
+        {
+          "index": 11,
+          "path": [
+            "result",
+            "status"
+          ],
+          "value": "needs_user_decision"
+        },
+        {
+          "index": 11,
+          "path": [
+            "result",
+            "issues"
+          ],
+          "value": [
+            {
+              "code": "task_invalid",
+              "path": "task_payload",
+              "message": "需要作者处理。"
+            }
+          ]
+        }
+      ],
+      "accept": true,
+      "complete": true
+    },
+    {
+      "name": "needs decision cannot have no issues",
+      "kind": "repair",
+      "mutations": [
+        {
+          "index": 11,
+          "path": [
+            "result",
+            "status"
+          ],
+          "value": "needs_user_decision"
+        }
+      ],
+      "accept": false,
+      "complete": false
+    },
+    {
+      "name": "single attempt cannot skip required repair",
+      "kind": "normal",
+      "mutations": [
+        {
+          "index": 7,
+          "path": [
+            "result",
+            "status"
+          ],
+          "value": "needs_user_decision"
+        },
+        {
+          "index": 7,
+          "path": [
+            "result",
+            "issues"
+          ],
+          "value": [
+            {
+              "code": "task_invalid",
+              "path": "task_payload",
+              "message": "需要作者处理。"
+            }
+          ]
+        }
+      ],
+      "accept": false,
+      "complete": false
+    }
+  ],
+  "capabilities": [
+    {
+      "value": null,
+      "expected": "json"
+    },
+    {
+      "value": {},
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "stream_operations": [
+          "generate_chapter"
+        ]
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "stream_operations": [
+          "plan_chapter"
+        ]
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "planning_stream_version": 1
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "planning_stream_version": 2,
+        "stream_operations": [
+          "plan_chapter"
+        ]
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 1,
+        "planning_stream_version": 1,
+        "stream_operations": [
+          "plan_chapter"
+        ]
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "planning_stream_version": true,
+        "stream_operations": [
+          "plan_chapter"
+        ]
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "planning_stream_version": 1,
+        "stream_operations": "plan_chapter"
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "planning_stream_version": 1,
+        "stream_operations": [
+          "plan_chapter",
+          9
+        ]
+      },
+      "expected": "json"
+    },
+    {
+      "value": {
+        "protocol_version": 2,
+        "planning_stream_version": 1,
+        "stream_operations": [
+          "generate_chapter",
+          "plan_chapter"
+        ]
+      },
+      "expected": "stream"
+    }
+  ]
+}

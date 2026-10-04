@@ -374,28 +374,28 @@ def _validate_plan_against_task(plan: dict[str, Any], task_result: Any | None) -
     if message:
         return None, message
     active_task = source_task or (dict(task_result.approved) if task_result and task_result.approved else None)
-    if active_task is None:
-        return None, ""
+    return active_task, validate_scene_constraints(plan, active_task or {})
 
-    canon_budget = clean_text(active_task.get("canon_budget"))
+
+def validate_scene_constraints(plan: dict[str, Any], task: dict[str, Any]) -> str:
+    """Validate scene content against a task without resolving approval metadata."""
+    canon_budget = clean_text(task.get("canon_budget"))
     if canon_budget == "none":
         for scene in plan.get("scenes", []):
             scene_function = clean_text(scene.get("scene_function"))
             if scene_function in SCENE_FUNCTIONS_FORBIDDEN_WITH_NONE:
                 return (
-                    active_task,
                     f"scene_function '{scene_function}' is incompatible with canon_budget 'none'. "
-                    "Change the Scene Plan function or raise the Chapter Task canon budget.",
+                    "Change the Scene Plan function or raise the Chapter Task canon budget."
                 )
             if not _has_no_new_canon_marker(list(scene.get("forbidden_information") or [])):
                 return (
-                    active_task,
                     "canon_budget 'none' requires every scene forbidden_information to include "
-                    "'不释放新正典信息' or an equivalent no-new-canon marker.",
+                    "'不释放新正典信息' or an equivalent no-new-canon marker."
                 )
 
-    task_forbidden = list(active_task.get("forbidden_advances") or [])
-    task_allowed = list(active_task.get("allowed_advances") or [])
+    task_forbidden = list(task.get("forbidden_advances") or [])
+    task_allowed = list(task.get("allowed_advances") or [])
     scene_allowed: list[str] = []
     scene_forbidden: list[str] = []
     for scene in plan.get("scenes", []):
@@ -404,18 +404,20 @@ def _validate_plan_against_task(plan: dict[str, Any], task_result: Any | None) -
     conflicts = _advance_conflicts(scene_allowed, task_forbidden)
     if conflicts:
         return (
-            active_task,
             "Scene Plan allowed_information conflicts with Chapter Task forbidden_advances: "
-            f"{', '.join(conflicts)}.",
+            f"{', '.join(conflicts)}."
         )
     conflicts = _advance_conflicts(scene_forbidden, task_allowed)
     if conflicts:
         return (
-            active_task,
             "Scene Plan forbidden_information conflicts with Chapter Task allowed_advances: "
-            f"{', '.join(conflicts)}.",
+            f"{', '.join(conflicts)}."
         )
-    return active_task, ""
+    for scene in plan.get("scenes", []):
+        conflicts = _advance_conflicts(list(scene.get("allowed_information") or []), list(scene.get("forbidden_information") or []))
+        if conflicts:
+            return f"Scene {scene.get('scene_no')} allowed_information conflicts with its forbidden_information: {', '.join(conflicts)}."
+    return ""
 
 
 def _result_from_document(

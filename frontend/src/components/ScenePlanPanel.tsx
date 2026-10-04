@@ -132,6 +132,8 @@ export function ScenePlanPanel({
   disabled,
   approvedChapterTask,
   onScenePlanStateChange,
+  refreshToken = 0,
+  onEditorStateChange,
 }: {
   projectRef: string;
   chapterNumber: number;
@@ -139,6 +141,8 @@ export function ScenePlanPanel({
   disabled: boolean;
   approvedChapterTask: ChapterTaskSheet | null;
   onScenePlanStateChange: (approved: ScenePlan | null, latestDraft: ScenePlan | null) => void;
+  refreshToken?: number;
+  onEditorStateChange?: (state: { dirty: boolean; busy: boolean; loaded: boolean }) => void;
 }) {
   const [data, setData] = useState<ScenePlanResponse | null>(null);
   const [form, setForm] = useState<ScenePlanDraftRequest>(emptyForm(approvedChapterTask));
@@ -150,13 +154,19 @@ export function ScenePlanPanel({
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const lifecycleRef = useRef(0);
   const loadedScopeRef = useRef<string | null>(null);
+  const loadedRefreshRef = useRef<number | null>(null);
   const savedFormRef = useRef(JSON.stringify(emptyForm(approvedChapterTask)));
-  const callbacksRef = useRef({ onScenePlanStateChange, approvedChapterTask });
-  callbacksRef.current = { onScenePlanStateChange, approvedChapterTask };
+  const callbacksRef = useRef({ onScenePlanStateChange, approvedChapterTask, onEditorStateChange });
+  callbacksRef.current = { onScenePlanStateChange, approvedChapterTask, onEditorStateChange };
   const scope = `${projectRef}:${chapterNumber}`;
   const activeScopeRef = useRef(scope);
   activeScopeRef.current = scope;
   const hasUnsavedChanges = JSON.stringify(form) !== savedFormRef.current;
+  const editorLoaded = loadedScopeRef.current === scope && loadedRefreshRef.current === refreshToken && data !== null;
+
+  useEffect(() => {
+    callbacksRef.current.onEditorStateChange?.({ dirty: loadedScopeRef.current === scope && hasUnsavedChanges, busy: loading || saving || approving, loaded: editorLoaded });
+  }, [scope, hasUnsavedChanges, loading, saving, approving, editorLoaded]);
 
   const isWorkspaceProject = projectRef.startsWith("book:");
   const canUseApi = Boolean(projectRef && isWorkspaceProject && apiStatus === "online");
@@ -188,6 +198,7 @@ export function ScenePlanPanel({
   useEffect(() => {
     lifecycleRef.current += 1;
     loadedScopeRef.current = null;
+    loadedRefreshRef.current = null;
     callbacksRef.current.onScenePlanStateChange(null, null);
     setData(null);
     const nextForm = emptyForm(callbacksRef.current.approvedChapterTask);
@@ -209,9 +220,10 @@ export function ScenePlanPanel({
       return;
     }
     // Connectivity and task updates are not instructions to discard local edits.
-    if (loadedScopeRef.current === scope) {
+    if (loadedScopeRef.current === scope && loadedRefreshRef.current === refreshToken) {
       return;
     }
+    if (loadedScopeRef.current === scope && (hasUnsavedChanges || saving || approving)) return;
     setLoading(true);
     setError("");
     void getScenePlan(projectRef, chapterNumber)
@@ -220,6 +232,7 @@ export function ScenePlanPanel({
           return;
         }
         loadedScopeRef.current = scope;
+        loadedRefreshRef.current = refreshToken;
         setData(result);
         const task = result.current_approved_chapter_task ?? callbacksRef.current.approvedChapterTask;
         const nextForm = toForm(result.latest_draft ?? result.approved, task);
@@ -238,7 +251,7 @@ export function ScenePlanPanel({
         }
       });
     return () => { ignore = true; };
-  }, [canUseApi, chapterNumber, projectRef, scope]);
+  }, [canUseApi, chapterNumber, projectRef, scope, refreshToken, hasUnsavedChanges, saving, approving]);
 
   function updateScene(index: number, patch: Partial<ScenePlanScene>) {
     setForm((current) => ({

@@ -1,9 +1,10 @@
 import { API_BASE_URL, safePublicMessage } from './api';
 import { acquireConnection, resolveConnection, requestFingerprint, type ConnectionLease } from './providerConnections';
+import { PlanningEventContract, type PlanningEvent, type PlanningProgress } from './planningStreamContract';
 
 export type ComputeIdentity = { run_id: string; step_id: string; attempt_id: string; input_revision: number; request_fingerprint?: string };
 export type ComputeResult = { result: Record<string, unknown>; metrics: Record<string, unknown> };
-export const MODEL_OPERATIONS = new Set(['connection_test', 'list_models', 'expand_setting', 'generate_outline', 'generate_characters', 'generate_chapter', 'continue_chapter', 'summarize_chapter', 'story_delta', 'import_chapter', 'import_synthesis']);
+export const MODEL_OPERATIONS = new Set(['connection_test', 'list_models', 'expand_setting', 'generate_outline', 'generate_characters', 'generate_chapter', 'continue_chapter', 'summarize_chapter', 'story_delta', 'import_chapter', 'import_synthesis', 'plan_chapter']);
 const TIMEOUT_MS = 190_000; // Server: 120 s per model call, 180 s per step, plus transport allowance.
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -17,7 +18,7 @@ export function prepareCompute(operation: string, input: Record<string, unknown>
   if (modelCall && !lease) throw new Error('模型请求缺少已绑定连接。');
   if (lease) {
     if(operation!=='list_models'&&!lease.snapshot.model)throw new Error('请选择或输入模型ID。');
-    const structured = ['expand_setting','story_delta','import_chapter','import_synthesis'].includes(operation) || (operation === 'summarize_chapter' && input.review_scope === 'semantic_and_rules');
+    const structured = ['expand_setting','story_delta','import_chapter','import_synthesis','plan_chapter'].includes(operation) || (operation === 'summarize_chapter' && input.review_scope === 'semantic_and_rules');
     if (structured && lease.snapshot.policy.structured === 'unsupported') throw new Error('此模型尚未启用结构化输出，请在连接能力设置中选择模式。');
     lease.signal.throwIfAborted();
   }
@@ -101,4 +102,92 @@ export async function computeStream(operation: string, input: Record<string, unk
     await lease?.check(); return completed;
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
   } finally { if(!bound)lease?.close(); }
+}
+
+function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason); };
+    pending.then(value => { signal.removeEventListener('abort', aborted); resolve(value); },
+      error => { signal.removeEventListener('abort', aborted); reject(error); });
+    signal.addEventListener('abort', aborted, { once: true });
+    if (signal.aborted) aborted();
+  });
+}
+
+/** Planning has its own event contract; only normal EOF can return a candidate. */
+export async function computePlanningStream(input: Record<string, unknown>, identity: ComputeIdentity,
+  handlers: { onProgress?: (progress: Readonly<PlanningProgress>, active: AbortSignal) => void | Promise<void> } = {}, signal?: AbortSignal, bound?: ConnectionLease): Promise<ComputeResult> {
+  const chapterNumber = input.chapter_number;
+  if (typeof chapterNumber !== 'number' || !Number.isSafeInteger(chapterNumber) || chapterNumber < 1) throw new Error('策划目标章节无效。');
+  const requestIdentity = { ...identity };
+  const controller = new AbortController();
+  const lifetime = AbortSignal.any([controller.signal, AbortSignal.timeout(TIMEOUT_MS), ...(signal ? [signal] : [])]);
+  let lease = bound;
+  try {
+    lifetime.throwIfAborted();
+    if (!lease) {
+      const acquisition = leaseFor('plan_chapter', input, lifetime);
+      try { lease = await abortable(acquisition, lifetime); }
+      catch (error) { void acquisition.then(late => late?.close(), () => undefined); throw error; }
+    }
+    if (!lease) throw new Error('策划请求缺少已绑定连接。');
+    const active = AbortSignal.any([lifetime, lease.signal]);
+    async function check() {
+      active.throwIfAborted();
+      await abortable(lease!.check(), active);
+      active.throwIfAborted();
+    }
+    const destination = lease.snapshot.destination_fingerprint, execution = lease.snapshot.execution_fingerprint;
+    await check();
+    const response = await abortable(send('plan_chapter', input, requestIdentity, active, true, lease), active);
+    await check();
+    if (!response.body) throw new Error('策划流式响应格式无效。');
+    const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true });
+    try {
+      if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/x-ndjson') throw new Error('策划流式响应格式无效。');
+      const parser = new PlanningEventContract({ ...requestIdentity, protocol_version: 2, request_fingerprint: requestIdentity.request_fingerprint!,
+        destination_fingerprint: destination, execution_fingerprint: execution }, chapterNumber);
+      let buffer = '', receivedBytes = 0;
+      let metrics: Record<string, unknown> | undefined;
+      async function line(text: string) {
+        await check();
+        if (!text.trim() || text.length > 1024 * 1024) throw new Error('策划事件为空或超过大小限制。');
+        let value: unknown;
+        try { value = JSON.parse(text); } catch { throw new Error('策划流式事件不是完整合法的 JSON，未应用结果。'); }
+        parser.accept(value);
+        await check();
+        const event = value as PlanningEvent;
+        if (event.type === 'error') throw new Error(safePublicMessage(event.message, '策划中断，请手动重试。'));
+        if (event.type === 'progress' && handlers.onProgress) {
+          const progress = Object.freeze({ event_version: event.event_version, seq: event.seq, chapter_number: event.chapter_number,
+            type: event.type, node: event.node, visit: event.visit, status: event.status, elapsed_ms: event.elapsed_ms });
+          await abortable(Promise.resolve().then(() => { active.throwIfAborted(); return handlers.onProgress!(progress, active); }), active);
+          await check();
+        } else if (event.type === 'done') metrics = structuredClone(event.metrics);
+      }
+      while (true) {
+        await check();
+        const { value, done } = await abortable(reader.read(), active);
+        active.throwIfAborted();
+        if (value) receivedBytes += value.byteLength;
+        if (receivedBytes > 2 * 1024 * 1024) throw new Error('策划响应超过 2 MiB，未应用结果。');
+        buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+        let index: number;
+        while ((index = buffer.indexOf('\n')) >= 0) {
+          await line(buffer.slice(0, index)); buffer = buffer.slice(index + 1);
+        }
+        if (buffer.length > 1024 * 1024) throw new Error('策划事件超过大小限制。');
+        if (done) break;
+      }
+      if (buffer) await line(buffer);
+      const result = parser.finish();
+      await check();
+      active.throwIfAborted();
+      return { result: result as unknown as Record<string, unknown>, metrics: metrics! };
+    } finally {
+      // A hostile underlying cancel promise must not hold the reader or connection open.
+      void reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+  } finally { controller.abort(); if (!bound) lease?.close(); }
 }

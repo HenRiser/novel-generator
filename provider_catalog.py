@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 CATALOG_VERSION = 1
 PROTOCOLS = ("chat_completions", "messages")
-STRUCTURED_OPERATIONS = {"expand_setting", "story_delta", "import_chapter", "import_synthesis"}
+STRUCTURED_OPERATIONS = {"expand_setting", "story_delta", "import_chapter", "import_synthesis", "plan_chapter"}
 CATALOG = [
     {"id": "deepseek", "name": "DeepSeek", "protocol": "chat_completions", "url": "https://api.deepseek.com", "structured": "json_object"},
     {"id": "qwen", "name": "阿里云百炼 / Qwen", "protocol": "chat_completions", "url": "https://dashscope.aliyuncs.com/compatible-mode/v1", "structured": "json_object", "regions": [
@@ -146,6 +146,7 @@ def request_fingerprint(connection, operation, data):
         pairs = [(int(request.get('max_tokens', config.get('max_tokens', 4000))), float(request.get('temperature', config.get('temperature', .7))))]
     elif operation == 'summarize_chapter': pairs = [(1800 if data.get('review_scope')=='semantic_and_rules' else 512, .2)]
     elif operation == 'story_delta': pairs = [(8000,.2),(8000,0)]
+    elif operation == 'plan_chapter': pairs = [(4000,.3),(4000,.1)]
     elif operation == 'import_chapter': pairs = [(6000,.2)]
     elif operation == 'import_synthesis': pairs = [(8000,.2)]
     elif operation == 'connection_test': pairs = [(512,1)] * (1 if connection['policy']['structured']=='unsupported' else 2)

@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from api.routers import (
     audit,
@@ -69,19 +70,27 @@ app.include_router(generation.router)
 app.include_router(chapter_workflow.router)
 
 
-@app.middleware("http")
-async def public_boundary(request: Request, call_next):
-    if PUBLIC_MODE and request.url.path.startswith("/api/"):
-        path = request.url.path
-        allowed = path in PUBLIC_PATHS or path.startswith("/api/compute/")
-        if request.method == "OPTIONS":
-            allowed = True
-        if not allowed:
-            return JSONResponse(
-                status_code=404,
-                content={"error": {"code": "public_mode", "message": "该接口在浏览器本地数据模式下不可用。"}},
-            )
-    return await call_next(request)
+class PublicBoundaryMiddleware:
+    """Keep the real ASGI send under the compute response's lifetime deadline."""
+
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and PUBLIC_MODE and scope["path"].startswith("/api/"):
+            path = scope["path"]
+            allowed = path in PUBLIC_PATHS or path.startswith("/api/compute/") or scope["method"] == "OPTIONS"
+            if not allowed:
+                response = JSONResponse(
+                    status_code=404,
+                    content={"error": {"code": "public_mode", "message": "该接口在浏览器本地数据模式下不可用。"}},
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(PublicBoundaryMiddleware)
 
 
 @app.exception_handler(WorkflowError)

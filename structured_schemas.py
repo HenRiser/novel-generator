@@ -14,7 +14,13 @@ STORY_TEXT_FIELDS = ("type", "node_type", "label", "name", "character", "charact
 STORY_ENTITY = obj(**{k:S for k in STORY_TEXT_FIELDS}, importance=I, characters=arr(S), aliases=arr(S), tags=arr(S))
 PAYLOAD = STORY_ENTITY
 CHANGE = obj(id=S, operation=S, target=S, source=S, confidence=N, requires_review=B, evidence=S, rationale=S, payload=PAYLOAD)
+PLANNING_TASK = obj(primary_function=S, secondary_functions=arr(S), intensity=S, canon_budget=S,
+    must_carry=arr(S), allowed_advances=arr(S), forbidden_advances=arr(S), required_characters=arr(S),
+    relationship_goal=S, decision_goal=S, allowed_scene_types=arr(S), forbidden_scene_drivers=arr(S), ending_state=S, notes=S)
+PLANNING_SCENE = obj(scene_no=I, title=S, location=S, participants=arr(S), scene_function=S,
+    allowed_information=arr(S), forbidden_information=arr(S), emotional_shift=S, ending_state=S)
 SCHEMAS = {
+    "plan_chapter": obj(task_payload=PLANNING_TASK, scene_proposal=obj(scenes=arr(PLANNING_SCENE))),
     "connection_test": obj(ok=B),
     "expand_setting": obj(title_candidates=arr(S), recommended_title=S, protagonist_setting=S, supporting_characters_setting=S, world_setting=S, core_conflict=S),
     "summarize_chapter": obj(summary=S, warnings=arr(WARNING)),

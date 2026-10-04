@@ -29,11 +29,13 @@ export async function getConnection(id:string) { await ensureConnections(); cons
 export async function defaultConnectionId() { return await getSetting<string>('default_connection')||LEGACY_CONNECTION; }
 export async function setDefaultConnection(id:string) { const p=await getConnection(id);if(!p.enabled||p.deleted)throw new Error('请先启用连接。');await setSetting('default_connection',id);notifyConnection(id); }
 
-export async function capabilities(refresh=false):Promise<ProviderCapabilities> {
-  try { const response=await fetch(API_BASE_URL+'/api/capabilities',{cache:'no-store',signal:AbortSignal.timeout(10000)});if(!response.ok)throw new Error();const c=await response.json();
+export async function capabilities(refresh=false,signal?:AbortSignal):Promise<ProviderCapabilities> {
+  signal?.throwIfAborted();
+  try { const response=await fetch(API_BASE_URL+'/api/capabilities',{cache:'no-store',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(10000)]):AbortSignal.timeout(10000)});if(!response.ok)throw new Error();const c=await response.json();
     if(c.protocol_version!==2||!Array.isArray(c.providers))throw new Error('后端需升级到连接协议v2，未发送任何Key。');
+    signal?.throwIfAborted();
     await setSetting('provider-catalog',c);return c;
-  }catch(e){ if(!refresh){const cached=await getSetting<ProviderCapabilities>('provider-catalog');if(cached)return cached;}throw e instanceof Error&&e.message?e:new Error('无法读取连接能力，请检查计算服务。'); }
+  }catch(e){ signal?.throwIfAborted();if(!refresh){const cached=await getSetting<ProviderCapabilities>('provider-catalog');if(cached)return cached;}throw e instanceof Error&&e.message?e:new Error('无法读取连接能力，请检查计算服务。'); }
 }
 export async function validateConnection(raw:ConnectionSnapshot, signal?:AbortSignal):Promise<ConnectionSnapshot> {
   await capabilities(true); // Never send a non-DeepSeek Key to a v1-only backend.
@@ -114,6 +116,7 @@ export async function requestFingerprint(connection:ConnectionSnapshot,operation
   if(['generate_chapter','continue_chapter','generate_outline','generate_characters','expand_setting'].includes(operation))pairs=[[Math.trunc(Number(request.max_tokens??config.max_tokens??4000)),Number(request.temperature??config.temperature??.7)]];
   else if(operation==='summarize_chapter')pairs=[[input.review_scope==='semantic_and_rules'?1800:512,.2]];
   else if(operation==='story_delta')pairs=[[8000,.2],[8000,0]];
+  else if(operation==='plan_chapter')pairs=[[4000,.3],[4000,.1]];
   else if(operation==='import_chapter')pairs=[[6000,.2]];
   else if(operation==='import_synthesis')pairs=[[8000,.2]];
   else if(operation==='connection_test')pairs=connection.policy.structured==='unsupported'?[[512,1]]:[[512,1],[512,1]];

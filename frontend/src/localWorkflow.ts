@@ -1,8 +1,11 @@
-import { acquireConnection, resolveConnection, legacySnapshot } from './providerConnections';
+import { acquireConnection, resolveConnection, legacySnapshot, capabilities } from './providerConnections';
 import type { ConnectionSnapshot } from './providerTypes';
-import { compute, computeStream, newIdentity, prepareCompute, MODEL_OPERATIONS } from './computeClient';
+import { compute, computeStream, computePlanningStream, newIdentity, prepareCompute, MODEL_OPERATIONS } from './computeClient';
 import { getProject, listProjects, rememberRescue, updateProject } from './localStore';
 import type { LocalChapter, LocalProject, LocalRun } from './localTypes';
+import { validatePlanningResult } from './planningInput';
+import { selectPlanningTransport } from './planningStreamContract';
+import { planningTraceEntry, readPlanningTrace } from './planningTrace';
 import type { BatchGenerationRequest, ChapterStreamDoneEvent, ChapterStreamHandlers, ChapterWorkflow, GenerationRequest, NoRevealReview, KnowledgeDraft, NarrativeGraphDocument, NarrativeGraphViewsDocument, ChapterTaskResponse, ScenePlanResponse } from './types';
 
 const active = new Map<string, AbortController>();
@@ -70,7 +73,8 @@ export function contextInput(p: LocalProject, number = 1, request: Record<string
 
 export function applyResult(p: LocalProject, operation: string, result: Record<string, unknown>, input: Record<string, unknown>) {
   const n = Number(input.chapter_number || 1);
-  if (operation === 'generate_outline') p.assets.outline = requiredContent(result.content);
+  if (operation === 'plan_chapter') validatePlanningResult(result, n); // A proposal only; no task, scene or prose is approved here.
+  else if (operation === 'generate_outline') p.assets.outline = requiredContent(result.content);
   else if (operation === 'generate_characters') p.assets.characters = requiredContent(result.content);
   else if (operation === 'expand_setting') {
     const data = result.expanded_data as Record<string, unknown>;
@@ -143,6 +147,7 @@ async function runLocked(p: LocalProject, operation: string, input: Record<strin
   const lease = frozen ? await acquireConnection(frozen, options.signal) : undefined;
   try { prepareCompute(operation, input, identity, lease); } catch(error) { lease?.close(); throw error; }
   const run: LocalRun = { ...identity, operation, status: 'running', partial: '', error: '', started_at: now(),
+    ...(operation === 'plan_chapter' ? { planning_trace: [] } : {}),
     chapter_number: Number(input.chapter_number || 1), input: structuredClone(input), connection: frozen, connection_guard: lease?.guard,
     attempt_history: options.retry ? [...(options.retry.attempt_history || []), { attempt_id: options.retry.attempt_id, partial: options.retry.partial, error: options.retry.error, result: options.retry.result }] : [] };
   try { await updateProject(p.project_ref, draft => {
@@ -154,8 +159,28 @@ async function runLocked(p: LocalProject, operation: string, input: Record<strin
   const signal = AbortSignal.any([controller.signal, ...(options.signal ? [options.signal] : []), ...(lease ? [lease.signal] : [])]);
   let partial = '', lastSave = 0;
   let response: { result: Record<string, unknown>; metrics: Record<string, unknown> } | undefined;
+  let resultSaved = false;
   try {
-    response = options.stream ? await computeStream(operation, input, identity, {
+    if (operation === 'plan_chapter') {
+      const transport = selectPlanningTransport(await capabilities(true, signal));
+      signal.throwIfAborted();
+      await lease?.check();
+      response = transport === 'stream' ? await computePlanningStream(input, identity, {
+        onProgress: async (progress, active) => {
+          active.throwIfAborted();
+          const entry = planningTraceEntry(progress);
+          const updated = await updateProject(p.project_ref, draft => {
+            active.throwIfAborted();
+            const current = currentRun(draft, run.attempt_id);
+            const trace = readPlanningTrace([...(current.planning_trace || []), entry]);
+            if (trace.invalid) throw new Error('策划轨迹不符合当前运行顺序，未保存。');
+            current.planning_trace = trace.entries;
+          }, p.revision, false, lease?.guard);
+          run.planning_trace = updated.runs.find(r => r.attempt_id === run.attempt_id)!.planning_trace;
+          active.throwIfAborted(); changed(p.project_ref);
+        },
+      }, signal, lease) : await compute(operation, input, identity, signal, undefined, lease);
+    } else response = options.stream ? await computeStream(operation, input, identity, {
       onStarted: async frozen => {
         run.frozen_context = frozen;
         await updateProject(p.project_ref, draft => {
@@ -174,13 +199,17 @@ async function runLocked(p: LocalProject, operation: string, input: Record<strin
     }, signal, lease) : await compute(operation, input, identity, signal, undefined, lease);
     // A saved result can be manually applied after reload without another model call.
     await updateProject(p.project_ref, draft => {
+      if (operation === 'plan_chapter') signal.throwIfAborted();
       Object.assign(currentRun(draft, run.attempt_id), { result: response!.result, metrics: response!.metrics, result_revision: p.revision });
     }, undefined, false, lease?.guard);
+    resultSaved = true;
     await updateProject(p.project_ref, draft => {
+      if (operation === 'plan_chapter') signal.throwIfAborted();
       commitResult(draft, currentRun(draft, run.attempt_id), response!.result, response!.metrics);
-    }, p.revision);
+    }, p.revision, true, operation === 'plan_chapter' ? lease?.guard : undefined);
     return { ...response.result, run_id: run.run_id };
   } catch (error) {
+    if (operation === 'plan_chapter' && signal.aborted && !resultSaved) response = undefined;
     const message = error instanceof Error ? error.message : '任务未完成。';
     let authorized = true;
     if (lease) { try { await lease.check(); } catch { authorized = false; response = undefined; } }
@@ -210,7 +239,7 @@ async function recoverLocked(ref: string): Promise<LocalProject> {
   const p = await getProject(ref);
   const pending = Object.values(p.chapters).some(c => ['pending', 'running'].includes(c.workflow.summary_status));
   if (!pending && !p.runs.some(r => r.status === 'running') && !['running', 'stopping'].includes(p.batch.status)) return p;
-  return updateProject(ref, draft => {
+  const recovered = await updateProject(ref, draft => {
     for (const run of draft.runs) if (run.status === 'running') {
       run.status = 'interrupted'; run.error = run.result ? '结果已保存，确认后可直接应用，无需重新调用模型。' : '上次请求结果未知。手动重试可能再次计费。';
     }
@@ -219,6 +248,7 @@ async function recoverLocked(ref: string): Promise<LocalProject> {
     }
     if (['running', 'stopping'].includes(draft.batch.status)) Object.assign(draft.batch, { status: 'stopped', stage: 'interrupted', message: '连续生成已暂停，请手动继续。' });
   }, undefined, false);
+  changed(ref); return recovered;
 }
 
 export async function recoverInterrupted(ref: string): Promise<LocalProject> {

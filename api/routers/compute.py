@@ -16,6 +16,8 @@ from provider_catalog import catalog, normalize_connection, request_fingerprint,
 from provider_transport import DestinationRejected
 from model_client import ModelConfig
 from services.compute_service import MODEL_OPERATIONS, OPERATIONS, STREAM_OPERATIONS, ComputeError, compute as run_compute, stream_compute
+from services.chapter_planning_contract import validate_input as validate_planning_input
+from services.chapter_planning_events import PlanningEventContract
 
 router = APIRouter(prefix="/api", tags=["compute"])
 PROTOCOL_VERSION = 2
@@ -148,6 +150,7 @@ async def _connected(request: Request, coroutine):
 @router.get("/capabilities", response_model=None)
 async def capabilities():
     return JSONResponse({"protocol_version": PROTOCOL_VERSION, "operations": sorted(OPERATIONS), "stream_operations": sorted(STREAM_OPERATIONS),
+        "planning_stream_version": 1,
         "provider": {"name": "deepseek", "official_base_url": "https://api.deepseek.com"}, "providers": catalog(), "supported_protocols": PROTOCOLS,
         "limits": {"max_request_bytes": MAX_REQUEST_BYTES, "max_concurrent_calls": MAX_CONCURRENT_CALLS, "max_model_seconds": MAX_MODEL_SECONDS, "max_compute_seconds": MAX_COMPUTE_SECONDS},
         "persistence": {"projects": False, "chapters": False, "credentials": False, "background_tasks": False}}, headers=HEADERS)
@@ -186,6 +189,121 @@ class _ComputeStream(StreamingResponse):
                 _CALLS.release()
 
 
+class _PlanningComputeStream(StreamingResponse):
+    """One lifetime deadline includes ASGI send, even while the graph is idle."""
+
+    def __init__(self, body, deadline: float):
+        super().__init__(body, media_type="application/x-ndjson", headers=HEADERS)
+        self.deadline = deadline
+        self.release = _CALLS.release
+
+    async def __call__(self, scope, receive, send):
+        # Listen even on ASGI 2.4: send may not run while a model is waiting.
+        async def send_before_deadline(message):
+            if monotonic() >= self.deadline:
+                raise asyncio.TimeoutError()
+            await send(message)
+        work = asyncio.create_task(self.stream_response(send_before_deadline))
+        disconnected = asyncio.create_task(self.listen_for_disconnect(receive))
+        try:
+            finished, _ = await asyncio.wait({work, disconnected}, timeout=max(0, self.deadline - monotonic()),
+                                              return_when=asyncio.FIRST_COMPLETED)
+            if work in finished:
+                try:
+                    await work
+                except Exception:
+                    pass  # A failed ASGI send cannot receive an error; never echo its text.
+        finally:
+            async def cleanup():
+                try:
+                    for task in (work, disconnected):
+                        if not task.done():
+                            task.cancel()
+                    await asyncio.gather(work, disconnected, return_exceptions=True)
+                    try:
+                        await self.body_iterator.aclose()
+                    except Exception:
+                        pass  # Never log a raw provider/graph exception during close.
+                finally:
+                    self.release()
+            closing = asyncio.create_task(cleanup())
+            cancelled = False
+            while not closing.done():
+                try:
+                    await asyncio.shield(closing)
+                except asyncio.CancelledError:
+                    cancelled = True
+            await closing
+            if cancelled:
+                raise asyncio.CancelledError()
+
+
+def _planning_error(exc: Exception) -> tuple[int, str, str]:
+    # Graph task errors can include arbitrary provider text; do not echo str(exc).
+    if isinstance(exc, asyncio.TimeoutError):
+        return 504, "compute_timeout", "策划计算超时，请手动重试。"
+    if isinstance(exc, DestinationRejected):
+        return 403, "destination_rejected", "模型目的地未通过安全检查。"
+    if isinstance(exc, DeepSeekClientError):
+        return 502, "provider_error", "模型请求未完成，请检查连接或额度后手动重试。"
+    if isinstance(exc, (ComputeError, ValidationError, ValueError, TypeError, KeyError, RecursionError)):
+        return 400, "invalid_input", "策划输入或事件格式无效，请检查字段与版本。"
+    return 500, "internal_error", "策划未完成，请手动重试。"
+
+
+async def _planning_stream_body(identity, data, credentials, started: float, deadline: float):
+    metrics: dict[str, Any] = {}
+    contract = PlanningEventContract(identity, data["chapter_number"])
+    sequence = 0
+    iterator = stream_compute("plan_chapter", data, credentials, metrics, started_at=started, deadline=deadline)
+
+    def frame(payload):
+        return {**payload, **identity, "event_version": 1, "chapter_number": data["chapter_number"], "seq": sequence + 1}
+
+    def encode(event):
+        return (json.dumps(event, ensure_ascii=True, allow_nan=False) + "\n").encode("utf-8")
+
+    try:
+        event = frame({"type": "started"})
+        encoded = encode(event)
+        contract.accept(event); sequence += 1
+        yield encoded
+        pending_done = None
+        while True:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            try:
+                # This response's work task owns the reader. An implicit wait_for task
+                # could outlive it if cancellation interrupts timeout cleanup.
+                payload = await iterator.__anext__()
+            except StopAsyncIteration:
+                break
+            if pending_done is not None:
+                raise ValueError("Unexpected event after completion.")
+            if payload.get("type") == "done":
+                pending_done = payload
+                continue  # Publish only after the same graph iterator finishes normally.
+            event = frame(payload)
+            encoded = encode(event)
+            contract.accept(event); sequence += 1
+            yield encoded
+        if pending_done is None:
+            raise RuntimeError("Planning stream ended without a result.")
+        event = frame({**pending_done, "metrics": _metrics("plan_chapter", started, metrics)})
+        encoded = encode(event)
+        contract.accept(event); contract.finish(); sequence += 1
+        yield encoded
+    except Exception as exc:
+        status, code, message = _planning_error(exc)
+        event = frame({"type": "error", "code": code, "message": message, "status": status})
+        encoded = encode(event)
+        contract.accept(event)
+        yield encoded
+    finally:
+        await iterator.aclose()
+
+
 async def _stream_body(operation, identity, data, credentials):
     started = monotonic()
     metrics: dict[str, Any] = {}
@@ -217,9 +335,22 @@ async def _stream_body(operation, identity, data, credentials):
 async def compute_stream_endpoint(operation: str, request: Request):
     if operation not in STREAM_OPERATIONS:
         return _error(400, "stream_not_supported", "该操作不支持流式计算。")
+    acquired = False
     try:
         identity, credentials, data = await asyncio.wait_for(_parse(request, operation), MAX_COMPUTE_SECONDS)
-        _acquire(operation)
+        if operation == "plan_chapter":
+            if identity.get("protocol_version") != 2:
+                raise ComputeError("策划流需要v2连接协议。", "protocol_version")
+            _, issues = validate_planning_input(data)
+            if issues:
+                raise ComputeError("策划输入无效，请确认连续前文与章节约束。")
+        acquired = _acquire(operation)
+        if operation == "plan_chapter":
+            started = monotonic()
+            return _PlanningComputeStream(_planning_stream_body(identity, data, credentials, started, started + MAX_COMPUTE_SECONDS),
+                                          started + MAX_COMPUTE_SECONDS)
     except Exception as exc:
+        if acquired:
+            _CALLS.release()
         return _error(*_exception(exc))
     return _ComputeStream(_stream_body(operation, identity, data, credentials), media_type="application/x-ndjson", headers=HEADERS)

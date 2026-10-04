@@ -36,6 +36,8 @@ from services.consistency_check_service import check_generated_chapter_consisten
 from services.context_pack_service import build_context_pack_from_graph
 from services.project_service import validate_project_config_ready
 from services.setting_service import parse_model_json_response, parse_setting_expansion_response
+from services.chapter_planning_contract import validate_candidate
+from services.chapter_planning_service import plan_chapter, stream_plan_chapter
 
 
 async def request_text(provider, messages, **kwargs):
@@ -60,13 +62,13 @@ def provider_config(credentials, operation):
 MODEL_OPERATIONS = frozenset({
     "connection_test", "list_models", "expand_setting", "generate_outline", "generate_characters",
     "generate_chapter", "continue_chapter", "summarize_chapter", "story_delta",
-    "import_chapter", "import_synthesis",
+    "import_chapter", "import_synthesis", "plan_chapter",
 })
 OPERATIONS = MODEL_OPERATIONS | {
     "context_pack", "graph_change", "chapter_task", "scene_plan", "review_change",
-    "function_review", "validate_project", "validate_connection",
+    "function_review", "validate_project", "validate_connection", "validate_planning_candidate",
 }
-STREAM_OPERATIONS = frozenset({"generate_chapter", "continue_chapter"})
+STREAM_OPERATIONS = frozenset({"generate_chapter", "continue_chapter", "plan_chapter"})
 
 
 class ComputeError(ValueError):
@@ -554,10 +556,18 @@ async def compute(operation: str, data: dict[str, Any], credentials: dict[str, A
         return _review_change(data)
     if operation == "function_review":
         return {"ok": True, "review": _function_review(data)}
+    if operation == "validate_planning_candidate":
+        return validate_candidate(data.get("candidate"), data.get("constraints"))
     if operation == "validate_project":
         validation = validate_project_config_ready(_object(data.get("config")))
         return {"ready": validation.ok, "blockers": [] if validation.ok else [{"code": "project_config_incomplete", "message": validation.message}]}
     assert provider is not None
+    if operation == "plan_chapter":
+        async def call_model(messages, **kwargs):
+            return await request_text(provider, messages, usage_metrics=metrics, **kwargs)
+        result = await plan_chapter(data, call_model)
+        metrics["repair_used"] = result["repair_count"] > 0
+        return result
     if operation == "connection_test" and isinstance(provider, ModelConfig):
         result = {"text": "failed", "structured": "not_enabled", "errors": []}
         try:
@@ -610,10 +620,24 @@ async def compute(operation: str, data: dict[str, Any], credentials: dict[str, A
     raise ComputeError("不支持的计算操作。")
 
 
-async def stream_compute(operation: str, data: dict[str, Any], credentials: dict[str, Any], metrics: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+async def stream_compute(operation: str, data: dict[str, Any], credentials: dict[str, Any], metrics: dict[str, Any], *, started_at: float | None = None, deadline: float | None = None) -> AsyncIterator[dict[str, Any]]:
     if operation not in STREAM_OPERATIONS:
         raise ComputeError("该操作不支持流式计算。")
     provider = provider_config(credentials, operation)
+    if operation == "plan_chapter":
+        if not isinstance(provider, ModelConfig):
+            raise ComputeError("策划流需要v2连接协议。", "protocol_version")
+        async def call_model(messages, **kwargs):
+            return await request_text(provider, messages, usage_metrics=metrics, **kwargs)
+        events = stream_plan_chapter(data, call_model, started_at=started_at, deadline=deadline)
+        try:
+            async for event in events:
+                if event["type"] == "done":
+                    metrics["repair_used"] = event["result"]["repair_count"] > 0
+                yield event
+        finally:
+            await events.aclose()
+        return
     messages = _body_messages(data, operation == "continue_chapter")
     content: list[str] = []
     started = perf_counter()

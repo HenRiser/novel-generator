@@ -1,0 +1,694 @@
+{
+  "notice": "Contract examples; the local backend and browser planning progress are integrated. Production deployment is separate.",
+  "identity": {
+    "run_id": "planning-run",
+    "step_id": "planning-step",
+    "attempt_id": "planning-attempt",
+    "input_revision": 3,
+    "protocol_version": 2,
+    "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "chapter_number": 2,
+  "capabilities_when_implemented": {
+    "protocol_version": 2,
+    "stream_operations": [
+      "plan_chapter"
+    ],
+    "planning_stream_version": 1
+  },
+  "normal": [
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 1,
+      "chapter_number": 2,
+      "type": "started"
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 2,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 1
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 3,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 2
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 4,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "initial_proposal",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 3
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 5,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "initial_proposal",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 4
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 6,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "validate",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 5
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 7,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "validate",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 6
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 8,
+      "chapter_number": 2,
+      "type": "done",
+      "result": {
+        "graph_version": "chapter-planning-v1",
+        "chapter_number": 2,
+        "status": "draft_ready",
+        "task_payload": {
+          "primary_function": "emotional_aftermath",
+          "secondary_functions": [
+            "relationship_progress"
+          ],
+          "intensity": "low",
+          "canon_budget": "none",
+          "must_carry": [
+            "承接争执"
+          ],
+          "allowed_advances": [
+            "恢复有限信任"
+          ],
+          "forbidden_advances": [
+            "揭示组织秘密"
+          ],
+          "required_characters": [
+            "林默",
+            "周岚"
+          ],
+          "relationship_goal": "继续同行",
+          "decision_goal": "回家休整",
+          "allowed_scene_types": [
+            "低强度对话"
+          ],
+          "forbidden_scene_drivers": [
+            "查阅旧档案"
+          ],
+          "ending_state": "脆弱共识",
+          "notes": "保持低强度"
+        },
+        "scene_proposal": {
+          "scenes": [
+            {
+              "scene_no": 1,
+              "title": "场景 1",
+              "location": "厨房",
+              "participants": [
+                "林默",
+                "周岚"
+              ],
+              "scene_function": "relationship_dialogue",
+              "allowed_information": [
+                "恢复有限信任"
+              ],
+              "forbidden_information": [
+                "不释放新正典信息"
+              ],
+              "emotional_shift": "暂时信任",
+              "ending_state": "共同休整"
+            },
+            {
+              "scene_no": 2,
+              "title": "场景 2",
+              "location": "厨房",
+              "participants": [
+                "林默",
+                "周岚"
+              ],
+              "scene_function": "relationship_dialogue",
+              "allowed_information": [
+                "恢复有限信任"
+              ],
+              "forbidden_information": [
+                "不释放新正典信息"
+              ],
+              "emotional_shift": "暂时信任",
+              "ending_state": "共同休整"
+            }
+          ]
+        },
+        "issues": [],
+        "repair_count": 0,
+        "nodes": [
+          "context_pack",
+          "initial_proposal",
+          "validate"
+        ],
+        "excluded_records": 0,
+        "warnings": []
+      },
+      "metrics": {
+        "operation": "plan_chapter",
+        "protocol_version": 2,
+        "elapsed_ms": 100,
+        "call_count": 1,
+        "repair_used": false
+      }
+    }
+  ],
+  "repair": [
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 1,
+      "chapter_number": 2,
+      "type": "started"
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 2,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 1
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 3,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 2
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 4,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "initial_proposal",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 3
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 5,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "initial_proposal",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 4
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 6,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "validate",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 5
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 7,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "validate",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 6
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 8,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "repair_once",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 7
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 9,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "repair_once",
+      "visit": 1,
+      "status": "finished",
+      "elapsed_ms": 8
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 10,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "validate",
+      "visit": 2,
+      "status": "started",
+      "elapsed_ms": 9
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 11,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "validate",
+      "visit": 2,
+      "status": "finished",
+      "elapsed_ms": 10
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 12,
+      "chapter_number": 2,
+      "type": "done",
+      "result": {
+        "graph_version": "chapter-planning-v1",
+        "chapter_number": 2,
+        "status": "draft_ready",
+        "task_payload": {
+          "primary_function": "emotional_aftermath",
+          "secondary_functions": [
+            "relationship_progress"
+          ],
+          "intensity": "low",
+          "canon_budget": "none",
+          "must_carry": [
+            "承接争执"
+          ],
+          "allowed_advances": [
+            "恢复有限信任"
+          ],
+          "forbidden_advances": [
+            "揭示组织秘密"
+          ],
+          "required_characters": [
+            "林默",
+            "周岚"
+          ],
+          "relationship_goal": "继续同行",
+          "decision_goal": "回家休整",
+          "allowed_scene_types": [
+            "低强度对话"
+          ],
+          "forbidden_scene_drivers": [
+            "查阅旧档案"
+          ],
+          "ending_state": "脆弱共识",
+          "notes": "保持低强度"
+        },
+        "scene_proposal": {
+          "scenes": [
+            {
+              "scene_no": 1,
+              "title": "场景 1",
+              "location": "厨房",
+              "participants": [
+                "林默",
+                "周岚"
+              ],
+              "scene_function": "relationship_dialogue",
+              "allowed_information": [
+                "恢复有限信任"
+              ],
+              "forbidden_information": [
+                "不释放新正典信息"
+              ],
+              "emotional_shift": "暂时信任",
+              "ending_state": "共同休整"
+            },
+            {
+              "scene_no": 2,
+              "title": "场景 2",
+              "location": "厨房",
+              "participants": [
+                "林默",
+                "周岚"
+              ],
+              "scene_function": "relationship_dialogue",
+              "allowed_information": [
+                "恢复有限信任"
+              ],
+              "forbidden_information": [
+                "不释放新正典信息"
+              ],
+              "emotional_shift": "暂时信任",
+              "ending_state": "共同休整"
+            }
+          ]
+        },
+        "issues": [],
+        "repair_count": 1,
+        "nodes": [
+          "context_pack",
+          "initial_proposal",
+          "validate",
+          "repair_once",
+          "validate"
+        ],
+        "excluded_records": 0,
+        "warnings": []
+      },
+      "metrics": {
+        "operation": "plan_chapter",
+        "protocol_version": 2,
+        "elapsed_ms": 100,
+        "call_count": 2,
+        "repair_used": true
+      }
+    }
+  ],
+  "error_before": [
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 1,
+      "chapter_number": 2,
+      "type": "error",
+      "code": "provider_error",
+      "message": "Planning failed.",
+      "status": 502
+    }
+  ],
+  "error_during": [
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 1,
+      "chapter_number": 2,
+      "type": "started"
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 2,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 0
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 3,
+      "chapter_number": 2,
+      "type": "error",
+      "code": "provider_error",
+      "message": "Planning failed.",
+      "status": 502
+    }
+  ],
+  "failed_node": [
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 1,
+      "chapter_number": 2,
+      "type": "started"
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 2,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "started",
+      "elapsed_ms": 1
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 3,
+      "chapter_number": 2,
+      "type": "progress",
+      "node": "context_pack",
+      "visit": 1,
+      "status": "failed",
+      "elapsed_ms": 2
+    },
+    {
+      "run_id": "planning-run",
+      "step_id": "planning-step",
+      "attempt_id": "planning-attempt",
+      "input_revision": 3,
+      "protocol_version": 2,
+      "request_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "destination_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "execution_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "event_version": 1,
+      "seq": 4,
+      "chapter_number": 2,
+      "type": "error",
+      "code": "provider_error",
+      "message": "Planning failed.",
+      "status": 502
+    }
+  ]
+}

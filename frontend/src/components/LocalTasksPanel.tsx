@@ -7,7 +7,7 @@ import { recoverInterrupted, resumeLocalRun, resolveLocalRun, startLocalBatch, e
 import { downloadRescue, hasRescue } from '../localStore';
 import type { LocalProject } from '../localTypes';
 
-const labels: Record<string, string> = { generate_chapter: '正文生成', continue_chapter: '章内续写', summarize_chapter: '摘要与检查', generate_outline: '大纲生成', generate_characters: '人物卡生成', expand_setting: '设定扩写', story_delta: '章节分析', graph_change: '图谱修改', review_change: '知识审核', chapter_task: '章节任务单', scene_plan: '场景计划' };
+const labels: Record<string, string> = { generate_chapter: '正文生成', continue_chapter: '章内续写', summarize_chapter: '摘要与检查', generate_outline: '大纲生成', generate_characters: '人物卡生成', expand_setting: '设定扩写', story_delta: '章节分析', graph_change: '图谱修改', review_change: '知识审核', chapter_task: '章节任务单', scene_plan: '场景计划', plan_chapter: '章节策划' };
 
 /** Always mounted for the selected work. Recovery never automatically calls a model. */
 export default function LocalTasksPanel() {
