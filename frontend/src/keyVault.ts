@@ -70,7 +70,14 @@ function revoked(id: string) { sessions.delete(id); if (id === 'legacy-deepseek'
 keyChannel?.addEventListener('message', event => { if (event.data?.type === 'revoke' && typeof event.data.id === 'string') revoked(event.data.id); else window.dispatchEvent(new Event('braipen:connections-changed')); });
 export function notifyConnection(id: string, revoke = false) { if (revoke) revoked(id); keyChannel?.postMessage({ type: revoke ? 'revoke' : 'changed', id }); window.dispatchEvent(new Event('braipen:connections-changed')); }
 export function onConnectionRevoked(listener: (id: string) => void) { revocations.add(listener); return () => { revocations.delete(listener); }; }
-export function validateKey(key: string) { if (!key.trim() || key.length > 4096 || /[^\x20-\x7e]/.test(key)) throw new Error('Key不能为空、超过4096字符或包含控制字符。'); }
+export function validateKey(key: string) {
+  if (!key.trim()) throw new Error('未填写 API Key。请在「偏好设置 → 模型连接」填写当前连接的 Key。');
+  if (key.length > 4096) throw new Error(`API Key 长度为 ${key.length} 个字符，超过 4096 个字符的上限。请检查是否误粘贴了说明文字或重复内容。`);
+  if (/[\r\n]/.test(key)) throw new Error('API Key 含换行符。请粘贴单行密钥，删除换行后重试。');
+  if (/\t/.test(key)) throw new Error('API Key 含制表符（Tab）。请删除制表符后重试。');
+  if (/[\x00-\x1f\x7f]/.test(key)) throw new Error('API Key 含不可见控制字符。请重新复制密钥本身后重试。');
+  if (/[^\x20-\x7e]/.test(key)) throw new Error('API Key 含非 ASCII 字符。请检查中文、全角字符或特殊空格，并重新复制密钥本身。');
+}
 export function profileKey(profile: ConnectionProfile, snapshot: ConnectionSnapshot): string {
   const entry = sessions.get(profile.id);
   if (entry && entry.destination === snapshot.destination_fingerprint && entry.epoch === profile.epoch && entry.keyVersion === profile.key_version) return entry.key;

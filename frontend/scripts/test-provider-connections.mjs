@@ -40,6 +40,45 @@ async function test(name,fn){
  try{await fn({page,ctx,load,calls,setHandler:h=>{handler=h;}});results.push({name,status:'passed'});console.log('PASS '+name);}catch(e){results.push({name,status:'failed',error:e.message});console.error('FAIL '+name+'\n'+e.stack);throw e;}finally{await ctx.close();}
 }
 try{
+await test('密钥缺失区分无会话和已加密未解锁，无认证连接保持可用',async({page,load,calls})=>{
+ await load();const result=await page.evaluate(async()=>{
+  const profile=await newProfile();await pc.manageConnection(profile.id,'lock');
+  let missing='',locked='';
+  try{const lease=await pc.acquireConnection(profile.revisions[0]);lease.close();}catch(error){missing=error.message;}
+  await pc.storeConnectionKey(profile.id,'SYNTHETIC_ENCRYPTED_KEY','local-test-password');await pc.manageConnection(profile.id,'lock');
+  try{const lease=await pc.acquireConnection(profile.revisions[0]);lease.close();}catch(error){locked=error.message;}
+  const anonymous=await pc.saveConnection('无需密钥',{...profile.revisions[0],profile_id:crypto.randomUUID(),revision:1,auth_mode:'none'});
+  const lease=await pc.acquireConnection(anonymous.revisions[0]);const noKey=lease.apiKey;lease.close();
+  return{missing,locked,noKey};
+ });
+ assert.equal(result.missing,'模型连接「测试连接」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。');
+ assert.equal(result.locked,'模型连接「测试连接」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。');
+ assert.equal(result.noKey,'');assert.equal(calls.length,0);
+});
+
+await test('实际设定扩写页面显示具体密钥原因，失败后按钮恢复且不调用模型',async({page,load,calls})=>{
+ const output=resolve(process.env.BRAIPEN_REPORT_DIR||report);await mkdir(output,{recursive:true});
+ for(const remembered of [false,true]){
+  await load();const ref=await page.evaluate(async remembered=>{
+   const profile=await newProfile(),ref=await newProject(profile);
+   await store.updateProject(ref,p=>{p.config.raw_story_idea='合成验收：修钟青年收到未来来信。';});
+   if(remembered)await pc.storeConnectionKey(profile.id,'SYNTHETIC_ENCRYPTED_KEY','local-test-password');
+   await pc.manageConnection(profile.id,'lock');localStorage.setItem('braipen:intro-hidden','true');
+   return ref;
+  },remembered);
+  await page.goto(origin+'/writing?tab=assets');await load();
+  await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+  const button=page.getByRole('button',{name:'扩写并保存设定 · 调用模型',exact:true});
+  await button.click();
+  const expected=remembered?'模型连接「测试连接」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。':'模型连接「测试连接」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。';
+  await page.getByText(expected,{exact:true}).waitFor({state:'visible'});
+  await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.textContent?.trim()==='扩写并保存设定 · 调用模型'&&!button.classList.contains('ant-btn-loading')&&!button.disabled));
+  assert.equal(calls.length,0);
+  const saved=await page.evaluate(ref=>store.getProject(ref),ref);assert.equal(saved.runs.length,0);assert.equal(saved.assets.setting_expansion,'');
+  await page.evaluate(()=>window.scrollTo(0,0));await page.screenshot({path:join(output,remembered?'key-locked.png':'key-missing.png'),fullPage:true});
+ }
+});
+
 await test('Custom非sk Key、组织/模型ID、独立密钥与冻结目的地',async({page,load,calls})=>{
  await load();await page.evaluate(async()=>{const a=await newProfile(),b=await newProfile('https://b.example/v1','org/other~fast','DIFFERENT_KEY_B');const ref=await newProject(a);await pc.setDefaultConnection(b.id);await wf.generateLocalChapter(ref,1,{model:'org/model:fast',temperature:.7,max_tokens:4000});const c=(await store.getProject(ref)).chapters[1];await wf.confirmLocalChapter(ref,1,c.content,c.revision);await wait(async()=>(await store.getProject(ref)).chapters[1].workflow.summary_status==='ready');});
  assert.equal(calls.length,2);assert.ok(calls.every(p=>p.connection.base_url==='https://a.example/v1'&&p.credentials.api_key==='NON_SK_KEY_A'&&p.connection.model==='org/model:fast'));

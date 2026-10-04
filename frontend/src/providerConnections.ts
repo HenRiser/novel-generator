@@ -1,6 +1,6 @@
 import { API_BASE_URL, safePublicMessage } from './api';
 import { getSetting, setSetting, listSettings, commitSettings, assertConnectionGuard } from './localStore';
-import { profileKey, loadProfileKey, encryptProfileKey, unlockProfileKey, notifyConnection, onConnectionRevoked, validateKey } from './keyVault';
+import { profileKey, loadProfileKey, encryptProfileKey, unlockProfileKey, hasRememberedKey, notifyConnection, onConnectionRevoked, validateKey } from './keyVault';
 import { LEGACY_CONNECTION, type ConnectionProfile, type ConnectionSnapshot, type ConnectionGuard, type ProviderCapabilities, type CapabilityPolicy } from './providerTypes';
 
 export const hash = async (text:string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('');
@@ -91,7 +91,15 @@ export async function acquireConnection(snapshot:ConnectionSnapshot,external?:Ab
     const original=p.revisions.find(r=>r.revision===snapshot.revision);
     if(!p.enabled||p.deleted||!original||original.destination_fingerprint!==snapshot.destination_fingerprint||original.auth_mode!==snapshot.auth_mode||original.base_url!==snapshot.base_url||original.protocol!==snapshot.protocol||(JSON.stringify(stable(original.policy))!==JSON.stringify(stable(snapshot.policy))&&!(original.policy.source==='official_catalog'&&snapshot.policy.source==='official_catalog'&&original.policy.version===snapshot.policy.version)))throw new Error('原连接修订不可用，不能静默切换目的地。');
     const key=snapshot.auth_mode==='none'?'':temporaryKey??profileKey(p,snapshot);
-    if(snapshot.auth_mode==='key')validateKey(key);
+    if(snapshot.auth_mode==='key') {
+      if (!key.trim()) {
+        const saved = Boolean(await getSetting('vault:' + p.id)) || (p.id === LEGACY_CONNECTION && await hasRememberedKey());
+        throw new Error(saved
+          ? `模型连接「${p.name}」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。`
+          : `模型连接「${p.name}」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。`);
+      }
+      validateKey(key);
+    }
     const guard={profile_id:p.id,epoch:p.epoch,destination_fingerprint:snapshot.destination_fingerprint,key_version:p.key_version};
     const controller=new AbortController();const unsubscribe=onConnectionRevoked(id=>{if(id===p.id)controller.abort(new Error('连接凭据已撤销。'));});
     const check=()=>assertConnectionGuard(guard);
