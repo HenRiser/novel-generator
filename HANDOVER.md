@@ -1,19 +1,19 @@
 # Braipen 项目交接文档
 
-> 更新时间：2026-10-04（Asia/Shanghai）。工作目录：`D:\vibecoding\novel-generator`。
+> 更新时间：2026-10-08（Asia/Shanghai）。工作目录：`D:\vibecoding\novel-generator`。
 > 面向接手的新对话：先核对 Git 状态和源码，再据此继续工作。本文记录现状与历史决策；与源码冲突时以源码为准，后续用户的新指令优先。
 
 ## 0. 接手前必须知道的现状
 
 - 当前分支：`codex/chapter-planning`。
-- 本轮开发基线：`dc902ca4eaccaeddb8a5043d179e82a4daa4d24b`，提交摘要为“feat: 浏览器本地创作流程与多服务商模型连接”。**这不是最终发布 SHA**；当前 HEAD、最终提交、远端分支和线上版本须分别核对 Git 与部署的 `RELEASE` 标记。
+- 本轮封面开发基线：`b5de406e797356172846933329d9ca2852b3bf78`，提交摘要为“feat: 按项生成故事设定并简化模型连接操作”。**这不是本轮最终发布 SHA**；当前 HEAD、最终提交、远端分支和线上版本须分别核对 Git 与部署的 `RELEASE` 标记。
 - 远程：`https://github.com/HenRiser/novel-generator.git`。
-- 最新章节策划、三阶段节点进度、前端执行轨迹与公网中间件修复已完成本地验收。本次文档更新处于发布准备阶段，仍有已跟踪修改和未跟踪新文件；**不能从本文推定已完成 commit、push 或部署**，最终结果以 Git、`RELEASE` 和发布报告核验为准。
+- 最新封面生成、原图修改、版本选择、网站展示和媒体备份已完成本地验收及独立代码审查。**不能从本文推定已完成 commit、push 或部署**，最终结果以 Git、`RELEASE` 和发布报告核验为准。
 - **不要清理工作区、回退文件或丢弃未跟踪文件。** 新对话须先运行 `git status --short`，保护已有成果。
 - 当前主产品路径是 **React 浏览器本地项目 + IndexedDB + FastAPI 请求内计算**。旧 `.env` / JSON / Markdown 文件项目服务仍保留作兼容，不是公网产品的正式存储路径。
-- 最新本地验证：后端 **346/346**、Node **101/101**、Edge **66/66**（策划30、原工作流18、连接11、节点进度7）及类型检查、生产构建通过。均使用模拟模型，**不能据此声称真实模型质量、真实服务商性能或线上部署已通过**。
-- 当前目标是发布已验收成果。**基于已有大纲预测后续章节、可考虑 JEV** 保留为另行待办；JEV 指代未确认，尚未研究或实施。
-- 用户已于2026-10-04明确授权：提交当前 `codex/chapter-planning` 分支现有成果、推送至现有远端并部署。该授权不等于新增真实付费模型试验授权；发布是否成功仍须实际核验，后续不重复询问已授权步骤。
+- 最新本地验证：后端 **386/386**、Node **128/128**、封面 Edge **9/9**、文字连接回归 **16/16**、真实 IndexedDB 媒体事务综合验证，以及类型检查、生产构建通过。模型请求均为模拟，**不能据此声称真实模型质量或线上部署已通过**。原图编辑、备份字节、预览缩放与原尺寸导出均有验证；真实调用与发布证据见 `reports/cover-delivery-2026-10-08/`。
+- 当前目标是发布封面制作流程，并用用户授权的 Seedream 验证生成图片在网站可见。默认输入为白话设定与人物卡，不读取大纲、不做剧透筛选；角色视觉参考卡暂不做。**基于已有大纲预测后续章节、可考虑 JEV** 保留为另行待办。
+- 用户已明确授权本轮分步实施、独立审查、推送部署，并要求使用刚才验证过的火山方舟 Seedream 方式生成图片且在网站可见。不要把该授权扩展为其他供应商或大规模付费测试。发布是否成功仍须实际核验，后续不重复询问已授权步骤。
 
 ## 1. 项目意义与用户目标
 
@@ -42,10 +42,10 @@ FastAPI /api/compute/*：临时计算，不持久化正式项目、Key或后台�
 
 ### 2.1 浏览器存储
 
-- `frontend/src/localStore.ts`：数据库名 `braipen.local.v1`，**IndexedDB 版本为 2**；包含 `projects`、`imports`、`settings` 三个 store。
+- `frontend/src/localStore.ts`：数据库名 `braipen.local.v1`，**IndexedDB 版本为 3**；包含 `projects`、`imports`、`settings`、`cover_media` 四个 store。
 - `frontend/src/localTypes.ts`：`LocalProject.schema_version = 2`。项目内有 config、assets、chapters、graph/views、任务与场景历史、知识草稿、事件、快照、运行记录和批次状态。
 - `updateProject` 在同一事务内检查项目 revision，并可同时检查连接 guard。回调必须同步；不可把 `await` 放进 IndexedDB mutation 回调。
-- 完整 JSON 备份支持恢复副本，产生新的项目/连接标识；恢复的连接默认禁用，Key 不随备份恢复。**未完成的导入草稿位于 imports store，不包含在完整项目备份中**。
+- 完整 JSON 备份版本为 3，兼容 v1/v2，包含独立编码的封面媒体字节。恢复副本会重映射项目、连接、图片版本、父版本和媒体标识；恢复的连接默认禁用，Key 不随备份恢复。**未完成的导入草稿位于 imports store，不包含在完整项目备份中**。
 - 浏览器存储属于 origin；更换域名、协议或端口会得到不同数据库。不能把“数据没了”直接归因于服务器。
 - `api.ts` 除健康检查外将原 API 样式业务调用转交 `localApi`；`computeClient`、`providerConnections` 另有实际 HTTP 请求，不要误以为所有请求都由 api.ts 单独发送。
 
@@ -54,7 +54,7 @@ FastAPI /api/compute/*：临时计算，不持久化正式项目、Key或后台�
 - `api/main.py`：`BRAIPEN_PUBLIC_MODE=1` 时，放行 `/api/health`、`/api/capabilities`、`/api/compute/*`，隐藏 OpenAPI/文档，其他旧 `/api/*` 业务路径被边界中间件阻止。
 - 非公网模式仍保留旧文件项目、配置、章节和审核接口；不要未经设计删除兼容服务。
 - `api/routers/compute.py`：协议版本 2；模型请求携带当次 credentials 和 connection，计算结果回显任务身份和三类指纹。
-- 单请求最多 **1 MiB**；模型调用每次最多 **120 秒**；计算执行预算 **180 秒**；最多 **2 个并发模型请求**。策划流从解析通过并获得 admission 时起，两轮计算与实际 ASGI 发送共享绝对截止；请求解析沿用独立限时，截止后仍须等待取消清理，不能宣称整次HTTP交互必在180秒内结束。并发上限是进程内 semaphore，生产目前应使用单 worker；多 worker 需先解决共享 admission。
+- 文字请求最多 **1 MiB**；图片请求独立限制为 **12 MiB**、单张原图/结果 **8 MiB**；模型调用每次最多 **120 秒**，计算执行预算 **180 秒**，共享最多 **2 个并发模型请求**。策划流与图片成功响应覆盖真实 ASGI 发送和取消清理；图片错误小 JSON 有最多 1 秒发送宽限。取消清理可能超过截止，不能宣称整次 HTTP 交互必在 180 秒内结束。生产目前应使用单 worker；多 worker 需先解决共享 admission。
 - 断连和取消传播到上游，清理后释放 admission。JSON/NDJSON 响应设置 `no-store`、`no-transform` 和 `X-Accel-Buffering: no`；真实反代缓存/缓冲行为仍需部署验收。不得添加依赖用户小说数据的服务器后台任务。
 - v2 计算路径使用请求级配置，不回退服务器共享 Key。应用代码不主动将完整 prompt、原始 provider 错误、Key 或小说项目副本持久化到服务器日志/文件；反代日志、系统转储和其他中间层是否留存，本轮未在线核验。
 - 发布准备修复：`api/main.py` 的公网边界改为纯 ASGI `PublicBoundaryMiddleware`，直接传递真实 `receive/send`，避免函数式HTTP中间件引入内部缓冲后使发送超时与槽位释放脱离真实连接。公网路径隔离、OPTIONS/CORS、非公网旧接口及异常JSON语义保留；已新增完整 `api.main.app` 的慢响应头/慢body与取消清理回归，线上反代仍需发布验收。
@@ -75,6 +75,17 @@ FastAPI /api/compute/*：临时计算，不持久化正式项目、Key或后台�
 - **Custom 执行需要管理员配置 `BRAIPEN_SELF_ADDRESSES`**，用于排除服务器自身地址。本交接不写真实服务器连接资料、Key、密码、私钥或 `.env` 内容。
 
 说明文档：`docs/provider-connections.html`。核心代码：`provider_catalog.py`、`model_client.py`、`provider_transport.py`、`frontend/src/providerConnections.ts`、`providerTypes.ts`、`keyVault.ts`。
+
+### 3.1 图片连接与封面
+
+- 图片目录与文字目录分开，预设 Seedream（火山方舟）、OpenAI、Gemini、百炼，另有 Custom。共用每连接会话 Key、可选加密记住及撤销 guard，图片连接不会进入文字模型选择器。
+- `image_provider.py`、`api/routers/image_compute.py` 提供 `/api/compute/images/{validate_connection,models,generate,edit}`。Seedream 默认 `doubao-seedream-5-0-flash-260915`，使用 `/api/v3/images/generations`，`response_format=url`、`size=2K`、`stream=false`、`watermark=true`。编辑携带原图。
+- 四预设展示官方建议模型，不代表账号权限验证；Custom 可获取目录，也可手填。OpenAI 的 2K 档位映射为 `1024x1536`，不应宣传所有供应商均原生输出 2K。
+- 结果 URL 通过独立无凭据安全客户端及时下载，不将签名 URL 存成资产或转交浏览器。出口复用公网 DNS 校验、固定 IP、无重定向及自身地址排除。
+- `CoverPanel` 将结果存为候选，作者明确设为封面后，在创作台、概览和阅读页显示。封面不改人物卡或正文；书名/作者由同一 Canvas 绘制函数预览和导出，不再调用模型。
+- 媒体 Blob 独立存储，项目 `cover` 仅含引用、来源和排版。单图 8 MiB、单作品 30 版本、备份媒体总量 120 MiB。缩略图按展示尺寸绘制，导出保留原尺寸。
+- 图片任务使用作品 Web Lock，来源在生成时冻结；封面保存不递增文字 revision，避免影响正在写作的章节。页面中断/刷新后的结果标记未知，不自动重试或保证供应商停止计费。旧任务收尾只更新对应 attempt。
+- 部署时仅 `/api/compute/images/` 的代理上传限制提高到 12 MiB，文字请求保留 1 MiB；保持关闭缓冲与现有超时设置。
 
 ## 4. 当前已实现的业务流程
 

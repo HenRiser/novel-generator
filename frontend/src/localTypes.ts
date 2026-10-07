@@ -1,5 +1,6 @@
 import type { ConnectionSnapshot, ConnectionGuard } from './providerTypes';
 import type { PlanningTraceEntry } from './planningTrace';
+import type { CoverState } from './coverTypes';
 import type { BatchGenerationRequest, BatchGenerationStatus, ChapterTaskResponse, ChapterWorkflow, KnowledgeDraft, NarrativeGraphDocument, NarrativeGraphViewsDocument, NoRevealReview, ScenePlanResponse } from './types';
 
 export type LocalRun = {
@@ -24,6 +25,7 @@ export type LocalChapter = {
 };
 export type LocalProject = {
   schema_version: 2; project_ref: string; revision: number; title: string; updated_at: string;
+  cover?: CoverState;
   config: Record<string, unknown>;
   assets: { outline: string; characters: string; setting_expansion: string };
   chapters: Record<string, LocalChapter>;

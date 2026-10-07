@@ -1,0 +1,29 @@
+.cover-workspace { display:flex; flex-direction:column; gap:18px; }
+.cover-intro h2 { margin:0 0 12px; color:var(--ink); font-size:23px; }
+.cover-intro p,.cover-error { font-size:13px; line-height:1.8; color:var(--muted); }
+.cover-columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(230px,.85fr); gap:26px; align-items:start; }
+.cover-controls,.cover-result,.cover-layout { display:flex; flex-direction:column; gap:14px; min-width:0; }
+.cover-field { display:flex; flex-direction:column; gap:7px; font-size:13px; color:var(--muted); }
+.cover-field .ant-select,.cover-field .ant-select-auto-complete { min-width:150px; width:100%; }
+.cover-field > input[type=color] { width:64px; height:32px; border:1px solid var(--border); border-radius:4px; padding:2px; background:transparent; }
+.cover-artwork { overflow:hidden; border-radius:8px; background:#e9ede6; }
+.cover-artwork canvas { display:block; width:100%; height:auto; }
+.cover-error { margin:8px; color:#b44a3a; }
+.cover-result > .cover-artwork { max-height:660px; align-self:center; max-width:100%; }
+.cover-result > .cover-artwork canvas { max-height:660px; width:auto; max-width:100%; object-fit:contain; }
+.cover-version-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.cover-layout { margin-top:12px; padding-top:16px; border-top:1px solid var(--border); }
+.cover-layout h3,.cover-history h3 { margin:0; color:var(--ink); font-size:16px; }
+.cover-layout > .ant-btn { align-self:flex-start; }
+.cover-version-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(105px,1fr)); gap:12px; }
+.cover-version-grid > button { background:transparent; padding:7px; border:1px solid var(--border); border-radius:9px; color:var(--ink); cursor:pointer; }
+.cover-version-grid > button.is-active { border:2px solid var(--accent); padding:6px; }
+.cover-version-grid > button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.cover-version-grid .cover-artwork { height:125px; }
+.cover-version-grid canvas { height:125px; width:100%; object-fit:cover; }
+.cover-version-grid span { display:block; font-size:11px; margin-top:6px; }
+.book-cover { margin:12px auto; width:100%; max-width:200px; }
+.book-cover canvas { max-height:250px; object-fit:contain; }
+.reader-cover,.studio-cover { max-width:175px; margin:0 auto 18px; }
+@media(max-width:1000px) { .cover-columns { grid-template-columns:1fr; } .cover-result > .cover-artwork { max-width:380px; } }
+@media(max-width:600px) { .cover-controls .ant-space { align-items:stretch; } .cover-version-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }

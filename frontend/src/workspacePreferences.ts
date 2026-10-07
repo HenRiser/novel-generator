@@ -1,6 +1,6 @@
 /** 仅保存界面偏好；正文、凭据和任务运行状态不进入浏览器存储。 */
 const STORAGE_KEY = "braipen.workspace-preferences.v1";
-export type WritingTab = "generate" | "reader" | "assets" | "status";
+export type WritingTab = "generate" | "reader" | "assets" | "cover" | "status";
 export type ProjectWorkspace = { chapterNumber?: number; writingTab?: WritingTab };
 export type ReaderFont = "serif" | "sans";
 export type ReaderTheme = "auto" | "paper" | "white" | "night";
@@ -14,7 +14,7 @@ type Preferences = {
   positions: Record<string, ReadingPosition>;
 };
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value));
-export const isWritingTab = (value: unknown): value is WritingTab => typeof value === "string" && ["generate", "reader", "assets", "status"].includes(value);
+export const isWritingTab = (value: unknown): value is WritingTab => typeof value === "string" && ["generate", "reader", "assets", "cover", "status"].includes(value);
 const positiveChapter = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
 const isReaderFont = (value: unknown): value is ReaderFont => value === "serif" || value === "sans";
 const isReaderTheme = (value: unknown): value is ReaderTheme => typeof value === "string" && ["auto", "paper", "white", "night"].includes(value);

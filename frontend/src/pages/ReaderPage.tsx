@@ -8,6 +8,7 @@ import { useProjectData } from "../hooks/useProjectData";
 import { getProjectWorkspace, rememberProjectWorkspace } from "../workspacePreferences";
 import ChapterListPanel from "../components/chapter/ChapterListPanel";
 import ChapterReader from "../components/chapter/ChapterReader";
+import ProjectCover from "../components/CoverPreview";
 import "../components/chapter/reader.css";
 
 export default function ReaderPage() {
@@ -44,7 +45,7 @@ function ReaderWorkspace() {
     {apiStatus === "offline" && <Alert type="warning" showIcon message="计算服务暂未连接，已保存在本浏览器的章节仍可阅读与导出。" />}
     {chaptersError && <Alert type="error" showIcon message={chaptersError} action={<Button size="small" onClick={() => void refreshChapters()}>重新加载</Button>} />}
     {!selectedProjectRef ? <Card><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一本作品，开始阅读。"><Button type="primary" onClick={() => navigate("/dashboard")}>前往作品概览</Button></Empty></Card> : <div className="reader-workspace">
-      <aside className="reader-directory"><div className="reader-directory-heading"><span className="eyebrow">CONTENTS</span><h2>{selectedProject?.title || "作品目录"}</h2><span>{chapters.length} 章 · 当前正文</span></div><ChapterListPanel selectedChapterNumber={selectedChapterNumber} onSelectChapter={selectChapter} /></aside>
+      <aside className="reader-directory"><div className="reader-directory-heading"><span className="eyebrow">CONTENTS</span><h2>{selectedProject?.title || "作品目录"}</h2><span>{chapters.length} 章 · 当前正文</span></div><ProjectCover projectRef={selectedProjectRef} className="reader-cover" /><ChapterListPanel selectedChapterNumber={selectedChapterNumber} onSelectChapter={selectChapter} /></aside>
       <section className="reader-sheet"><ChapterReader chapterNumber={selectedChapterNumber} footer={<footer className="reader-pagination"><Button type="text" icon={<ArrowLeftOutlined />} disabled={index <= 0} onClick={() => selectChapter(sorted[index - 1].chapter_number)}>上一章</Button><span>{index >= 0 ? `${index + 1} / ${sorted.length}` : "BRAIPEN · READER"}</span><Button type="text" disabled={index < 0 || index >= sorted.length - 1} onClick={() => selectChapter(sorted[index + 1].chapter_number)}>下一章 <ArrowRightOutlined /></Button></footer>} /></section>
     </div>}
   </div>;

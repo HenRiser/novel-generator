@@ -8,6 +8,7 @@ import { selectGenerationBusy, useAppStore } from "../store/useAppStore";
 import ProjectCreateModal from "../components/project/ProjectCreateModal";
 import NeuralSculpture from "../components/intro/NeuralSculpture";
 import type { ProjectSummary } from "../types";
+import ProjectCover from "../components/CoverPreview";
 
 const PATHWAYS = [
   { n: "01", title: "构建故事", text: "从一颗创作种子，展开大纲与角色。", icon: <EditOutlined />, route: "/writing" },
@@ -81,7 +82,7 @@ export default function DashboardPage() {
       {projectsLoading && !projects.length ? <div className="project-grid">{[0, 1, 2].map(n => <div className="book-card" key={n}><Skeleton active paragraph={{ rows: 3 }} /></div>)}</div> : visibleProjects.length === 0 ? <div className="shelf-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search ? "没有找到这个故事，换个关键词试试。" : "书架的第一页，等你落笔。"} />{!search && <Button type="primary" onClick={() => setCreateOpen(true)} disabled={!ready || busy} icon={<PlusOutlined />}>写下第一个灵感</Button>}</div> : <div className="project-grid">
         {visibleProjects.map((project, index) => <article className={`book-card book-tone-${index % 3}${selectedProjectRef === project.project_ref ? " is-current" : ""}`} key={project.project_ref}>
           <div className="book-top"><span className="book-number">STORY / {String(projects.indexOf(project) + 1).padStart(2, "0")}</span>{selectedProjectRef === project.project_ref && <span className="current-indicator"><span /> 当前故事</span>}<Dropdown trigger={["click"]} menu={{ items: [{ key: "read", label: "在阅读空间打开" }, { type: "divider" }, { key: "delete", label: "删除项目", danger: true }], onClick: ({ key }) => key === "delete" ? handleDelete(project) : openProject(project, "/reader") }}><Button type="text" icon={<MoreOutlined />} aria-label={`《${project.title}》更多操作`} disabled={busy || !ready || Boolean(deletingRef)} /></Dropdown></div>
-          <button className="book-main" onClick={() => openProject(project)} disabled={busy || !ready || Boolean(deletingRef)}><h3>{project.title}</h3><p>{(project.description && !/\[(workspace|legacy)\]/.test(project.description) ? project.description : "独立故事空间 · 本地保存")}</p></button>
+          <button className="book-main" onClick={() => openProject(project)} disabled={busy || !ready || Boolean(deletingRef)}><ProjectCover projectRef={project.project_ref} className="book-cover" /><h3>{project.title}</h3><p>{(project.description && !/\[(workspace|legacy)\]/.test(project.description) ? project.description : "独立故事空间 · 本地保存")}</p></button>
           <div className="book-bottom"><span>{displayDate(project.updated_at)} <span className="date-label">更新</span></span><button aria-label={`继续创作《${project.title}》`} disabled={busy || !ready || Boolean(deletingRef)} onClick={() => openProject(project)}><ArrowRightOutlined /></button></div>
         </article>)}
         <button className="new-story-card" disabled={!ready || busy} onClick={() => setCreateOpen(true)}><span><PlusOutlined /></span><b>下一个故事</b><small>让一个新的念头，有处安放。</small></button>

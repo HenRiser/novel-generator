@@ -9,6 +9,8 @@ import { getProjectWorkspace, isWritingTab, rememberProjectWorkspace } from "../
 import ChapterReader from "../components/chapter/ChapterReader";
 import GenerationPanel from "../components/generation/GenerationPanel";
 import AssetsPanel from "../components/AssetsPanel";
+import CoverPanel from "../components/CoverPanel";
+import ProjectCover from "../components/CoverPreview";
 import "../styles/writing.css";
 
 export default function WritingCockpitPage() {
@@ -84,6 +86,7 @@ function Studio({ refreshChapters }: { refreshChapters: () => Promise<void> }) {
     <div className="studio-layout">
       <aside className="studio-rail" aria-label="章节目录">
         <div className="studio-rail-heading"><span className="eyebrow">MANUSCRIPT</span><h2>{selectedProject?.title || "我的手稿"}</h2><span className="muted-note">{chapters.length} 个章节</span></div>
+        <ProjectCover projectRef={selectedProjectRef} className="studio-cover" />
         <Button type="primary" icon={<PlusOutlined />} block disabled={busy} onClick={() => { setTargetChapter(nextChapter); setActiveTab("generate"); }}>开始第 {nextChapter} 章</Button>
         <div className="studio-rail-label"><span>章节目录</span><Button type="text" size="small" icon={<ReloadOutlined />} aria-label="刷新章节目录" loading={chaptersLoading} onClick={() => void refreshChapters()} /></div>
         {chaptersLoading && !chapters.length ? <Skeleton active paragraph={{ rows: 4 }} title={false} /> : sorted.length ? <nav className="studio-chapters">{sorted.map((chapter) => <button type="button" key={chapter.chapter_number} className={`studio-chapter${selectedChapterNumber === chapter.chapter_number && activeTab === "reader" ? " is-active" : ""}`} onClick={() => selectChapter(chapter.chapter_number)} aria-current={selectedChapterNumber === chapter.chapter_number && activeTab === "reader" ? "page" : undefined}><span className="studio-chapter-number">{String(chapter.chapter_number).padStart(2, "0")}</span><span><strong>{chapter.title || `第 ${chapter.chapter_number} 章`}</strong><small>{chapter.is_version ? `修订版本 ${chapter.version}` : "已保存手稿"}</small></span></button>)}</nav> : <p className="studio-rail-empty">第一章还未落笔。<br />先准备大纲与人物，<br />再开始你的故事。</p>}
@@ -94,6 +97,7 @@ function Studio({ refreshChapters }: { refreshChapters: () => Promise<void> }) {
           { key: "generate", label: "AI 共创", children: <GenerationPanel onStreamDone={handleDone} onAssetsGenerated={handleAssets} targetChapterNumber={targetChapter ?? nextChapter} onTargetChapterChange={setTargetChapter} /> },
           { key: "reader", label: "章节手稿", children: selectedChapterNumber !== null ? <div className="studio-reader"><div className="studio-document-actions"><Button size="small" type="text" disabled={busy || !readerWorkflow?.editable} onClick={() => { setTargetChapter(selectedChapterNumber); setActiveTab("generate"); }}>重新生成第 {selectedChapterNumber} 章</Button><Link to={`/review?chapter=${selectedChapterNumber}`}>本章规划 <ArrowRightOutlined /></Link></div><ChapterReader key={`${selectedProjectRef}-${selectedChapterNumber}-${revision}`} chapterNumber={selectedChapterNumber} onWorkflowChange={setReaderWorkflow} /></div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="生成第一章后，手稿会出现在这里。" /> },
           { key: "assets", label: "故事设定", children: <AssetsPanel key={`${selectedProjectRef}-${assetsRevision}`} /> },
+          { key: "cover", label: "作品封面", children: <CoverPanel key={selectedProjectRef} projectRef={selectedProjectRef!} /> },
           { key: "status", label: "流程记录", children: <div className="studio-status"><div className="studio-status-heading"><div><span className="eyebrow">CHAPTER RECORD</span><h2>{selectedChapterNumber !== null ? `第 ${selectedChapterNumber} 章的创作记录` : "等待第一章"}</h2></div><Button icon={<ReloadOutlined />} loading={status.loading} onClick={() => void status.refresh()} disabled={selectedChapterNumber === null}>刷新记录</Button></div>{status.error && <Alert type="error" showIcon message={status.error} />}{status.loading ? <Skeleton active /> : chapterStatus ? <><div className="studio-status-grid"><div><strong>{chapterStatus.chapter_status.chapter.exists ? "已保存" : "未生成"}</strong><span>章节手稿</span></div><div><strong>{chapterStatus.chapter_status.review.pending_count}</strong><span>等待复核</span></div><div><strong>{chapterStatus.chapter_status.review.accepted_count}</strong><span>已接受变更</span></div><div><strong>{chapterStatus.chapter_status.knowledge_drafts.counts.total}</strong><span>知识草稿</span></div></div>{chapterStatus.chapter_status.warnings.map((warning) => <Alert key={warning.code} type="warning" showIcon message={warning.message} />)}<Space wrap><Link to={`/review?chapter=${selectedChapterNumber}`}><Button>查看章节审查</Button></Link><Link to="/library"><Button>审核知识变更 <ArrowRightOutlined /></Button></Link></Space></> : !status.error && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个章节，查看它的生成与审核记录。" />}</div> },
         ]} />
       </section>

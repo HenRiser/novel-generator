@@ -18,6 +18,7 @@ from model_client import ModelConfig
 from services.compute_service import MODEL_OPERATIONS, OPERATIONS, STREAM_OPERATIONS, ComputeError, compute as run_compute, stream_compute
 from services.chapter_planning_contract import validate_input as validate_planning_input
 from services.chapter_planning_events import PlanningEventContract
+from image_provider import image_catalog, MAX_IMAGE_BYTES, MAX_MODEL_SECONDS as MAX_IMAGE_MODEL_SECONDS
 
 router = APIRouter(prefix="/api", tags=["compute"])
 PROTOCOL_VERSION = 2
@@ -97,6 +98,8 @@ async def _parse(request: Request, operation: str):
     if not is_v1:
         try: connection = normalize_connection(payload['connection'], verify=operation != 'validate_connection')
         except ValueError as exc: raise ComputeError(str(exc), 'invalid_connection') from None
+        if connection['protocol'] not in PROTOCOLS:
+            raise ComputeError('文字计算需要文字模型连接。', 'invalid_connection')
         expected_fingerprint = request_fingerprint(connection, operation, data)
         if operation != 'validate_connection' and payload.get('request_fingerprint') != expected_fingerprint:
             raise ComputeError('本次请求参数指纹不匹配，未发送Key。', 'request_fingerprint')
@@ -152,6 +155,8 @@ async def capabilities():
     return JSONResponse({"protocol_version": PROTOCOL_VERSION, "operations": sorted(OPERATIONS), "stream_operations": sorted(STREAM_OPERATIONS),
         "planning_stream_version": 1,
         "provider": {"name": "deepseek", "official_base_url": "https://api.deepseek.com"}, "providers": catalog(), "supported_protocols": PROTOCOLS,
+        "image_providers": image_catalog(), "image_protocols": ["seedream_images", "openai_images", "gemini_images", "qwen_images"],
+        "image_limits": {"max_request_bytes": 12 * 1024 * 1024, "max_image_bytes": MAX_IMAGE_BYTES, "max_model_seconds": MAX_IMAGE_MODEL_SECONDS, "max_compute_seconds": MAX_COMPUTE_SECONDS},
         "limits": {"max_request_bytes": MAX_REQUEST_BYTES, "max_concurrent_calls": MAX_CONCURRENT_CALLS, "max_model_seconds": MAX_MODEL_SECONDS, "max_compute_seconds": MAX_COMPUTE_SECONDS},
         "persistence": {"projects": False, "chapters": False, "credentials": False, "background_tasks": False}}, headers=HEADERS)
 

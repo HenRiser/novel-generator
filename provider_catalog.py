@@ -100,6 +100,9 @@ def validate_policy(raw: dict, protocol: str) -> dict:
 
 
 def normalize_connection(raw: dict, *, verify: bool = False) -> dict:
+    if isinstance(raw, dict) and raw.get("protocol") in {"seedream_images", "openai_images", "gemini_images", "qwen_images"}:
+        from image_provider import normalize_image_connection
+        return normalize_image_connection(raw, verify=verify)
     fields = {"profile_id", "revision", "preset", "protocol", "base_url", "model", "policy", "destination_fingerprint", "execution_fingerprint", "auth_mode"}
     if not isinstance(raw, dict) or set(raw) - fields:
         raise ValueError("连接字段无效。")

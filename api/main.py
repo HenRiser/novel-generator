@@ -19,6 +19,7 @@ from api.routers import (
     continue_writing,
     generation,
     health,
+    image_compute,
     knowledge_drafts,
     narrative_graph,
     projects,
@@ -54,6 +55,7 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(compute.router)
+app.include_router(image_compute.router)
 app.include_router(projects.router)
 app.include_router(settings.router)
 app.include_router(audit.router)

@@ -24,7 +24,7 @@ export async function ensureConnections() {
     await setSetting('connection:'+LEGACY_CONNECTION,{id:LEGACY_CONNECTION,name:'DeepSeek',enabled:true,deleted:false,epoch:0,key_version:'legacy',head:1,revisions:[snapshot]} satisfies ConnectionProfile);
   });
 }
-export async function connections() { await ensureConnections(); return (await listSettings<ConnectionProfile>('connection:')).filter(p=>!p.deleted); }
+export async function connections() { await ensureConnections(); return (await listSettings<ConnectionProfile>('connection:')).filter(p=>!p.deleted&&['chat_completions','messages'].includes((p.draft||p.revisions.find(r=>r.revision===p.head))?.protocol||'')); }
 export async function getConnection(id:string) { await ensureConnections(); const p=await getSetting<ConnectionProfile>('connection:'+id);if(!p)throw new Error('此连接不存在，请重新关联相同目的地。');return p; }
 export async function defaultConnectionId() { return await getSetting<string>('default_connection')||LEGACY_CONNECTION; }
 export async function setDefaultConnection(id:string) { const p=await getConnection(id);if(!p.enabled||p.deleted)throw new Error('请先启用连接。');await setSetting('default_connection',id);notifyConnection(id); }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   Alert,
   App as AntApp,
@@ -27,6 +27,7 @@ import { API_BASE_URL } from "../api";
 import { useProjectData, useProjects } from "../hooks/useProjectData";
 import { isIntroHidden, setIntroHidden } from "../appConfig";
 import ProviderConnectionsPanel from "../components/ProviderConnectionsPanel";
+import ImageConnectionsPanel from "../components/ImageConnectionsPanel";
 import ConnectionPicker from "../components/ConnectionPicker";
 import LocalDataPanel from "../components/LocalDataPanel";
 
@@ -45,6 +46,7 @@ type GenerationSettingsForm = {
 export default function SettingsPage() {
   const { message } = AntApp.useApp();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const {
     apiStatus,
     selectedProjectRef,
@@ -57,7 +59,8 @@ export default function SettingsPage() {
   } = useAppStore();
   const [form] = Form.useForm<GenerationSettingsForm>();
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("api");
+  const requestedTab = searchParams.get("tab");
+  const activeTab = requestedTab && ["api", "images", "project", "system"].includes(requestedTab) ? requestedTab : "api";
   const [hideIntro, setHideIntro] = useState(isIntroHidden);
   const { refreshProject, detailError } = useProjectData(selectedProjectRef);
   const { refresh: refreshProjects } = useProjects();
@@ -238,12 +241,13 @@ export default function SettingsPage() {
       <div className="page-heading"><div><span className="eyebrow">MAKE IT YOURS</span><h1 className="page-title">偏好设置</h1><p className="page-subtitle">连接你的模型，找到适合自己的创作节奏。</p></div></div>
       {detailError && <Alert type="error" showIcon message={detailError} style={{ marginBottom: 20 }} />}
       <div className="settings-layout">
-      <div>
+      <div style={{ minWidth: 0 }}>
         <Tabs
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={tab => { const next = new URLSearchParams(searchParams); next.set("tab", tab); setSearchParams(next); }}
           items={[
             { key: "api", label: "模型连接", children: apiKeyTab },
+            { key: "images", label: "图片模型连接", children: <ImageConnectionsPanel /> },
             { key: "project", label: "故事偏好", children: projectTab },
             { key: "system", label: "本地数据与体验", children: systemTab },
           ]}
