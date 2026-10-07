@@ -6,12 +6,12 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 
-function load(name, dependencies = {}) {
+function load(name, dependencies = {}, environment = {}) {
   const source = readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
   runInNewContext(outputText, { exports, structuredClone, crypto: webcrypto, Blob, atob, btoa,
-    require: key => { assert.ok(key in dependencies, `Unexpected import ${key}`); return dependencies[key]; } });
+    require: key => { assert.ok(key in dependencies, `Unexpected import ${key}`); return dependencies[key]; }, ...environment });
   return exports;
 }
 const store = load('localStore', { './planningTrace': { readPlanningTrace: () => ({ invalid: false, entries: [] }) } });
@@ -19,6 +19,16 @@ const types = load('localTypes');
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1sAAAAASUVORK5CYII=';
 const bytes = Buffer.from(png, 'base64');
 const clone = value => JSON.parse(JSON.stringify(value));
+
+test('恢复采用统一文件限额，允许 Base64 膨胀后的备份并在解析前拒绝超限', async () => {
+  let reportedSize = 160 * 1024 * 1024;
+  class SizedBlob extends Blob { get size() { return reportedSize; } }
+  const bounded = load('localStore', { './planningTrace': { readPlanningTrace: () => ({ invalid: false, entries: [] }) } }, { Blob: SizedBlob });
+  assert.equal(bounded.parseBackup(JSON.stringify(backup())).length, 1);
+  reportedSize = bounded.MAX_BACKUP_FILE_BYTES + 1;
+  assert.throws(() => bounded.parseBackup('not JSON'), /200 MiB/);
+  await assert.rejects(() => bounded.restoreBackup('not JSON'), /200 MiB/);
+});
 
 function project() {
   const value = types.emptyProject('封面故事');

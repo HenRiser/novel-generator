@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Card, Descriptions, Space, Typography } from 'antd';
 import { DownloadOutlined, SafetyCertificateOutlined, UploadOutlined } from '@ant-design/icons';
-import { downloadRescue, exportBackup, hasRescue, restoreBackup } from '../localStore';
+import { downloadRescue, exportBackup, hasRescue, restoreBackup, MAX_BACKUP_FILE_BYTES } from '../localStore';
 
 type Props = { onProjectsChanged?: () => void | Promise<void> };
 type StorageInfo = { usage?: number; quota?: number; persisted?: boolean };
@@ -45,7 +45,7 @@ export default function LocalDataPanel({ onProjectsChanged }: Props) {
 
   async function importFile(file: File) {
     await action('restore', async () => {
-      if (file.size > 100 * 1024 * 1024) throw new Error('备份超过 100 MB，请拆分项目后恢复。');
+      if (file.size > MAX_BACKUP_FILE_BYTES) throw new Error('完整备份超过 200 MiB，请使用较小的备份文件。');
       const refs = await restoreBackup(await file.text());
       void message.success(`已恢复 ${refs.length} 个项目副本，原有项目保留。`);
       window.dispatchEvent(new Event('braipen:projects-changed'));

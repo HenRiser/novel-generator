@@ -7,6 +7,7 @@ const DATABASE = 'braipen.local.v1';
 export const MAX_COVER_BYTES = 8 * 1024 * 1024;
 export const MAX_COVER_VERSIONS = 30;
 const MAX_BACKUP_COVER_BYTES = 120 * 1024 * 1024;
+export const MAX_BACKUP_FILE_BYTES = 200 * 1024 * 1024;
 type CoverMedia = { id: string; project_ref: string; blob: Blob };
 type BackupCoverMedia = { id: string; project_ref: string; mime_type: string; bytes: number; base64: string };
 let connection: Promise<IDBDatabase> | undefined;
@@ -424,7 +425,9 @@ export function rememberRescue(value: unknown): void {
 export function hasRescue(): boolean { return rescue !== undefined; }
 
 function download(value: unknown, filename: string): void {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+  if (object(value) && value.format === 'braipen-backup' && blob.size > MAX_BACKUP_FILE_BYTES) throw new Error('完整备份超过 200 MiB，本次未导出。请减少单次备份内容。');
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -509,6 +512,7 @@ export async function exportBackup(): Promise<void> {
 }
 
 function readBackup(text: string): { projects: LocalProject[]; media: CoverMedia[]; raw: Record<string, unknown> } {
+  if (new Blob([text]).size > MAX_BACKUP_FILE_BYTES) throw new Error('完整备份超过 200 MiB，请使用较小的备份文件。');
   const backup: unknown = JSON.parse(text);
   if (!object(backup) || backup.format !== 'braipen-backup' || ![1, 2, 3].includes(Number(backup.version)) || !Array.isArray(backup.projects)) {
     throw new Error('请选择 Braipen 导出的完整项目备份。');
