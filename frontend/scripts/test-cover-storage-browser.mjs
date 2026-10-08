@@ -28,12 +28,17 @@ try {
   const result = await page.evaluate(async () => {
     const types = await import('/src/localTypes.ts');
     const original = types.emptyProject('真实封面事务');
-    // Seed the actual prior schema before localStore upgrades it to v3.
+    const legacy = types.emptyProject('旧提示词迁移');
+    legacy.cover = { layout: { title: '旧封面', author: '', titleColor: '#ffffff', authorColor: '#ffffff', titlePosition: 'top', fontFamily: 'serif', titleSize: 10, authorSize: 3 },
+      selected_id: 'old_cover', versions: [{ id: 'old_cover', media_id: 'old_media', prompt: 'INTERNAL_LEGACY_PROMPT', source: { idea: '旧设想', characters: '' },
+        created_at: new Date().toISOString(), width: 1, height: 1, mime_type: 'image/png' }] };
+    const pixel = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1sAAAAASUVORK5CYII='), c => c.charCodeAt(0));
+    // Seed the prior image schema, then validate physical prompt removal in DB4.
     await new Promise((resolve, reject) => {
-      const request = indexedDB.open('braipen.local.v1', 2);
-      request.onupgradeneeded = () => { for (const [name, keyPath] of [['projects', 'project_ref'], ['settings', 'key'], ['imports', 'id']]) request.result.createObjectStore(name, { keyPath }); };
+      const request = indexedDB.open('braipen.local.v1', 3);
+      request.onupgradeneeded = () => { for (const [name, keyPath] of [['projects', 'project_ref'], ['settings', 'key'], ['imports', 'id']]) request.result.createObjectStore(name, { keyPath }); request.result.createObjectStore('cover_media', { keyPath: 'id' }).createIndex('project_ref', 'project_ref'); };
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => { const db = request.result, tx = db.transaction('projects', 'readwrite'); tx.objectStore('projects').add(original); tx.oncomplete = () => { db.close(); resolve(); }; tx.onabort = () => reject(tx.error); };
+      request.onsuccess = () => { const db = request.result, tx = db.transaction(['projects','cover_media'], 'readwrite'); tx.objectStore('projects').add(original); tx.objectStore('projects').add(legacy); tx.objectStore('cover_media').add({ id: 'old_media', project_ref: legacy.project_ref, blob: new Blob([pixel], { type: 'image/png' }) }); tx.oncomplete = () => { db.close(); resolve(); }; tx.onabort = () => reject(tx.error); };
     });
     const store = await import('/src/localStore.ts');
     const cover = await import('/src/coverStorage.ts');
@@ -41,13 +46,18 @@ try {
     let changed = 0;
     window.addEventListener('braipen:workflow-changed', () => changed++);
     const upgraded = await store.getProject(original.project_ref);
+    check(!JSON.stringify(await store.getProject(legacy.project_ref)).includes('INTERNAL_LEGACY_PROMPT'), 'Legacy prompt must be removed by database upgrade');
+    const migratedBackup = await store.createBackup();
+    check(!JSON.stringify(migratedBackup).includes('INTERNAL_LEGACY_PROMPT'), 'Export must not retain a legacy prompt');
+    check(migratedBackup.cover_media.length === 1, 'Legacy migration must preserve image bytes');
+    await store.deleteProject(legacy.project_ref);
     check(!upgraded.cover, 'Prior projects acquire no artificial cover');
     const ref = original.project_ref;
     const canvas = document.createElement('canvas'); canvas.width = 160; canvas.height = 240;
     const drawing = canvas.getContext('2d'); drawing.fillStyle = '#f00'; drawing.fillRect(0, 0, 160, 240);
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     const sourceBytes = Array.from(new Uint8Array(await blob.arrayBuffer()));
-    const metadata = { width: 160, height: 240, prompt: '原图提示词', source: { idea: '原始白话故事', characters: '原始人物卡' },
+    const metadata = { width: 160, height: 240, style_id: 'cinematic', template_version: 1, text_model: 'text-model', source: { idea: '原始白话故事', characters: '原始人物卡' },
       connection: { profile_id: 'image_test', revision: 1, model: 'mock-image', preset: 'openai-images' } };
     const profile = { id: 'image_test', name: '事务测试', enabled: true, deleted: false, epoch: 0, key_version: 'mock-version', head: 1,
       revisions: [{ profile_id: 'image_test', revision: 1, model: 'mock-image', preset: 'openai-images', destination_fingerprint: 'mock-destination' }] };
@@ -62,7 +72,7 @@ try {
     check(!saved.cover.attempt && !saved.cover.selected_id, 'Saving a candidate clears attempt without selecting it');
     check(saved.cover.connection_id === 'image_test' && saved.config.connection_id === 'legacy-deepseek', 'Cover connection must remain separate');
     await cover.selectCoverVersion(ref, first.id);
-    const second = await cover.saveCoverVersion(ref, { ...metadata, prompt: '只调整光线', parent_id: first.id }, blob, guard);
+    const second = await cover.saveCoverVersion(ref, { ...metadata, style_id: 'ink', parent_id: first.id }, blob, guard);
     await cover.selectCoverVersion(ref, second.id);
     await cover.selectCoverVersion(ref, first.id);
     await cover.saveCoverLayout(ref, { ...saved.cover.layout, author: '测试作者', titlePosition: 'bottom', titleSize: 12 });
@@ -85,6 +95,26 @@ try {
     check(quota.includes('存储空间不足') && (await store.getProject(ref)).cover.versions.length === 2, 'Quota failure must abort image plus metadata together');
     check(blob.size === sourceBytes.length, 'Caller retains downloadable original blob after quota failure');
 
+    const batchProject = types.emptyProject('批次事务验证'); await store.putProject(batchProject);
+    const textProfile = { ...profile, id: 'text_test', key_version: 'text-key-version', revisions: [{ ...profile.revisions[0], profile_id: 'text_test', destination_fingerprint: 'text-destination' }] };
+    const textGuard = { profile_id: textProfile.id, epoch: 0, key_version: textProfile.key_version, destination_fingerprint: 'text-destination' };
+    await store.setSetting('connection:' + textProfile.id, textProfile);
+    await cover.saveCoverAttempt(batchProject.project_ref, { id: 'batch_attempt', status: 'running', started_at: new Date().toISOString(), requested: 4, completed: 0 });
+    await cover.saveCoverVersion(batchProject.project_ref, metadata, blob, [guard, textGuard], { preserveAttempt: true, attemptId: 'batch_attempt' });
+    check((await store.getProject(batchProject.project_ref)).cover.attempt.id === 'batch_attempt', 'Saving one image must not clear its remaining batch');
+    await store.setSetting('connection:' + textProfile.id, { ...textProfile, epoch: 1 });
+    let textRevoked = ''; try { await cover.saveCoverVersion(batchProject.project_ref, metadata, blob, [guard, textGuard], { preserveAttempt: true, attemptId: 'batch_attempt' }); } catch (error) { textRevoked = error.message; }
+    check(textRevoked.includes('连接已锁定') && (await store.getProject(batchProject.project_ref)).cover.versions.length === 1, 'Text guard revocation must atomically prevent another image');
+    await store.setSetting('connection:' + textProfile.id, textProfile);
+    let staleBatch = ''; try { await cover.saveCoverVersion(batchProject.project_ref, metadata, blob, [guard, textGuard], { preserveAttempt: true, attemptId: 'other_attempt' }); } catch (error) { staleBatch = error.message; }
+    check(staleBatch.includes('旧结果') && (await store.getProject(batchProject.project_ref)).cover.versions.length === 1, 'An old batch must not append to a replacement attempt');
+    await cover.saveCoverVersion(batchProject.project_ref, metadata, blob, [guard, textGuard], { preserveAttempt: true, attemptId: 'batch_attempt' });
+    await cover.saveCoverAttempt(batchProject.project_ref, { id: 'batch_attempt', status: 'unknown', started_at: new Date().toISOString(), requested: 4, completed: 2, error: '后续请求失败。' }, 'batch_attempt');
+    check((await store.getProject(batchProject.project_ref)).cover.versions.length === 2, 'Partial batch failure must retain both paid candidates');
+    check(!JSON.stringify(await store.getProject(batchProject.project_ref)).includes('"prompt"'), 'New candidate metadata must never contain prompt');
+    await store.deleteProject(batchProject.project_ref);
+    await cover.saveCoverPreferences(ref, { text_connection_id: textProfile.id, style_id: 'fantasy', count: 4 });
+
     await cover.saveCoverAttempt(ref, { id: 'attempt_pending', status: 'running', started_at: new Date().toISOString() });
     await cover.saveCoverAttempt(ref, { id: 'attempt_stale', status: 'unknown', started_at: new Date().toISOString() }, 'attempt_stale');
     check((await store.getProject(ref)).cover.attempt.id === 'attempt_pending', 'A stale failure must not overwrite a newer image attempt');
@@ -99,6 +129,7 @@ try {
     check(copy.cover.attempt.status === 'unknown', 'Restore never automatically repeats image generation');
     check(copy.cover.connection_id !== profile.id && copy.cover.versions[0].connection.profile_id === copy.cover.connection_id, 'Restore remaps image connection references');
     check((await store.getSetting('connection:' + copy.cover.connection_id)).enabled === false, 'Restored connection remains disabled');
+    check(copy.cover.text_connection_id !== textProfile.id && (await store.getSetting('connection:' + copy.cover.text_connection_id)).enabled === false, 'Restore remaps text preparation connection references');
     check(JSON.stringify(Array.from(new Uint8Array(await (await cover.getCoverBlob(copy.cover.versions[0].media_id)).arrayBuffer()))) === JSON.stringify(sourceBytes), 'Restored image bytes match exactly');
 
     const damaged = structuredClone(backup); damaged.projects[0].cover.versions[0].width++;

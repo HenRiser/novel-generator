@@ -30,7 +30,9 @@ from api.routers import (
 from services.chapter_workflow_service import WorkflowError
 
 
-PUBLIC_MODE = os.getenv("BRAIPEN_PUBLIC_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+# Fail closed when an environment value is missing or mistyped. Legacy local APIs
+# require an explicit opt-out; request-scoped public computations remain available.
+PUBLIC_MODE = os.getenv("BRAIPEN_PUBLIC_MODE", "1").strip().lower() not in {"0", "false", "no", "off"}
 PUBLIC_PATHS = {"/api/health", "/api/capabilities"}
 
 app = FastAPI(

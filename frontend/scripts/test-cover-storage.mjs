@@ -33,10 +33,10 @@ test('恢复采用统一文件限额，允许 Base64 膨胀后的备份并在解
 function project() {
   const value = types.emptyProject('封面故事');
   value.cover = { connection_id: 'image-connection', layout: store.defaultCoverLayout(value.title), selected_id: 'cover_edited', versions: [
-    { id: 'cover_original', media_id: 'media_original', prompt: '原图提示词', source: { idea: '原始白话设定', characters: '最初人物卡' },
+    { id: 'cover_original', media_id: 'media_original', style_id: 'cinematic', template_version: 1, text_model: 'text-model', source: { idea: '原始白话设定', characters: '最初人物卡' },
       connection: { profile_id: 'image-connection', revision: 1, preset: 'openai-images', model: 'test-model' },
       created_at: '2026-10-06T00:00:00.000Z', width: 1, height: 1, mime_type: 'image/png' },
-    { id: 'cover_edited', media_id: 'media_edited', parent_id: 'cover_original', prompt: '局部修改提示词', source: { idea: '原始白话设定', characters: '最初人物卡' },
+    { id: 'cover_edited', media_id: 'media_edited', parent_id: 'cover_original', style_id: 'ink', template_version: 1, source: { idea: '原始白话设定', characters: '最初人物卡' },
       created_at: '2026-10-06T00:01:00.000Z', width: 1, height: 1, mime_type: 'image/png' },
   ] };
   return value;
@@ -46,6 +46,17 @@ function backup(value = project()) {
     id: version.media_id, project_ref: value.project_ref, mime_type: 'image/png', bytes: bytes.length, base64: png,
   })) };
 }
+
+test('旧备份的内部提示词迁移后不再进入客户端项目和后续备份', () => {
+  const legacy = backup();
+  legacy.projects[0].cover.versions[0].prompt = 'INTERNAL_LEGACY_PROMPT_MUST_NOT_SURVIVE';
+  const [parsed] = store.parseBackup(JSON.stringify(legacy));
+  assert.equal('prompt' in parsed.cover.versions[0], false);
+  assert.equal(JSON.stringify(parsed).includes('INTERNAL_LEGACY_PROMPT'), false);
+  assert.equal(legacy.projects[0].cover.versions[0].prompt, 'INTERNAL_LEGACY_PROMPT_MUST_NOT_SURVIVE');
+  const invalid = project(); invalid.cover.count = '4'; assert.throws(() => store.validateProject(invalid), /封面/);
+  invalid.cover.count = 4; invalid.cover.style_id = ['cinematic']; assert.throws(() => store.validateProject(invalid), /封面/);
+});
 
 test('原有无封面项目以及 v1/v2 备份继续可恢复', () => {
   const current = types.emptyProject('旧项目');
@@ -86,11 +97,11 @@ test('恢复副本重映射项目、图片、版本、父版本和已选版本�
   assert.deepEqual(clone(original.cover.versions), before.cover.versions);
   assert.equal(original.cover.attempt.status, 'running');
   const referenceText = project(); referenceText.cover.versions[0].source.idea = referenceText.project_ref;
-  referenceText.cover.versions[0].prompt = referenceText.cover.versions[0].id;
+  referenceText.cover.versions[0].source.characters = referenceText.cover.versions[0].id;
   referenceText.cover.layout.author = referenceText.cover.versions[0].media_id;
   const [referenceCopy] = store.restoreCopies([referenceText]);
   assert.equal(referenceCopy.cover.versions[0].source.idea, referenceText.project_ref);
-  assert.equal(referenceCopy.cover.versions[0].prompt, referenceText.cover.versions[0].id);
+  assert.equal(referenceCopy.cover.versions[0].source.characters, referenceText.cover.versions[0].id);
   assert.equal(referenceCopy.cover.layout.author, referenceText.cover.versions[0].media_id);
 });
 

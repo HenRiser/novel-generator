@@ -4,18 +4,6 @@ import type { CoverLayout } from './coverTypes';
 export function coverSource(project: LocalProject) {
   return { idea: String(project.config.raw_story_idea || project.config.seed_prompt || ''), characters: project.assets.characters };
 }
-export function initialCoverDirection(title: string) {
-  return title.includes('取反') ? '逆转感的对称构图，人物闭目结印的特写，面部与双手同框，突出人物主体，背景简洁。以对置光影表现逆转感。'
-    : '突出故事主体，构图清晰，色调体现故事氛围，为书名留出空间。';
-}
-export function buildCoverPrompt(source: { idea: string; characters: string }, direction: string) {
-  return ['创作一张竖版小说封面底图，宽高比 2:3。', '白话故事设定：', source.idea || '由作者提供的视觉要求决定画面。',
-    ...(source.characters ? ['人物卡：', source.characters] : []), '作者的封面视觉要求：', direction,
-    '只生成画面，不生成书名、作者名、标语、路牌文字、字母或数字，书名由应用另行排版。人物卡未写明的外貌细节仅用于此次封面设计。'].join('\n');
-}
-export function buildCoverEditPrompt(change: string) {
-  return `基于提供的原图修改。作者要求：\n${change}\n除上述明确修改外，尽量保持原图的人物特征、姿态和构图。不要新增书名、作者名、标语、字母或数字。`;
-}
 export function imageDataBlob(data: { mime_type: string; data_base64: string }) {
   const binary = atob(data.data_base64), bytes = new Uint8Array(binary.length);
   for (let i = 0; i < bytes.length; i++) bytes[i] = binary.charCodeAt(i);

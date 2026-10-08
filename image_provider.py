@@ -202,6 +202,117 @@ def image_info(content: bytes, expected_mime=None):
     return mime, width, height
 
 
+def strip_image_metadata(content: bytes, expected_mime=None) -> bytes:
+    """Remove descriptive metadata and ICC profiles without re-encoding pixels.
+
+    ICC names/tags can contain prompts. Privacy takes priority over embedded color
+    management; numeric color hints and required encoding transforms remain.
+    """
+    mime, _, _ = image_info(content, expected_mime)
+    if mime == "image/png":
+        # Keep only standardized rendering, color and animation chunks. Unknown
+        # ancillary chunks can contain arbitrary provider prompts or user text.
+        render_chunks = {b"IHDR", b"PLTE", b"IDAT", b"IEND", b"tRNS", b"cHRM", b"gAMA", b"sBIT", b"sRGB",
+                         b"cICP", b"mDCv", b"cLLi", b"bKGD", b"hIST", b"pHYs", b"acTL", b"fcTL", b"fdAT"}
+        cleaned = bytearray(content[:8])
+        offset = 8
+        while offset < len(content):
+            kind = content[offset + 4:offset + 8]
+            end = offset + 12 + int.from_bytes(content[offset:offset + 4], "big")
+            if kind in render_chunks:
+                cleaned.extend(content[offset:end])
+            elif not kind[0] & 0x20:
+                raise ValueError("PNG 图片含不支持的关键数据块。")
+            offset = end
+        return bytes(cleaned)
+    if mime == "image/jpeg":
+        cleaned = bytearray(content[:2])
+        offset = 2
+        in_scan = False
+        while offset < len(content):
+            if in_scan:
+                start = offset
+                while True:
+                    marker_start = content.find(b"\xff", offset)
+                    if marker_start < 0:
+                        raise ValueError("JPEG 图片不完整。")
+                    offset = marker_start + 1
+                    while offset < len(content) and content[offset] == 0xFF:
+                        offset += 1
+                    if offset >= len(content):
+                        raise ValueError("JPEG 图片不完整。")
+                    if content[offset] == 0 or 0xD0 <= content[offset] <= 0xD7:
+                        offset += 1
+                        continue
+                    cleaned.extend(content[start:marker_start])
+                    offset = marker_start
+                    in_scan = False
+                    break
+            start = offset
+            if content[offset] != 0xFF:
+                raise ValueError("JPEG 图片损坏。")
+            while offset < len(content) and content[offset] == 0xFF:
+                offset += 1
+            if offset >= len(content):
+                raise ValueError("JPEG 图片不完整。")
+            marker = content[offset]
+            offset += 1
+            if marker == 0xD9:
+                if offset != len(content):
+                    raise ValueError("JPEG 图片含额外尾部数据。")
+                cleaned.extend(content[start:offset])
+                return bytes(cleaned)
+            if marker == 0x01 or 0xD0 <= marker <= 0xD7:
+                cleaned.extend(content[start:offset])
+                continue
+            if marker in {0, 0xD8} or offset + 2 > len(content):
+                raise ValueError("JPEG 图片损坏。")
+            length = int.from_bytes(content[offset:offset + 2], "big")
+            end = offset + length
+            if length < 2 or end > len(content):
+                raise ValueError("JPEG 图片损坏。")
+            body = content[offset + 2:end]
+            keep = marker != 0xFE and not 0xE0 <= marker <= 0xEF
+            # Preserve fixed-layout JFIF and the Adobe encoding transform. ICC
+            # profiles can carry arbitrary descriptions, so every APP2 is removed.
+            keep |= marker == 0xE0 and body.startswith(b"JFIF\0") and len(body) >= 14 and len(body) == 14 + 3 * body[12] * body[13]
+            keep |= marker == 0xEE and body.startswith(b"Adobe") and len(body) == 12
+            if keep:
+                cleaned.extend(content[start:end])
+            offset = end
+            in_scan = marker == 0xDA
+        raise ValueError("JPEG 图片不完整。")
+    chunks = _strip_webp_chunks(content[12:])
+    return b"RIFF" + struct.pack("<I", len(chunks) + 4) + b"WEBP" + chunks
+
+
+def _strip_webp_chunks(content: bytes, *, frame=False) -> bytes:
+    cleaned = bytearray()
+    offset = 0
+    allowed = {b"ALPH", b"VP8 ", b"VP8L"} if frame else {b"VP8X", b"ANIM", b"ANMF", b"ALPH", b"VP8 ", b"VP8L"}
+    while offset < len(content):
+        if offset + 8 > len(content):
+            raise ValueError("WebP 图片数据块不完整。")
+        kind = content[offset:offset + 4]
+        length = int.from_bytes(content[offset + 4:offset + 8], "little")
+        end = offset + 8 + length
+        if end + (length & 1) > len(content):
+            raise ValueError("WebP 图片数据块不完整。")
+        body = content[offset + 8:end]
+        if kind in allowed:
+            if kind == b"VP8X":
+                if length != 10:
+                    raise ValueError("WebP 图片头无效。")
+                body = bytes([body[0] & ~0x2C]) + body[1:]
+            elif kind == b"ANMF":
+                if length < 16:
+                    raise ValueError("WebP 动画帧无效。")
+                body = body[:16] + _strip_webp_chunks(body[16:], frame=True)
+            cleaned.extend(kind + struct.pack("<I", len(body)) + body + (b"\0" if len(body) & 1 else b""))
+        offset = end + (length & 1)
+    return bytes(cleaned)
+
+
 def validate_input(operation, data):
     if not isinstance(data, dict) or set(data) - {"prompt", "size", "image"}:
         raise ValueError("图片输入字段无效。")
@@ -222,8 +333,7 @@ def validate_input(operation, data):
     if not isinstance(image, dict) or set(image) != {"mime_type", "data_base64"}:
         raise ValueError("图片编辑需要原图的 MIME 类型与 Base64。")
     content = _decode(image["data_base64"])
-    image_info(content, image["mime_type"])
-    return content
+    return strip_image_metadata(content, image["mime_type"])
 
 
 def _download_url(config, raw):
@@ -292,11 +402,13 @@ async def request_image(config, operation, data, metrics):
     protocol, model = connection["protocol"], connection["model"]
     headers = _headers(config)
     image = data.get("image")
-    data_url = "data:" + image["mime_type"] + ";base64," + image["data_base64"] if image else None
+    image_base64 = base64.b64encode(content).decode("ascii") if image else None
+    data_url = "data:" + image["mime_type"] + ";base64," + image_base64 if image else None
     path = "/images/generations"
     kwargs = {}
     if protocol == "seedream_images":
-        body = {"model": model, "prompt": data["prompt"], "response_format": "url", "size": "2K", "stream": False, "watermark": True}
+        body = {"model": model, "prompt": data["prompt"], "response_format": "url", "size": "2K", "stream": False, "watermark": True,
+                "sequential_image_generation": "disabled"}
         if data_url:
             body["image"] = data_url
         kwargs["json"] = body
@@ -313,7 +425,7 @@ async def request_image(config, operation, data, metrics):
         path = "/models/" + model + ":generateContent"
         parts = [{"text": data["prompt"]}]
         if image:
-            parts.insert(0, {"inlineData": {"mimeType": image["mime_type"], "data": image["data_base64"]}})
+            parts.insert(0, {"inlineData": {"mimeType": image["mime_type"], "data": image_base64}})
         kwargs["json"] = {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"], "responseFormat": {"image": {"aspectRatio": "2:3", "imageSize": "2K"}}}}
     else:
         path = "/services/aigc/multimodal-generation/generation"
@@ -356,6 +468,7 @@ async def request_image(config, operation, data, metrics):
                 content = _decode(output["b64_json"])
             else:
                 content, declared = await _download(config, output.get("url"))
+        content = strip_image_metadata(content, declared)
         mime, width, height = image_info(content, declared)
         usage = _usage(raw)
         result = {"image": {"mime_type": mime, "data_base64": base64.b64encode(content).decode("ascii"), "width": width, "height": height}, "model": model}

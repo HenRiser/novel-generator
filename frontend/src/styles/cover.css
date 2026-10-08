@@ -6,6 +6,16 @@
 .cover-field { display:flex; flex-direction:column; gap:7px; font-size:13px; color:var(--muted); }
 .cover-field .ant-select,.cover-field .ant-select-auto-complete { min-width:150px; width:100%; }
 .cover-field > input[type=color] { width:64px; height:32px; border:1px solid var(--border); border-radius:4px; padding:2px; background:transparent; }
+.cover-style { min-width:0; margin:0; padding:0; border:0; }
+.cover-style legend { margin-bottom:8px; font-size:13px; color:var(--muted); }
+.cover-style-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.cover-style-grid button { padding:11px 6px; border:1px solid var(--border); border-radius:7px; background:var(--paper,#fff); color:var(--ink); font:inherit; font-size:13px; cursor:pointer; }
+.cover-style-grid button.is-active { border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+.cover-style-grid button:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.cover-style-grid button:disabled { opacity:.6; cursor:default; }
+.cover-billing { margin:0; padding:10px 12px; border-radius:7px; background:rgba(144,127,77,.08); color:var(--muted); font-size:12px; line-height:1.8; }
+.cover-stage { margin:0; font-size:13px; color:var(--accent); }
+.cover-workspace .field-caption { overflow-wrap:anywhere; }
 .cover-artwork { overflow:hidden; border-radius:8px; background:#e9ede6; }
 .cover-artwork canvas { display:block; width:100%; height:auto; }
 .cover-error { margin:8px; color:#b44a3a; }
@@ -26,4 +36,4 @@
 .book-cover canvas { max-height:250px; object-fit:contain; }
 .reader-cover,.studio-cover { max-width:175px; margin:0 auto 18px; }
 @media(max-width:1000px) { .cover-columns { grid-template-columns:1fr; } .cover-result > .cover-artwork { max-width:380px; } }
-@media(max-width:600px) { .cover-controls .ant-space { align-items:stretch; } .cover-version-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media(max-width:600px) { .cover-controls .ant-space { align-items:stretch; } .cover-controls .ant-btn { white-space:normal; height:auto; min-height:32px; max-width:100%; } .cover-style-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .cover-version-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }

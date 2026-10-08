@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, App as AntApp, Button, Card, Descriptions, Space, Typography } from 'antd';
 import { DownloadOutlined, SafetyCertificateOutlined, UploadOutlined } from '@ant-design/icons';
 import { downloadRescue, exportBackup, hasRescue, restoreBackup, MAX_BACKUP_FILE_BYTES } from '../localStore';
+import LocalFolderPanel from './LocalFolderPanel';
 
 type Props = { onProjectsChanged?: () => void | Promise<void> };
 type StorageInfo = { usage?: number; quota?: number; persisted?: boolean };
@@ -56,6 +57,7 @@ export default function LocalDataPanel({ onProjectsChanged }: Props) {
   return (
     <Space orientation="vertical" size={20} style={{ width: '100%' }}>
       {error && <Alert type="error" showIcon title={error} />}
+      <LocalFolderPanel />
       <Card title={<Space><DownloadOutlined />项目备份与恢复</Space>}>
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <Typography.Paragraph type="secondary" style={{ margin: 0 }}>

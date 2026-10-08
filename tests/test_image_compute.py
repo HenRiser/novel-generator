@@ -159,7 +159,7 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
                 result = await client.post("/api/compute/images/generate", json=payload())
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(str(seen[0].url), "https://ark.cn-beijing.volces.com/api/v3/images/generations")
-        self.assertEqual(json.loads(seen[0].content), {"model": "doubao-seedream-5-0-flash-260915", "prompt": "雨城少年，小说封面", "response_format": "url", "size": "2K", "stream": False, "watermark": True})
+        self.assertEqual(json.loads(seen[0].content), {"model": "doubao-seedream-5-0-flash-260915", "prompt": "雨城少年，小说封面", "response_format": "url", "size": "2K", "stream": False, "watermark": True, "sequential_image_generation": "disabled"})
         self.assertEqual(seen[0].headers["authorization"], "Bearer " + KEY)
         self.assertEqual(seen[1].method, "GET")
         self.assertFalse(any(k in seen[1].headers for k in ("authorization", "x-goog-api-key", "cookie")))
@@ -421,7 +421,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
                                     cleaned.set()
                         large = {**self.result, "image": {**self.result["image"], "data_base64": "A" * (11 * 1024 * 1024)}}
                         harness = ImageSendHarness(application, send, version)
-                        with patch.object(main, "PUBLIC_MODE", True), patch.object(compute, "MAX_COMPUTE_SECONDS", .2), \
+                        with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .2), \
                                 patch.object(route, "request_image", AsyncMock(return_value=large if phase == "http.response.body" else self.result)), \
                                 patch.object(self.slots, "release", wraps=self.slots.release) as released:
                             task = asyncio.create_task(harness.run()); self.tasks.append(task)
@@ -455,7 +455,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
                                 cleanup_began.set()
                                 await cleanup_allow.wait()
                     harness = ImageSendHarness(application, send, version)
-                    with patch.object(main, "PUBLIC_MODE", True), patch.object(route, "request_image", AsyncMock(return_value=self.result)), \
+                    with patch.object(main, "PUBLIC_MODE", False), patch.object(route, "request_image", AsyncMock(return_value=self.result)), \
                             patch.object(self.slots, "release", wraps=self.slots.release) as released:
                         task = asyncio.create_task(harness.run()); self.tasks.append(task)
                         try:
@@ -485,7 +485,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
             harness = ImageSendHarness(application, send)
             from time import monotonic
             started = monotonic()
-            with patch.object(main, "PUBLIC_MODE", True), patch.object(compute, "MAX_COMPUTE_SECONDS", .4), patch.object(route, "request_image", side_effect=generate):
+            with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .4), patch.object(route, "request_image", side_effect=generate):
                 task = asyncio.create_task(harness.run()); self.tasks.append(task)
                 await asyncio.wait_for(task, 2)
             self.assertTrue(entered.is_set()); self.assertTrue(cancelled.is_set())
@@ -497,7 +497,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
             async def send(message):
                 self.assertFalse(self.slots.acquire(False))
             harness = ImageSendHarness(application, send)
-            with patch.object(main, "PUBLIC_MODE", True), patch.object(route, "request_image", AsyncMock(return_value=self.result)), \
+            with patch.object(main, "PUBLIC_MODE", False), patch.object(route, "request_image", AsyncMock(return_value=self.result)), \
                     patch.object(self.slots, "release", wraps=self.slots.release) as released:
                 task = asyncio.create_task(harness.run()); self.tasks.append(task)
                 await asyncio.wait_for(task, 2)
@@ -523,7 +523,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(provider_cleaned.is_set())
                         self.assertFalse(self.slots.acquire(False))
                     harness = ImageSendHarness(application, send, version)
-                    with patch.object(main, "PUBLIC_MODE", True), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), \
+                    with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), \
                             patch.object(route, "request_image", side_effect=generate), \
                             patch.object(self.slots, "release", wraps=self.slots.release) as released:
                         task = asyncio.create_task(harness.run()); self.tasks.append(task)
@@ -549,7 +549,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
                                 cleanup_began.set()
                                 await cleanup_allow.wait()
                     harness = ImageSendHarness(application, send)
-                    with patch.object(main, "PUBLIC_MODE", True), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), \
+                    with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), \
                             patch.object(route, "MAX_ERROR_SEND_SECONDS", .08), patch.object(route, "request_image", side_effect=generate), \
                             patch.object(self.slots, "release", wraps=self.slots.release) as released:
                         task = asyncio.create_task(harness.run()); self.tasks.append(task)

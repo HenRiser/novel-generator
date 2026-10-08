@@ -144,6 +144,19 @@ def request_fingerprint(connection, operation, data):
 
     Floating point values use IEEE-754 bytes so browser/Python exponent formatting cannot differ.
     """
+    if operation in {'cover_generate', 'cover_edit'}:
+        from image_provider import _decode
+        text = data['text_connection']
+        policy = text['policy']
+        temperature = max(policy['temperature_min'], min(.3, policy['temperature_max']))
+        effective = None if policy['temperature'] == 'omit' else struct.pack('>d', float(policy['temperature_fixed'] if policy['temperature'] == 'fixed' else temperature)).hex()
+        return digest(json.dumps({'execution': connection['execution_fingerprint'], 'operation': operation,
+            'cover_protocol': 1, 'template_version': 1, 'text_execution': text['execution_fingerprint'],
+            'style_id': data['style_id'], 'count': data['count'], 'size': data['size'],
+            'edit_kind': data['edit_kind'] if operation == 'cover_edit' else None,
+            'source_digest': digest(json.dumps(data['source'], sort_keys=True, separators=(',', ':'), ensure_ascii=False)),
+            'image_digest': hashlib.sha256(_decode(data['image']['data_base64'])).hexdigest() if operation == 'cover_edit' else None,
+            'text_parameters': {'tokens': 6000, 'temperature': effective}}, sort_keys=True, separators=(',', ':'), ensure_ascii=False))
     request, config = data.get('request') or {}, data.get('config') or {}
     if operation in {'generate_chapter','continue_chapter','generate_outline','generate_characters','expand_setting'}:
         pairs = [(int(request.get('max_tokens', config.get('max_tokens', 4000))), float(request.get('temperature', config.get('temperature', .7))))]

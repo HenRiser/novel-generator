@@ -19,6 +19,7 @@ from services.compute_service import MODEL_OPERATIONS, OPERATIONS, STREAM_OPERAT
 from services.chapter_planning_contract import validate_input as validate_planning_input
 from services.chapter_planning_events import PlanningEventContract
 from image_provider import image_catalog, MAX_IMAGE_BYTES, MAX_MODEL_SECONDS as MAX_IMAGE_MODEL_SECONDS
+from cover_generation import capabilities as cover_capabilities
 
 router = APIRouter(prefix="/api", tags=["compute"])
 PROTOCOL_VERSION = 2
@@ -156,6 +157,7 @@ async def capabilities():
         "planning_stream_version": 1,
         "provider": {"name": "deepseek", "official_base_url": "https://api.deepseek.com"}, "providers": catalog(), "supported_protocols": PROTOCOLS,
         "image_providers": image_catalog(), "image_protocols": ["seedream_images", "openai_images", "gemini_images", "qwen_images"],
+        "cover_generation": cover_capabilities(),
         "image_limits": {"max_request_bytes": 12 * 1024 * 1024, "max_image_bytes": MAX_IMAGE_BYTES, "max_model_seconds": MAX_IMAGE_MODEL_SECONDS, "max_compute_seconds": MAX_COMPUTE_SECONDS},
         "limits": {"max_request_bytes": MAX_REQUEST_BYTES, "max_concurrent_calls": MAX_CONCURRENT_CALLS, "max_model_seconds": MAX_MODEL_SECONDS, "max_compute_seconds": MAX_COMPUTE_SECONDS},
         "persistence": {"projects": False, "chapters": False, "credentials": False, "background_tasks": False}}, headers=HEADERS)

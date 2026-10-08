@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>受控封面与本地存储</title>
+<style>body{max-width:900px;margin:36px auto;padding:0 20px;color:#263a30;background:#faf9f4;font:16px/1.8 system-ui,sans-serif}h1,h2{color:#173d35}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cdd6ca;padding:10px;text-align:left}code{overflow-wrap:anywhere}a{color:#245e4f}</style></head><body>
+<h1>受控封面与本地保存</h1>
+<p>图片生成先读取作者保存的白话设定和人物卡，经文字模型整理，再顺序生成 1、2 或 4 张候选。每张完成后保存，后续失败不删除已有图片；不会自动重复调用模型。</p>
+<h2>风格来源与选择</h2>
+<p>用户选择五种预设全部启用。风格定义及模型指令在后端维护，浏览器仅接收风格名称、流程阶段和图片结果，不显示或接受改写内部提示词。</p>
+<table><tr><th>预设</th><th>视觉方向</th></tr><tr><td>电影写实</td><td>真实人物和材质、戏剧性光影、克制色彩。</td></tr><tr><td>国风水墨</td><td>笔触、墨色层次、纸感和留白。</td></tr><tr><td>轻小说插画</td><td>清晰线条、人物主视觉和协调配色。</td></tr><tr><td>幻想写实</td><td>幻想场景、可信材质、空间和光线。</td></tr><tr><td>极简象征</td><td>核心意象、有限色彩和简洁关系。</td></tr></table>
+<p>本项目自行编写模板，参考以下资料的结构与风格描述方式，未安装或执行仓库技能：</p>
+<ul><li><a href="https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-seedream-image-generate/SKILL.md">ByteDance Seedream 官方技能</a>（<a href="https://github.com/bytedance/agentkit-samples/blob/main/LICENSE">Apache-2.0</a>）：主体、艺术风格、光影与构图。</li>
+<li><a href="https://github.com/replicate/skills/blob/main/skills/prompt-images/SKILL.md">Replicate 图像提示指南</a>（<a href="https://github.com/replicate/skills/blob/main/LICENSE">Apache-2.0</a>）：自然语言表达可画出的特征与空间关系。</li>
+<li><a href="https://github.com/openai/openai-imagegen-demo/blob/main/lib/photobooth-styles.ts">OpenAI 官方风格示例</a>（<a href="https://github.com/openai/openai-imagegen-demo/blob/main/LICENSE">MIT</a>）：用媒介、线条、材质和色彩描述固定风格。</li></ul>
+<h2>提示词边界</h2>
+<p>内部描述不进入前端包、接口结果、新封面版本或备份；旧封面 prompt 字符串在数据库升级和备份导入时去除，图片字节保留。公开旧 raw prompt 生成接口已关闭。</p>
+<p>用户选择保留 Custom。自定义网关运营者可以接触模型请求，本功能不能对其保密，也不保证任何恶意输入都无法滥用。固定流程和输入校验用于约束本应用的入口，文字模型和生图服务的内容审核继续生效。</p>
+<p>返回图片去除描述性元数据、ICC 和 EXIF。压缩像素不重编码，但嵌入色彩管理、EXIF 方向可能丢失；像素里的文字不属于元数据，不能由此清除。</p>
+<h2>保存位置</h2>
+<p>在支持原生目录 API 和安全锁的桌面浏览器，用户可选择文件夹，项目与模型配置自动同步为 <code>braipen-workspace.json</code>。IndexedDB 继续作为工作副本。完成文件 close 才标记同步成功；跨标签页共享锁保护快照和绑定变更。</p>
+<p>浏览器通常只提供授权目录名称，网站不能写入任意未授权绝对路径。未知同名文件拒绝覆盖；换目录或停止同步不会删除原备份。手机与不支持目录 API 的浏览器使用下载备份和文件恢复。</p>
+<p>Key 默认只在标签页内存使用，选择加密记住后在本地保险库保存。Key、加密保险库、口令和目录句柄不进入同步文件。恢复副本后连接重新编号并禁用，默认连接需重新选择，Key需填写或解锁。</p>
+<h2>服务器</h2>
+<p>项目与凭据不在服务器持久保存，模型计算只在请求内存中处理。公网模式默认关闭旧文件服务入口；模板代码属于应用配置，不是用户创作资料。部署还需关闭请求日志及磁盘缓冲，清理经用户批准的历史测试资料和日志。</p>
+</body></html>

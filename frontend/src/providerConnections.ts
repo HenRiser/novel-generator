@@ -119,6 +119,17 @@ export async function recordConnectionResult(lease: ConnectionLease, kind:'model
 }
 
 export async function requestFingerprint(connection:ConnectionSnapshot,operation:string,input:Record<string,unknown>){
+  if(operation==='cover_generate'||operation==='cover_edit') {
+    const text=input.text_connection as ConnectionSnapshot, image=input.image as {data_base64:string}|undefined;
+    if(!text?.execution_fingerprint)throw new Error('请选择整理描述的文字连接。');
+    const bytes=operation==='cover_edit'&&image?Uint8Array.from(atob(image.data_base64),c=>c.charCodeAt(0)):null;
+    const image_digest=bytes?Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join(''):null;
+    const buffer=new ArrayBuffer(8),temperature=text.policy.temperature==='fixed'?text.policy.temperature_fixed:Math.max(text.policy.temperature_min,Math.min(text.policy.temperature_max,.3));
+    new DataView(buffer).setFloat64(0,temperature===0?0:temperature);
+    return hash(JSON.stringify(stable({execution:connection.execution_fingerprint,operation,cover_protocol:1,template_version:1,text_execution:text.execution_fingerprint,
+      style_id:input.style_id,count:input.count,size:'2K',edit_kind:operation==='cover_edit'?input.edit_kind:null,source_digest:await hash(JSON.stringify(stable(input.source))),image_digest,
+      text_parameters:{tokens:6000,temperature:text.policy.temperature==='omit'?null:Array.from(new Uint8Array(buffer),b=>b.toString(16).padStart(2,'0')).join('')}})));
+  }
   const request=(input.request||{}) as Record<string,unknown>,config=(input.config||{}) as Record<string,unknown>;
   let pairs:Array<[number,number]>=[];
   if(['generate_chapter','continue_chapter','generate_outline','generate_characters','expand_setting'].includes(operation))pairs=[[Math.trunc(Number(request.max_tokens??config.max_tokens??4000)),Number(request.temperature??config.temperature??.7)]];

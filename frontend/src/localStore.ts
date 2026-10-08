@@ -1,6 +1,6 @@
 import type { ConnectionGuard, ConnectionProfile } from './providerTypes';
 import type { LocalProject } from './localTypes';
-import type { CoverAttempt, CoverLayout, CoverState, CoverVersion, CoverVersionInput } from './coverTypes';
+import type { CoverAttempt, CoverLayout, CoverState, CoverStyleId, CoverVersion, CoverVersionInput } from './coverTypes';
 import { readPlanningTrace } from './planningTrace';
 
 const DATABASE = 'braipen.local.v1';
@@ -27,7 +27,7 @@ function storageError(error: unknown): Error {
 function openDatabase(): Promise<IDBDatabase> {
   if (!connection) connection = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') { reject(new Error('此浏览器无法使用本地数据库。')); return; }
-    const request = indexedDB.open(DATABASE, 3);
+    const request = indexedDB.open(DATABASE, 4);
     request.onupgradeneeded = () => {
       const db = request.result, tx = request.transaction!;
       if (!db.objectStoreNames.contains('projects')) db.createObjectStore('projects', { keyPath: 'project_ref' });
@@ -36,7 +36,8 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('cover_media')) db.createObjectStore('cover_media', { keyPath: 'id' }).createIndex('project_ref', 'project_ref');
       const cursor = tx.objectStore('projects').openCursor();
       cursor.onsuccess = () => { const row = cursor.result; if (!row) return; const p = row.value;
-        if (p.schema_version === 1) { p.schema_version = 2; p.config.connection_id = 'legacy-deepseek'; row.update(p); } row.continue(); };
+        if (p.schema_version === 1) { p.schema_version = 2; p.config.connection_id = 'legacy-deepseek'; }
+        removeLegacyCoverPrompts(p); row.update(p); row.continue(); };
     };
     request.onerror = () => reject(storageError(request.error));
     request.onblocked = () => reject(new Error('本地数据库升级被其他标签页阻挡，请关闭其他 Braipen 页面后重试。'));
@@ -70,6 +71,13 @@ const object = (value: unknown): value is Record<string, unknown> => value !== n
 const secretNames = new Set(['key', 'apikey', 'secret', 'secretkey', 'password', 'passphrase', 'authorization', 'token', 'accesstoken', 'refreshtoken', 'privatekey', 'cookie', 'credentials']);
 const isSecret = (name: string) => secretNames.has(name.replace(/[_-]/g, '').toLowerCase());
 
+// Legacy prompt strings belong to the old client-authored flow; never re-export them.
+function removeLegacyCoverPrompts(value: unknown): void {
+  if (!object(value) || !object(value.cover) || !Array.isArray(value.cover.versions)) return;
+  for (const version of value.cover.versions) if (object(version) && typeof version.prompt === 'string') delete version.prompt;
+}
+const coverStyles = ['cinematic', 'ink', 'anime', 'fantasy', 'minimal'];
+
 function checkFields(value: unknown, depth = 0): void {
   if (depth > 80) throw new Error('数据嵌套层级过深。');
   if (Array.isArray(value)) { value.forEach(item => checkFields(item, depth + 1)); return; }
@@ -90,14 +98,20 @@ function validateCover(cover: unknown): asserts cover is CoverState {
   const fields = (value: Record<string, unknown>, allowed: string[]) => Object.keys(value).every(key => allowed.includes(key));
   const text = (value: unknown, max: number) => typeof value === 'string' && value.length <= max;
   const identifier = (value: unknown) => typeof value === 'string' && /^[\w:-]{1,200}$/.test(value);
-  if (!object(cover) || !fields(cover, ['connection_id', 'versions', 'selected_id', 'layout', 'attempt']) ||
+  if (!object(cover) || !fields(cover, ['connection_id', 'text_connection_id', 'style_id', 'count', 'versions', 'selected_id', 'layout', 'attempt']) ||
       !Array.isArray(cover.versions) || cover.versions.length > MAX_COVER_VERSIONS || !object(cover.layout)) return invalid();
   if (cover.connection_id !== undefined && !identifier(cover.connection_id)) return invalid();
+  if (cover.text_connection_id !== undefined && !identifier(cover.text_connection_id)) return invalid();
+  if (cover.style_id !== undefined && (typeof cover.style_id !== 'string' || !coverStyles.includes(cover.style_id))) return invalid();
+  if (cover.count !== undefined && (typeof cover.count !== 'number' || ![1, 2, 4].includes(cover.count))) return invalid();
   if (cover.attempt !== undefined) {
     const attempt = cover.attempt;
-    if (!object(attempt) || !fields(attempt, ['id', 'status', 'started_at', 'error']) || !identifier(attempt.id) ||
+    if (!object(attempt) || !fields(attempt, ['id', 'status', 'started_at', 'error', 'requested', 'completed']) || !identifier(attempt.id) ||
         !['running', 'unknown', 'failed'].includes(String(attempt.status)) || !text(attempt.started_at, 100) ||
         !Number.isFinite(Date.parse(attempt.started_at as string)) || (attempt.error !== undefined && !text(attempt.error, 2000))) return invalid();
+    if (attempt.requested !== undefined && (typeof attempt.requested !== 'number' || ![1, 2, 4].includes(attempt.requested))) return invalid();
+    if (attempt.completed !== undefined && (!Number.isSafeInteger(attempt.completed) || (attempt.completed as number) < 0 ||
+        (attempt.completed as number) > Number(attempt.requested ?? 4))) return invalid();
   }
   const layout = cover.layout;
   if (!fields(layout, ['title', 'author', 'titleColor', 'authorColor', 'titlePosition', 'fontFamily', 'titleSize', 'authorSize']) ||
@@ -108,14 +122,16 @@ function validateCover(cover: unknown): asserts cover is CoverState {
       typeof layout.authorSize !== 'number' || !Number.isFinite(layout.authorSize) || layout.authorSize < 1 || layout.authorSize > 8) return invalid();
   const ids = new Set<string>(), media = new Set<string>();
   for (const version of cover.versions) {
-    if (!object(version) || !fields(version, ['id', 'media_id', 'parent_id', 'prompt', 'source', 'connection', 'created_at', 'width', 'height', 'mime_type']) ||
+    if (!object(version) || !fields(version, ['id', 'media_id', 'parent_id', 'style_id', 'template_version', 'text_model', 'source', 'connection', 'created_at', 'width', 'height', 'mime_type']) ||
         !identifier(version.id) || !identifier(version.media_id) || ids.has(String(version.id)) || media.has(String(version.media_id)) ||
-        !text(version.prompt, 20000) || !(version.prompt as string).trim() ||
         !text(version.created_at, 100) || !Number.isFinite(Date.parse(version.created_at as string)) ||
         !['image/png', 'image/jpeg', 'image/webp'].includes(String(version.mime_type)) ||
         !Number.isSafeInteger(version.width) || !Number.isSafeInteger(version.height) || (version.width as number) <= 0 || (version.height as number) <= 0 ||
         (version.width as number) > 16384 || (version.height as number) > 16384 || (version.width as number) * (version.height as number) > 64 * 1024 * 1024 ||
         !object(version.source) || !fields(version.source, ['idea', 'characters']) || !text(version.source.idea, 100000) || !text(version.source.characters, 100000)) return invalid();
+    if (version.style_id !== undefined && (typeof version.style_id !== 'string' || !coverStyles.includes(version.style_id))) return invalid();
+    if (version.template_version !== undefined && (!Number.isSafeInteger(version.template_version) || (version.template_version as number) < 1)) return invalid();
+    if (version.text_model !== undefined && (!text(version.text_model, 200) || !(version.text_model as string).trim())) return invalid();
     if (version.parent_id !== undefined && !ids.has(String(version.parent_id))) return invalid();
     if (version.connection !== undefined) {
       const connection = version.connection;
@@ -153,6 +169,7 @@ export async function inspectCoverBlob(blob: Blob): Promise<{ mime_type: CoverVe
 export function validateProject(value: unknown): asserts value is LocalProject {
   const invalid = () => { throw new Error('项目备份格式不完整或版本不受支持。'); };
   if (!object(value)) return invalid();
+  removeLegacyCoverPrompts(value);
   checkFields(value);
   if (value.schema_version !== 2 || typeof value.project_ref !== 'string' || !value.project_ref.startsWith('book:bk_') ||
       !Number.isSafeInteger(value.revision) || (value.revision as number) < 0 || typeof value.title !== 'string' ||
@@ -192,9 +209,13 @@ export function validateProject(value: unknown): asserts value is LocalProject {
 }
 
 export function listProjects(): Promise<LocalProject[]> {
-  return transact(['projects'], 'readonly', (tx, done) => {
+  return transact(['projects'], 'readonly', (tx, done, fail) => {
     tx.objectStore('projects').getAll().onsuccess = event => {
-      done(((event.target as IDBRequest).result as LocalProject[]).sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+      try {
+        const projects = (event.target as IDBRequest).result as LocalProject[];
+        projects.forEach(validateProject);
+        done(projects.sort((a, b) => b.updated_at.localeCompare(a.updated_at)));
+      } catch (error) { fail(error); }
     };
   });
 }
@@ -202,7 +223,10 @@ export function listProjects(): Promise<LocalProject[]> {
 export function getProject(ref: string): Promise<LocalProject> {
   return transact(['projects'], 'readonly', (tx, done, fail) => {
     const request = tx.objectStore('projects').get(ref);
-    request.onsuccess = () => request.result ? done(request.result) : fail(new Error('此浏览器中找不到该项目。'));
+    request.onsuccess = () => {
+      if (!request.result) { fail(new Error('此浏览器中找不到该项目。')); return; }
+      try { validateProject(request.result); done(request.result); } catch (error) { fail(error); }
+    };
   });
 }
 
@@ -270,11 +294,14 @@ export function getCoverBlob(mediaId: string): Promise<Blob> {
   });
 }
 
-export async function saveCoverVersion(ref: string, metadata: CoverVersionInput, blob: Blob, guard?: ConnectionGuard): Promise<CoverVersion> {
-  if (guard && metadata.connection?.profile_id !== guard.profile_id) throw new Error('封面结果与生成所用连接不一致。');
+export async function saveCoverVersion(ref: string, metadata: CoverVersionInput, blob: Blob, guard?: ConnectionGuard | ConnectionGuard[],
+  options: { preserveAttempt?: boolean; attemptId?: string } = {}): Promise<CoverVersion> {
+  const guards = guard ? Array.isArray(guard) ? guard : [guard] : [];
+  if (guards.length && metadata.connection?.profile_id !== guards[0].profile_id) throw new Error('封面结果与生成所用连接不一致。');
   const image = await inspectCoverBlob(blob);
   if (metadata.width !== image.width || metadata.height !== image.height) throw new Error('封面尺寸与实际图片不一致。');
   const version: CoverVersion = { ...structuredClone(metadata), ...image, id: `cover_${crypto.randomUUID()}`, media_id: `media_${crypto.randomUUID()}`, created_at: new Date().toISOString() };
+  removeLegacyCoverPrompts({ cover: { versions: [version] } });
   checkFields(version);
   await transact<void>(['projects', 'settings', 'cover_media'], 'readwrite', (tx, _done, fail) => {
     const store = tx.objectStore('projects'), request = store.get(ref);
@@ -283,20 +310,23 @@ export async function saveCoverVersion(ref: string, metadata: CoverVersionInput,
         const project = request.result as LocalProject | undefined;
         if (!project) throw new Error('此浏览器中找不到该项目。');
         const cover = projectCover(project);
+        if (options.attemptId !== undefined && cover.attempt?.id !== options.attemptId) throw new Error('封面批次已结束或更换，旧结果未写入。');
         if (cover.versions.length >= MAX_COVER_VERSIONS) throw new Error('每个项目最多保存 30 个封面版本，请先备份。');
         if (version.parent_id && !cover.versions.some(item => item.id === version.parent_id)) throw new Error('找不到修改所依据的封面版本。');
         cover.versions.push(version);
-        delete cover.attempt;
+        if (!options.preserveAttempt) delete cover.attempt;
         // 封面不参与文字生成输入；沿用当前项目并保持文字 revision，避免作废正在生成的章节。
         project.updated_at = new Date().toISOString();
         validateProject(project);
         tx.objectStore('cover_media').add({ id: version.media_id, project_ref: ref, blob } satisfies CoverMedia);
         store.put(project);
       } catch (error) { fail(error); } };
-      if (guard) {
-        const permission = tx.objectStore('settings').get('connection:' + guard.profile_id);
-        permission.onsuccess = () => { try { checkConnectionGuard(permission.result?.value, guard); save(); } catch (error) { fail(error); } };
-      } else save();
+      let remaining = guards.length;
+      if (!remaining) { save(); return; }
+      for (const current of guards) {
+        const permission = tx.objectStore('settings').get('connection:' + current.profile_id);
+        permission.onsuccess = () => { try { checkConnectionGuard(permission.result?.value, current); if (--remaining === 0) save(); } catch (error) { fail(error); } };
+      }
     };
   });
   coverChanged(ref);
@@ -315,6 +345,12 @@ export async function selectCoverVersion(ref: string, id?: string): Promise<Loca
 
 export async function saveCoverLayout(ref: string, layout: CoverLayout): Promise<LocalProject> {
   const project = await updateProject(ref, project => { projectCover(project).layout = structuredClone(layout); }, undefined, false);
+  coverChanged(ref);
+  return project;
+}
+
+export async function saveCoverPreferences(ref: string, prefs: { text_connection_id?: string; style_id?: CoverStyleId; count?: 1 | 2 | 4 }): Promise<LocalProject> {
+  const project = await updateProject(ref, project => { Object.assign(projectCover(project), prefs); }, undefined, false);
   coverChanged(ref);
   return project;
 }
@@ -588,7 +624,7 @@ export async function restoreBackup(text: string): Promise<string[]> {
   }
   const remapConnections = (value: unknown): void => {
     if (!value || typeof value !== 'object') return;
-    for (const [k,v] of Object.entries(value)) { if ((k === 'connection_id' || k === 'profile_id') && typeof v === 'string' && mapped.has(v)) (value as Record<string,unknown>)[k] = mapped.get(v); else remapConnections(v); }
+    for (const [k,v] of Object.entries(value)) { if ((k === 'connection_id' || k === 'text_connection_id' || k === 'profile_id') && typeof v === 'string' && mapped.has(v)) (value as Record<string,unknown>)[k] = mapped.get(v); else remapConnections(v); }
   };
   copies.forEach(remapConnections);
   const restoredProfiles = descriptors.map(profile => {
