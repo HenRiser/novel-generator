@@ -111,16 +111,17 @@ function load({ backup = snapshot(), saved, browser = false, maxBytes = 200 * 10
 test('v3 快照保留项目、原图与连接，环境设置只读白名单，密钥保险库与handle不进入文件', async () => {
   const app = load(), folder = directory();
   app.settings.set('default_connection', 'text'); app.settings.set('default_image_connection', 'image'); app.settings.set('default_model', 'custom-model');
+  app.settings.set('fallback_image_connection', 'seedream');
   app.settings.set('vault:text', { ciphertext: [1], api_key: 'OFFLINE_KEY_SENTINEL' });
   app.settings.set('unknown-config', 'OFFLINE_UNKNOWN_SENTINEL');
   await app.sync.writeFolderSnapshot(folder.handle, 'workspace-1');
   const result = JSON.parse(folder.text());
   assert.deepEqual(result.projects, app.backup.projects); assert.deepEqual(result.cover_media, app.backup.cover_media);
   assert.deepEqual(result.connections, app.backup.connections);
-  assert.deepEqual(result.environment, { version: 1, default_connection: 'text', default_image_connection: 'image', default_model: 'custom-model' });
+  assert.deepEqual(result.environment, { version: 1, default_connection: 'text', default_image_connection: 'image', default_model: 'custom-model', fallback_image_connection: 'seedream' });
   assert.equal(result.folder_sync.workspace_id, 'workspace-1');
   assert.equal(folder.text().includes('OFFLINE_'), false); assert.equal(folder.text().includes('handle'), false);
-  assert.deepEqual(app.reads.sort(), ['default_connection', 'default_image_connection', 'default_model'].sort());
+  assert.deepEqual(app.reads.sort(), ['default_connection', 'default_image_connection', 'default_model', 'fallback_image_connection'].sort());
   assert.equal(folder.state.closes, 1); assert.deepEqual(JSON.parse(JSON.stringify(folder.state.options)), { keepExistingData: false, mode: 'exclusive' });
 });
 

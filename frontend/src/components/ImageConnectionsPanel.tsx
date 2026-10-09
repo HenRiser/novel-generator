@@ -4,7 +4,7 @@ import { ApiOutlined, CopyOutlined, LockOutlined, PlusOutlined } from '@ant-desi
 import { getSetting } from '../localStore';
 import { profileKey } from '../keyVault';
 import { getConnection, manageConnection, recordConnectionResult, renameConnection, storeConnectionKey, unlockConnection } from '../providerConnections';
-import { IMAGE_PRESETS, acquireImageConnection, blankImageConnection, defaultImageConnectionId, imageConnections, imageProviderPresets, imageSnapshot, saveImageConnection, setDefaultImageConnection, type ImageConnectionSnapshot, type ImageProviderPreset } from '../imageConnections';
+import { IMAGE_PRESETS, acquireImageConnection, blankImageConnection, defaultImageConnectionId, fallbackImageConnectionId, imageConnections, imageProviderPresets, imageSnapshot, saveImageConnection, setDefaultImageConnection, setFallbackImageConnection, type ImageConnectionSnapshot, type ImageProviderPreset } from '../imageConnections';
 import { requestImage } from '../imageClient';
 import type { ConnectionProfile } from '../providerTypes';
 
@@ -13,7 +13,7 @@ export default function ImageConnectionsPanel() {
   const [profiles, setProfiles] = useState<ConnectionProfile[]>([]), [presets, setPresets] = useState<ImageProviderPreset[]>(IMAGE_PRESETS), [selected, setSelected] = useState('');
   const [form, setForm] = useState<ImageConnectionSnapshot>(blankImageConnection), [name, setName] = useState('Seedream · 火山方舟');
   const [key, setKey] = useState(''), [password, setPassword] = useState(''), [remember, setRemember] = useState(false), [vault, setVault] = useState(false);
-  const [defaultId, setDefaultId] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState('');
+  const [defaultId, setDefaultId] = useState(''), [fallbackId, setFallbackId] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState('');
   const [models, setModels] = useState<Array<{ id: string; name: string }>>([]), [modelsSource, setModelsSource] = useState<'catalog' | 'suggestions' | 'saved' | ''>(''), [truncated, setTruncated] = useState(false);
   const abort = useRef<AbortController | null>(null), mounted = useRef(true);
   const selectedProfile = profiles.find(p => p.id === selected), saved = selectedProfile?.revisions.find(r => r.revision === selectedProfile.head);
@@ -24,8 +24,8 @@ export default function ImageConnectionsPanel() {
   const visibleSource = modelsSource || (form.preset !== 'custom' ? 'suggestions' : '');
   const visibleModels = modelsSource ? models : form.preset !== 'custom' ? suggestions : [];
   async function load() {
-    const [list, id] = await Promise.all([imageConnections(), defaultImageConnectionId()]);
-    if (mounted.current) { setProfiles(list); setDefaultId(id); } return list;
+    const [list, id, fallback] = await Promise.all([imageConnections(), defaultImageConnectionId(), fallbackImageConnectionId()]);
+    if (mounted.current) { setProfiles(list); setDefaultId(id); setFallbackId(fallback); } return list;
   }
   function select(profile?: ConnectionProfile) {
     const next = profile ? imageSnapshot(profile) : blankImageConnection();
@@ -73,7 +73,7 @@ export default function ImageConnectionsPanel() {
   return <div className="provider-connections">
     <div className="provider-list">
       <Space style={{ display: 'flex', justifyContent: 'space-between' }}><strong>我的图片连接</strong><Button aria-label="添加图片连接" icon={<PlusOutlined />} disabled={disabled} onClick={() => select()} /></Space>
-      {profiles.map(p => <button key={p.id} className={selected === p.id ? 'provider-item selected' : 'provider-item'} disabled={disabled} onClick={() => select(p)}><strong>{p.name}</strong><small>{p.id === defaultId ? '封面默认 · ' : ''}{p.enabled ? '已启用' : '已禁用'} · {imageSnapshot(p)?.model || '草稿'}</small></button>)}
+      {profiles.map(p => <button key={p.id} className={selected === p.id ? 'provider-item selected' : 'provider-item'} disabled={disabled} onClick={() => select(p)}><strong>{p.name}</strong><small>{p.id === defaultId ? '封面默认 · ' : ''}{p.id === fallbackId ? '确认后兜底 · ' : ''}{p.enabled ? '已启用' : '已禁用'} · {imageSnapshot(p)?.model || '草稿'}</small></button>)}
       <p className="muted-note">图片连接与文字连接分别选择。配置保存在此浏览器；Key 默认仅在当前标签页使用。</p>
     </div>
     <Card title={<Space><ApiOutlined />{selected ? '图片连接详情' : '添加图片连接'}</Space>} extra={<Button icon={<CopyOutlined />} disabled={disabled} onClick={copy}>复制配置</Button>}>
@@ -84,6 +84,7 @@ export default function ImageConnectionsPanel() {
         {preset?.regions && <label className="provider-field" htmlFor={fieldId + 'region'}>服务地域<Select id={fieldId + 'region'} aria-label="图片服务地域" value={form.base_url} disabled={disabled || Boolean(selected)} style={{ width: '100%' }} options={preset.regions.map(r => ({ value: r.url, label: r.name }))} onChange={base_url => setForm(f => ({ ...f, base_url }))} /><small>请选择创建 API Key 时对应的地域。</small></label>}
         <label className="provider-field" htmlFor={fieldId + 'url'}>API 服务地址<Input id={fieldId + 'url'} aria-label="图片 API 服务地址" value={form.base_url} disabled={disabled || Boolean(selected) || !['custom', 'qwen'].includes(form.preset)} placeholder="https://gateway.example/v1" onChange={e => setForm(f => ({ ...f, base_url: e.target.value }))} /><small>{form.preset === 'qwen' ? '使用百炼图片服务地址，也可填写控制台提供的专属工作空间地址。' : '填写服务商提供的基础地址。修改已保存的地址请复制为新连接。'}</small></label>
         <label className="provider-field" htmlFor={fieldId + 'key'}>API Key<Input.Password id={fieldId + 'key'} aria-label="图片连接 API Key" value={key} disabled={disabled} maxLength={4096} autoComplete="off" placeholder={unlocked ? '当前标签页已有 Key；留空保留' : '填写图片服务商 API Key'} onChange={e => setKey(e.target.value)} /></label>
+        {form.preset === 'gemini' && <Alert type="info" showIcon title="Gemini Flash 生图 API 不提供免费层级" description={<span>免费层级 Key 可以读取模型目录，但不代表有生图额度。不会自动开通计费或切换收费供应商。<a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noreferrer">查看 Google 官方定价</a></span>} />}
         <label className="provider-field" htmlFor={fieldId + 'model'}>默认图片模型<AutoComplete id={fieldId + 'model'} aria-label="默认图片模型 ID" value={form.model} options={visibleModels.map(m => ({ value: m.id, label: m.name === m.id ? m.id : `${m.name} · ${m.id}` }))} style={{ width: '100%' }} disabled={disabled} filterOption={(value, option) => String(option?.value || '').toLowerCase().includes(value.toLowerCase())} onChange={model => setForm(f => ({ ...f, model }))} placeholder="选择建议模型，或输入服务商提供的模型 ID" /><small>{form.preset === 'seedream' ? '也可填写火山方舟的模型接入点 ID。' : ''}模型是否可用以服务商账号权限为准。</small></label>
         {visibleSource && <div role="region" aria-label="可选图片模型列表" style={{ width: '100%' }}>
           <p role="status" style={{ margin: '0 0 8px' }}><strong>{visibleSource === 'suggestions' ? '建议模型' : visibleSource === 'catalog' ? '已获取模型目录' : '已保存候选模型'} · {visibleModels.length} 个</strong>{visibleSource === 'suggestions' ? '（账号权限以调用结果为准）' : ''}。点击选择后保存连接。</p>
@@ -92,6 +93,7 @@ export default function ImageConnectionsPanel() {
         </div>}
         {form.preset === 'custom' && <Collapse style={{ width: '100%' }} items={[{ key: 'format', label: '高级设置（按服务商文档填写）', children: <label className="provider-field" htmlFor={fieldId + 'format'}>图片接口类型<Select id={fieldId + 'format'} aria-label="自定义图片接口类型" value={form.protocol} disabled={disabled || Boolean(selected)} style={{ width: '100%' }} options={[{ value: 'openai_images', label: 'OpenAI 图片接口' }, { value: 'seedream_images', label: 'Seedream 图片接口' }, { value: 'gemini_images', label: 'Gemini 图片接口' }, { value: 'qwen_images', label: '百炼图片接口' }]} onChange={protocol => setForm(f => ({ ...f, protocol }))} /><small>默认使用 OpenAI 图片接口；自定义服务的生成与修改能力取决于其实际支持。</small></label> }]} />}
         <Space wrap><Button type="primary" loading={busy === 'save'} disabled={disabled} onClick={() => void action('save', () => save())}>保存图片连接</Button><Button disabled={disabled || Boolean(selectedProfile?.revisions.length)} onClick={() => void action('draft', () => save(true))}>仅存草稿</Button><Button disabled={disabled || !selectedProfile?.enabled} onClick={() => void action('default', () => setDefaultImageConnection(selected))}>设为封面默认</Button></Space>
+        <Space wrap><Button disabled={disabled || !selectedProfile?.enabled || saved?.preset !== 'seedream' || saved.model !== 'doubao-seedream-5-0-flash-260915'} onClick={() => void action('fallback', () => setFallbackImageConnection(selected))}>设为确认后兜底</Button>{fallbackId && <Button disabled={disabled} onClick={() => void action('clear-fallback', () => setFallbackImageConnection(''))}>停用兜底</Button>}</Space>
         <Space wrap><Button disabled={disabled || form.preset === 'custom' && !selectedProfile?.enabled} loading={busy === 'models'} onClick={() => void action('models', modelsList)}>{form.preset === 'custom' ? '获取图片模型列表' : '查看建议模型'}</Button>{busy === 'models' && <Button onClick={() => abort.current?.abort()}>取消获取</Button>}</Space>
         <p className="muted-note">保存连接、查看模型列表不会生成图片。只有在封面创作中明确点击生成或修改后才会调用图片模型，可能计费。</p>
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, width: '100%' }}>

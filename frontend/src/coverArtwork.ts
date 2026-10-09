@@ -2,7 +2,7 @@ import type { LocalProject } from './localTypes';
 import type { CoverLayout } from './coverTypes';
 
 export function coverSource(project: LocalProject) {
-  return { idea: String(project.config.raw_story_idea || project.config.seed_prompt || ''), characters: project.assets.characters };
+  return { idea: '', characters: project.assets.characters };
 }
 export function imageDataBlob(data: { mime_type: string; data_base64: string }) {
   const binary = atob(data.data_base64), bytes = new Uint8Array(binary.length);

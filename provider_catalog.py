@@ -151,7 +151,7 @@ def request_fingerprint(connection, operation, data):
         temperature = max(policy['temperature_min'], min(.3, policy['temperature_max']))
         effective = None if policy['temperature'] == 'omit' else struct.pack('>d', float(policy['temperature_fixed'] if policy['temperature'] == 'fixed' else temperature)).hex()
         return digest(json.dumps({'execution': connection['execution_fingerprint'], 'operation': operation,
-            'cover_protocol': 1, 'template_version': 1, 'text_execution': text['execution_fingerprint'],
+            'cover_protocol': 2, 'template_version': 2, 'text_execution': text['execution_fingerprint'],
             'style_id': data['style_id'], 'count': data['count'], 'size': data['size'],
             'edit_kind': data['edit_kind'] if operation == 'cover_edit' else None,
             'source_digest': digest(json.dumps(data['source'], sort_keys=True, separators=(',', ':'), ensure_ascii=False)),

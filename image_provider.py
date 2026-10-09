@@ -38,6 +38,47 @@ IMAGE_PROVIDERS = [
 _MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/~+-]{0,199}")
 _DOWNLOAD_DOMAINS = {"seedream": ("volces.com",), "openai": ("openai.com", "oaiusercontent.com", "blob.core.windows.net"),
                      "qwen": ("aliyuncs.com",), "gemini": ()}
+IMAGE_ERRORS = {
+    "image_auth_error": (401, "图片 API Key 认证失败，请检查完整 Key 与连接。"),
+    "image_permission_denied": (403, "图片连接没有所需权限，请检查模型、地域及账号配置。"),
+    "image_quota_or_rate_limited": (429, "图片服务限流或额度不足，未自动重试；请检查额度后决定是否手动切换连接。"),
+    "image_invalid_request": (400, "图片服务拒绝请求参数，请检查模型与协议配置。"),
+    "image_unavailable": (503, "图片服务暂不可用，未自动重试；请检查服务状态。"),
+    "image_content_rejected": (422, "图片服务拒绝此内容，请调整素材；不要切换供应商绕过审核。"),
+    "image_outcome_unknown": (502, "图片服务未返回可确认的完整结果，可能已产生费用；请核对上游记录，勿自动重试。"),
+}
+_GEMINI_STATUSES = {"UNAUTHENTICATED": "image_auth_error", "PERMISSION_DENIED": "image_permission_denied",
+                    "RESOURCE_EXHAUSTED": "image_quota_or_rate_limited", "INVALID_ARGUMENT": "image_invalid_request",
+                    "FAILED_PRECONDITION": "image_invalid_request", "OUT_OF_RANGE": "image_invalid_request",
+                    "NOT_FOUND": "image_invalid_request", "UNAVAILABLE": "image_unavailable", "INTERNAL": "image_unavailable"}
+_GEMINI_HTTP_ERRORS = {400: "image_invalid_request", 401: "image_auth_error", 403: "image_permission_denied",
+                       404: "image_invalid_request", 429: "image_quota_or_rate_limited", 500: "image_unavailable",
+                       502: "image_unavailable", 503: "image_unavailable"}
+_GEMINI_BLOCK_REASONS = {"SAFETY", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY"}
+_GEMINI_REJECTED_FINISHES = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY",
+                            "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION", "ESCALATION", "PUP_LIMITED_DISABLED"}
+
+
+class ImageProviderError(DeepSeekClientError):
+    """Only fixed public codes and messages; never retain upstream response text."""
+
+    def __init__(self, code):
+        self.code = code if code in IMAGE_ERRORS else "image_outcome_unknown"
+        super().__init__(IMAGE_ERRORS[self.code][1])
+
+
+def _gemini_error(raw, status):
+    error = raw.get("error") if isinstance(raw, dict) else None
+    if status >= 400 or error:
+        upstream_status = error.get("status") if isinstance(error, dict) else None
+        code = _GEMINI_STATUSES.get(upstream_status) if isinstance(upstream_status, str) else None
+        raise ImageProviderError(code or _GEMINI_HTTP_ERRORS.get(status, "image_outcome_unknown"))
+    feedback = raw.get("promptFeedback") if isinstance(raw, dict) else None
+    reason = feedback.get("blockReason") if isinstance(feedback, dict) else None
+    if isinstance(reason, str) and reason in _GEMINI_BLOCK_REASONS:
+        raise ImageProviderError("image_content_rejected")
+    if reason not in (None, "", "BLOCK_REASON_UNSPECIFIED"):
+        raise ImageProviderError("image_outcome_unknown")
 
 
 def image_catalog():
@@ -110,8 +151,14 @@ def _headers(config):
     return headers
 
 
-async def _read(response, limit):
-    _status(response)
+async def _read(response, limit, *, gemini_error=False):
+    if gemini_error and response.status_code >= 400:
+        # Read a bounded error object only to classify structured status, never its text.
+        limit = min(limit, 64 * 1024)
+        if response.headers.get("content-encoding", "identity").lower() not in {"", "identity"}:
+            raise ImageProviderError("image_outcome_unknown")
+    else:
+        _status(response)
     length = response.headers.get("content-length")
     if length and (not length.isdigit() or int(length) > limit):
         raise DeepSeekClientError("图片响应超过容量限制或长度无效。")
@@ -438,18 +485,23 @@ async def request_image(config, operation, data, metrics):
         async with _client(connection["base_url"], connection["preset"] == "custom") as client:
             metrics["call_count"] = metrics.get("call_count", 0) + 1
             async with client.stream("POST", connection["base_url"] + path, headers=headers, **kwargs) as response:
-                raw = json.loads(await _read(response, MAX_JSON_BYTES))
+                raw = json.loads(await _read(response, MAX_JSON_BYTES, gemini_error=protocol == "gemini_images"))
+                if protocol == "gemini_images":
+                    _gemini_error(raw, response.status_code)
         if not isinstance(raw, dict) or raw.get("error") or raw.get("code"):
             raise DeepSeekClientError("图片服务返回错误，未保存图片。")
         declared = None
         if protocol == "gemini_images":
             candidates = raw.get("candidates") or []
             candidate = candidates[0] if candidates else {}
-            if candidate.get("finishReason") not in {None, "STOP"}:
-                raise DeepSeekClientError("图片输出被拒绝或未完整结束。")
+            finish = candidate.get("finishReason")
+            if isinstance(finish, str) and finish in _GEMINI_REJECTED_FINISHES:
+                raise ImageProviderError("image_content_rejected")
+            if finish not in {None, "STOP"}:
+                raise ImageProviderError("image_outcome_unknown")
             output = next((p.get("inlineData") or p.get("inline_data") for p in candidate.get("content", {}).get("parts", []) if not p.get("thought") and (p.get("inlineData") or p.get("inline_data"))), None)
             if not output:
-                raise DeepSeekClientError("图片服务未返回图片。")
+                raise ImageProviderError("image_outcome_unknown")
             content = _decode(output.get("data"))
             declared = output.get("mimeType") or output.get("mime_type")
         elif protocol == "qwen_images":
@@ -481,7 +533,17 @@ async def request_image(config, operation, data, metrics):
 
     try:
         return await asyncio.wait_for(run(), MAX_MODEL_SECONDS)
-    except (DeepSeekClientError, DestinationRejected, asyncio.TimeoutError):
+    except (ImageProviderError, DestinationRejected, asyncio.TimeoutError):
+        raise
+    except httpx.TimeoutException:
+        if protocol == "gemini_images":
+            raise asyncio.TimeoutError() from None
+        raise DeepSeekClientError("图片响应格式无效或网络中断，请检查连接后手动重试。") from None
+    except DeepSeekClientError:
+        if protocol == "gemini_images":
+            raise ImageProviderError("image_outcome_unknown") from None
         raise
     except Exception:
+        if protocol == "gemini_images":
+            raise ImageProviderError("image_outcome_unknown") from None
         raise DeepSeekClientError("图片响应格式无效或网络中断，请检查连接后手动重试。") from None

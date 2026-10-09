@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from api.routers import compute
 import cover_generation
 from deepseek_client import DeepSeekClientError
-from image_provider import ImageConfig, list_models, normalize_image_connection, request_image, validate_input
+from image_provider import IMAGE_ERRORS, ImageConfig, ImageProviderError, list_models, normalize_image_connection, request_image, validate_input
 from model_client import ModelConfig
 from provider_catalog import request_fingerprint
 from provider_transport import DestinationRejected
@@ -64,6 +64,10 @@ async def _parse(request, operation):
         else:
             compute._check_tree(data)
             validate_input(operation, data)
+    except ComputeError:
+        if is_cover:
+            raise
+        raise ComputeError("图片输入无效：提示词最多 6000 字；编辑原图需为 8 MiB 内的 PNG、JPEG 或 WebP。") from None
     except (ValueError, TypeError):
         if is_cover:
             raise ComputeError("封面素材、文字连接或编辑原图无效。", "invalid_cover_input") from None
@@ -91,7 +95,11 @@ def _exception(exc):
     if isinstance(exc, DestinationRejected):
         return 403, "destination_rejected", "图片目的地或下载域名未通过安全检查。"
     if isinstance(exc, asyncio.TimeoutError):
-        return 504, "compute_timeout", "图片计算超时，请手动重试。"
+        return 504, "compute_timeout", "图片计算超时，上游结果未知且可能已产生费用；请核对记录，勿自动重试。"
+    if isinstance(exc, ImageProviderError):
+        code = exc.code if exc.code in IMAGE_ERRORS else "image_outcome_unknown"
+        status, message = IMAGE_ERRORS[code]
+        return status, code, message
     if isinstance(exc, DeepSeekClientError):
         return 502, "provider_error", "图片服务请求失败，请检查 Key、模型权限、额度及参数后手动重试。"
     if isinstance(exc, ComputeError):
@@ -223,6 +231,7 @@ async def _cover_body(identity, operation, data, configs, deadline):
 def _cover_exception(exc):
     if isinstance(exc, ComputeError):
         fixed = {"cover_unsuitable": "当前素材不适合生成封面，请调整创意后重试。",
+                 "cover_missing_appearance": "人物卡中未找到明确外观描述，请补充「外貌特征：」「服饰：」等字段后重试。",
                  "invalid_cover_plan": "文字模型未返回有效封面方案，请检查连接后手动重试。",
                  "compute_busy": "当前计算请求较多，请稍后重试。"}
         return exc.status, exc.code if exc.code in fixed else "invalid_cover_input", fixed.get(exc.code, "封面请求字段、连接或素材无效。")

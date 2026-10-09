@@ -126,7 +126,7 @@ export async function requestFingerprint(connection:ConnectionSnapshot,operation
     const image_digest=bytes?Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join(''):null;
     const buffer=new ArrayBuffer(8),temperature=text.policy.temperature==='fixed'?text.policy.temperature_fixed:Math.max(text.policy.temperature_min,Math.min(text.policy.temperature_max,.3));
     new DataView(buffer).setFloat64(0,temperature===0?0:temperature);
-    return hash(JSON.stringify(stable({execution:connection.execution_fingerprint,operation,cover_protocol:1,template_version:1,text_execution:text.execution_fingerprint,
+    return hash(JSON.stringify(stable({execution:connection.execution_fingerprint,operation,cover_protocol:2,template_version:2,text_execution:text.execution_fingerprint,
       style_id:input.style_id,count:input.count,size:'2K',edit_kind:operation==='cover_edit'?input.edit_kind:null,source_digest:await hash(JSON.stringify(stable(input.source))),image_digest,
       text_parameters:{tokens:6000,temperature:text.policy.temperature==='omit'?null:Array.from(new Uint8Array(buffer),b=>b.toString(16).padStart(2,'0')).join('')}})));
   }

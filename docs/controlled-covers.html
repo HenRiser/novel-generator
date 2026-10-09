@@ -2,14 +2,24 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>受控封面与本地存储</title>
 <style>body{max-width:900px;margin:36px auto;padding:0 20px;color:#263a30;background:#faf9f4;font:16px/1.8 system-ui,sans-serif}h1,h2{color:#173d35}table{border-collapse:collapse;width:100%}th,td{border:1px solid #cdd6ca;padding:10px;text-align:left}code{overflow-wrap:anywhere}a{color:#245e4f}</style></head><body>
 <h1>受控封面与本地保存</h1>
-<p>图片生成先读取作者保存的白话设定和人物卡，经文字模型整理，再顺序生成 1、2 或 4 张候选。每张完成后保存，后续失败不删除已有图片；不会自动重复调用模型。</p>
+<p>封面模板第 2 版从人物卡中先提取明确标注的姓名、外貌、服饰和可见饰物，再把这些片段与所选固定风格交给文字模型一次融合，形成视觉计划并顺序生成 1、2 或 4 张候选。故事创意字段须为空；文字与图片模型不接收大纲或整张人物卡。每张完成后保存，后续失败不删除已有图片；不会自动重复调用模型。</p>
 <h2>风格来源与选择</h2>
 <p>用户选择五种预设全部启用。风格定义及模型指令在后端维护，浏览器仅接收风格名称、流程阶段和图片结果，不显示或接受改写内部提示词。</p>
-<table><tr><th>预设</th><th>视觉方向</th></tr><tr><td>电影写实</td><td>真实人物和材质、戏剧性光影、克制色彩。</td></tr><tr><td>国风水墨</td><td>笔触、墨色层次、纸感和留白。</td></tr><tr><td>轻小说插画</td><td>清晰线条、人物主视觉和协调配色。</td></tr><tr><td>幻想写实</td><td>幻想场景、可信材质、空间和光线。</td></tr><tr><td>极简象征</td><td>核心意象、有限色彩和简洁关系。</td></tr></table>
-<p>本项目自行编写模板，参考以下资料的结构与风格描述方式，未安装或执行仓库技能：</p>
-<ul><li><a href="https://github.com/bytedance/agentkit-samples/blob/main/skills/byted-seedream-image-generate/SKILL.md">ByteDance Seedream 官方技能</a>（<a href="https://github.com/bytedance/agentkit-samples/blob/main/LICENSE">Apache-2.0</a>）：主体、艺术风格、光影与构图。</li>
-<li><a href="https://github.com/replicate/skills/blob/main/skills/prompt-images/SKILL.md">Replicate 图像提示指南</a>（<a href="https://github.com/replicate/skills/blob/main/LICENSE">Apache-2.0</a>）：自然语言表达可画出的特征与空间关系。</li>
-<li><a href="https://github.com/openai/openai-imagegen-demo/blob/main/lib/photobooth-styles.ts">OpenAI 官方风格示例</a>（<a href="https://github.com/openai/openai-imagegen-demo/blob/main/LICENSE">MIT</a>）：用媒介、线条、材质和色彩描述固定风格。</li></ul>
+<p>以下五项是<strong>依据 GitHub 提示框架与示例改编的本项目预设</strong>，不是上游仓库已有的五条原样提示词。2026-10-09 核对的 OpenAI 示例包含 anime、watercolor、digital-art 等照片转换风格；ByteDance 和 Replicate 提供通用结构与描述原则。项目保留用户选择的五种方向，独立编写小说封面措辞，不复制技能全文，也未安装或执行仓库技能。</p>
+<table><tr><th>预设</th><th>固定来源与许可</th><th>本项目改编点</th></tr>
+<tr><td>电影写实</td><td><a href="https://github.com/replicate/skills/blob/2f36e415965ae63baa1c9f6635888092bcd771d3/skills/prompt-images/SKILL.md#photographic-language">Replicate 摄影语言与构图</a>（Apache-2.0）；ByteDance 结构见下。</td><td>将摄影、光线和材质描述改为竖版人物封面；克制调色与缩略图焦点由本项目定义。</td></tr>
+<tr><td>国风水墨</td><td><a href="https://github.com/openai/openai-imagegen-demo/blob/0831e720b129c2cce2e33f01270328f384cfa61a/lib/photobooth-styles.ts">OpenAI watercolor 媒介示例</a>（MIT）；ByteDance 结构见下。</td><td>仅采用按媒介、笔触和色彩描述风格的方式；中国水墨、纸感、矿物色和留白均为本项目改编，上游没有原样国风水墨预设。</td></tr>
+<tr><td>轻小说插画</td><td><a href="https://github.com/openai/openai-imagegen-demo/blob/0831e720b129c2cce2e33f01270328f384cfa61a/lib/photobooth-styles.ts">OpenAI anime 风格示例</a>（MIT）。</td><td>把照片转换改为依据人物卡可见事实创作；线条、人物轮廓与配色适配轻小说封面，未复制原句。</td></tr>
+<tr><td>幻想写实</td><td><a href="https://github.com/bytedance/agentkit-samples/blob/2e4feace57d6d181b544a2489ff264fdfba2cdbc/skills/byted-seedream-image-generate/SKILL.md#prompt-engineering-tips">ByteDance 主体、风格、构图与光线框架</a>（Apache-2.0）。</td><td>本项目加入幻想插画媒介、可信材质与空间层次；背景只服务风格，不从角色经历或剧情生成场景。</td></tr>
+<tr><td>极简象征</td><td><a href="https://github.com/replicate/skills/blob/2f36e415965ae63baa1c9f6635888092bcd771d3/skills/prompt-images/SKILL.md#be-specific-and-unambiguous">Replicate 明确主体、色彩与空间关系原则</a>（Apache-2.0）；ByteDance 结构见下。</td><td>将原则收束为有限色彩、简洁关系与大面积留白；人物特征仍以卡中明示事实为准，不由象征表达补写身份或经历。</td></tr></table>
+<ul><li>ByteDance 固定提交 <code>2e4feace57d6d181b544a2489ff264fdfba2cdbc</code>：<a href="https://github.com/bytedance/agentkit-samples/blob/2e4feace57d6d181b544a2489ff264fdfba2cdbc/skills/byted-seedream-image-generate/SKILL.md">源码</a>、<a href="https://github.com/bytedance/agentkit-samples/blob/2e4feace57d6d181b544a2489ff264fdfba2cdbc/LICENSE">Apache-2.0 许可</a>。</li>
+<li>Replicate 固定提交 <code>2f36e415965ae63baa1c9f6635888092bcd771d3</code>：<a href="https://github.com/replicate/skills/blob/2f36e415965ae63baa1c9f6635888092bcd771d3/skills/prompt-images/SKILL.md">源码</a>、<a href="https://github.com/replicate/skills/blob/2f36e415965ae63baa1c9f6635888092bcd771d3/LICENSE">Apache-2.0 许可</a>。</li>
+<li>OpenAI 固定提交 <code>0831e720b129c2cce2e33f01270328f384cfa61a</code>：<a href="https://github.com/openai/openai-imagegen-demo/blob/0831e720b129c2cce2e33f01270328f384cfa61a/lib/photobooth-styles.ts">源码</a>、<a href="https://github.com/openai/openai-imagegen-demo/blob/0831e720b129c2cce2e33f01270328f384cfa61a/LICENSE">MIT 许可</a>（Copyright © 2026 OpenAI）。</li></ul>
+<p>项目使用独立改编措辞与来源链接，不分发上游技能实现或原始照片转换提示词。以后若复制实质源文，需一并保留相应完整许可及适用 NOTICE。</p>
+<h2>人物外观提取</h2>
+<p>支持冒号标签（中英文冒号）、列表及粗体标签，例如 <code>- **外貌特征**：黑色短发，灰色眼睛</code>。只保留姓名、名字、外貌特征、外貌、外观、服饰、服装、衣着、配饰、饰物、饰品和可见饰物字段；仅本字段后更深缩进的续行被保留，遇新标签、标题、空行或退回缩进便停止。身份、性格、经历、关系、能力、隐藏秘密及未标注自由散文不进入模型请求。</p>
+<p>未找到任何明确可见外观时返回 <code>cover_missing_appearance</code>，不调用文字或图片模型；需作者补充外观标签。人物卡最多 12000 字，筛选后供提示词使用的片段最多 2400 字（按 JSON 引号转义后的长度计），过长时要求精简。文字模型仅调用一次融合外观与风格；所有视觉计划验证通过后才开始第一张图，图片请求再次附加原外观事实约束，不补缺失年龄、性别、人种、衣着或饰物。</p>
+<p>字段筛选与计划结构校验不能证明自然语言或图片绝无语义偏移：若作者把经历写进外貌字段，它仍可能被视为字段内容。请保持每个字段只写可见特征，并对最终图片中的人物外观进行比较确认。</p>
 <h2>提示词边界</h2>
 <p>内部描述不进入前端包、接口结果、新封面版本或备份；旧封面 prompt 字符串在数据库升级和备份导入时去除，图片字节保留。公开旧 raw prompt 生成接口已关闭。</p>
 <p>用户选择保留 Custom。自定义网关运营者可以接触模型请求，本功能不能对其保密，也不保证任何恶意输入都无法滥用。固定流程和输入校验用于约束本应用的入口，文字模型和生图服务的内容审核继续生效。</p>

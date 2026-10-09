@@ -209,6 +209,99 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["generationConfig"]["responseFormat"]["image"], {"aspectRatio": "2:3", "imageSize": "2K"})
         self.assertEqual(result["image"]["data_base64"], B64)
 
+    async def test_gemini_auth_key_is_opaque_and_only_sent_in_header(self):
+        key = "AQ.fake.auth-key-for-mock-only"
+        seen = []
+        def upstream(req):
+            seen.append(req)
+            return response({"candidates": [{"finishReason": "STOP", "content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": B64}}]}}]})
+        with patch.object(images, "_client", factory(upstream)):
+            result = await images.request_image(images.ImageConfig(connection("gemini"), key), "generate", {"prompt": "封面"}, {})
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].headers["x-goog-api-key"], key)
+        self.assertNotIn("authorization", seen[0].headers)
+        self.assertNotIn(key, str(seen[0].url)); self.assertNotIn(key.encode(), seen[0].content)
+        self.assertNotIn(key, json.dumps(result))
+
+    async def test_gemini_structured_errors_are_fixed_sanitized_and_never_retried(self):
+        cases = ((401, "UNAUTHENTICATED", "image_auth_error", 401),
+                 (403, "PERMISSION_DENIED", "image_permission_denied", 403),
+                 (429, "RESOURCE_EXHAUSTED", "image_quota_or_rate_limited", 429),
+                 (400, "INVALID_ARGUMENT", "image_invalid_request", 400),
+                 (400, "FAILED_PRECONDITION", "image_invalid_request", 400),
+                 (404, "NOT_FOUND", "image_invalid_request", 400),
+                 (503, "UNAVAILABLE", "image_unavailable", 503),
+                 (500, "INTERNAL", "image_unavailable", 503),
+                 (504, "DEADLINE_EXCEEDED", "image_outcome_unknown", 502),
+                 (200, "RESOURCE_EXHAUSTED", "image_quota_or_rate_limited", 429),
+                 (403, None, "image_permission_denied", 403),
+                 (200, "unknown " + KEY, "image_outcome_unknown", 502))
+        for upstream_http, upstream_status, code, expected_http in cases:
+            with self.subTest(status=upstream_http, upstream_status=upstream_status):
+                seen = []
+                def upstream(req):
+                    seen.append(req)
+                    return response({"error": {"status": upstream_status, "message": "SAFETY quota freeTierNotAvailable " + KEY,
+                        "details": [{"reason": KEY, "url": "https://signed.example/?secret"}]}}, upstream_http,
+                        {"set-cookie": KEY, "x-provider-secret": KEY})
+                with patch.object(images, "_client", factory(upstream)):
+                    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                        result = await client.post("/api/compute/images/generate", json=payload(conn=connection("gemini")))
+                self.assertEqual(result.status_code, expected_http, result.text)
+                self.assertEqual(result.json()["error"]["code"], code)
+                self.assertEqual(len(seen), 1)
+                self.assertNotIn(KEY, result.text); self.assertNotIn("signed.example", result.text)
+                self.assertNotIn("freeTierNotAvailable", result.text)
+                self.assertNotIn("set-cookie", result.headers); self.assertNotIn("x-provider-secret", result.headers)
+
+    async def test_gemini_content_rejection_and_unknown_output_stay_distinct(self):
+        blocked = [{"promptFeedback": {"blockReason": reason, "blockReasonMessage": KEY}}
+                   for reason in ("SAFETY", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY")]
+        blocked += [{"candidates": [{"finishReason": reason, "finishMessage": KEY, "content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": B64}}]}}]}
+                    for reason in ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY", "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION", "ESCALATION", "PUP_LIMITED_DISABLED")]
+        unknown = [{}, {"promptFeedback": {"blockReason": "unknown " + KEY}},
+                   {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "SAFETY " + KEY}]}}]}]
+        unknown += [{"candidates": [{"finishReason": reason}]} for reason in ("MAX_TOKENS", "IMAGE_OTHER", "NO_IMAGE", "unknown " + KEY)]
+        for raw, code in [(raw, "image_content_rejected") for raw in blocked] + [(raw, "image_outcome_unknown") for raw in unknown]:
+            seen = []
+            def upstream(req):
+                seen.append(req); return response(raw)
+            with patch.object(images, "_client", factory(upstream)), self.assertRaises(images.ImageProviderError) as caught:
+                await images.request_image(images.ImageConfig(connection("gemini"), KEY), "generate", {"prompt": "封面"}, {})
+            self.assertEqual(caught.exception.code, code)
+            self.assertNotIn(KEY, str(caught.exception)); self.assertEqual(len(seen), 1)
+
+    async def test_gemini_malformed_bounded_response_and_network_failure_are_unknown(self):
+        failures = (response(b"not-json"), response({"error": {"status": "RESOURCE_EXHAUSTED", "message": KEY}}, 429, {"content-length": "100000"}),
+                    response({"error": {"status": "RESOURCE_EXHAUSTED"}}, 429, {"content-encoding": "gzip"}),
+                    response(b"x" * (64 * 1024 + 1), 429), response({"candidates": [{"content": {"parts": [{"inlineData": {"data": "bad"}}]}}]}))
+        for failure in failures:
+            seen = []
+            def upstream(req):
+                seen.append(req); return failure
+            with patch.object(images, "_client", factory(upstream)), self.assertRaises(images.ImageProviderError) as caught:
+                await images.request_image(images.ImageConfig(connection("gemini"), KEY), "generate", {"prompt": "封面"}, {})
+            self.assertEqual(caught.exception.code, "image_outcome_unknown"); self.assertEqual(len(seen), 1)
+        seen = []
+        def disconnected(req):
+            seen.append(req); raise httpx.ReadError(KEY)
+        with patch.object(images, "_client", factory(disconnected)), self.assertRaises(images.ImageProviderError) as caught:
+            await images.request_image(images.ImageConfig(connection("gemini"), KEY), "generate", {"prompt": "封面"}, {})
+        self.assertEqual(caught.exception.code, "image_outcome_unknown"); self.assertNotIn(KEY, str(caught.exception))
+        self.assertEqual(len(seen), 1)
+
+    async def test_gemini_transport_timeout_keeps_unknown_outcome_without_retry(self):
+        seen = []
+        def upstream(req):
+            seen.append(req); raise httpx.ReadTimeout(KEY)
+        with patch.object(images, "_client", factory(upstream)):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                result = await client.post("/api/compute/images/generate", json=payload(conn=connection("gemini")))
+        self.assertEqual(result.status_code, 504, result.text)
+        self.assertEqual(result.json()["error"]["code"], "compute_timeout")
+        self.assertIn("结果未知", result.json()["error"]["message"])
+        self.assertNotIn(KEY, result.text); self.assertEqual(len(seen), 1)
+
     async def test_qwen_synchronous_generate_and_edit_use_same_model(self):
         seen = []
         def upstream(req):

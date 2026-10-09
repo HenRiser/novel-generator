@@ -14,6 +14,8 @@ export type CoverStyleId = 'cinematic' | 'ink' | 'anime' | 'fantasy' | 'minimal'
 export type CoverVersion = {
   id: string;
   media_id: string;
+  /** Missing on older model-generated candidates. */
+  origin?: 'model' | 'upload';
   parent_id?: string;
   style_id?: CoverStyleId;
   template_version?: number;

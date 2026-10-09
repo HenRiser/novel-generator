@@ -30,6 +30,13 @@ export async function imageProviderPresets(signal?: AbortSignal): Promise<ImageP
   return [...(presets.length ? presets : IMAGE_PRESETS.filter(p => p.id !== 'custom')), IMAGE_PRESETS.find(p => p.id === 'custom')!];
 }
 export async function defaultImageConnectionId(): Promise<string> { return await getSetting<string>('default_image_connection') || ''; }
+export async function fallbackImageConnectionId(): Promise<string> { return await getSetting<string>('fallback_image_connection') || ''; }
+export async function setFallbackImageConnection(id: string) {
+  if (!id) { await setSetting('fallback_image_connection', ''); notifyConnection(''); return; }
+  const profile = await getConnection(id), snapshot = profile.revisions.find(item => item.revision === profile.head);
+  if (!profile.enabled || profile.deleted || !profile.revisions.length || snapshot?.preset !== 'seedream' || snapshot.model !== 'doubao-seedream-5-0-flash-260915') throw new Error('请先保存并启用 Seedream 5.0 Flash 图片连接。');
+  await setSetting('fallback_image_connection', id); notifyConnection(id);
+}
 export async function setDefaultImageConnection(id: string) {
   const profile = await getConnection(id);
   if (!profile.enabled || profile.deleted || !imageSnapshot(profile) || !profile.revisions.length) throw new Error('请先保存并启用图片连接。');
@@ -82,6 +89,11 @@ export async function resolveImageConnection(id?: string, model?: string): Promi
   const profile = await getConnection(target), snapshot = profile.revisions.find(r => r.revision === profile.head);
   if (!profile.enabled || profile.deleted || !snapshot || !isImageProtocol(snapshot.protocol)) throw new Error('图片连接不可用，请重新选择已启用的连接。');
   return !model || model === snapshot.model ? snapshot as ImageConnectionSnapshot : validateImageConnection({ ...snapshot, model });
+}
+export async function resolveFallbackImageConnection(id: string): Promise<ImageConnectionSnapshot> {
+  const snapshot = await resolveImageConnection(id);
+  if (snapshot.preset !== 'seedream' || snapshot.protocol !== 'seedream_images' || snapshot.model !== 'doubao-seedream-5-0-flash-260915') throw new Error('兜底连接已更改，请重新选择已保存的 Seedream 5.0 Flash 连接。');
+  return snapshot;
 }
 export async function acquireImageConnection(snapshot: ConnectionSnapshot, signal?: AbortSignal, temporaryKey?: string): Promise<ConnectionLease> {
   if (!isImageProtocol(snapshot.protocol)) throw new Error('请选择图片连接。');

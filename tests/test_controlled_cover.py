@@ -17,6 +17,8 @@ from api import main
 from api.routers import compute, image_compute as route
 import cover_generation as covers
 from deepseek_client import DeepSeekClientError
+from image_provider import ImageProviderError
+import provider_catalog
 from provider_catalog import default_policy, normalize_connection, request_fingerprint
 from tests.test_image_compute import connection, ORIGINAL, payload as legacy_payload
 from tests.test_image_metadata import metadata_png, SECRET
@@ -37,7 +39,7 @@ def plan(count, **changes):
 
 def payload(count=1, operation="generate", **changes):
     image = connection()
-    data = {"source": {"idea": "雨城的侦探与古老神话", "characters": "成年侦探，黑色风衣"},
+    data = {"source": {"idea": "", "characters": "- **姓名**：阿晏\n- **外貌特征**：黑色短发，灰色眼睛\n- **服饰**：黑色风衣"},
             "style_id": "cinematic", "count": count, "size": "2K", "text_connection": text_connection()}
     if operation == "edit":
         data.update(image=ORIGINAL, edit_kind="restyle")
@@ -83,7 +85,9 @@ class ControlledCoverTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config.api_key, TEXT_KEY)
             self.assertEqual(options["max_tokens"], 6000); self.assertTrue(options["json_mode"])
             self.assertEqual(messages[0]["role"], "system")
-            self.assertEqual(json.loads(messages[1]["content"])["source"], body["input"]["source"])
+            sent = json.loads(messages[1]["content"])
+            self.assertEqual(sent["characters"], covers._appearance_source(body["input"]["source"]["characters"]))
+            self.assertEqual(set(sent), {"characters", "count", "edit_kind"})
             await asyncio.sleep(0); active -= 1
             return json.dumps(plan(4))
         async def image(config, operation, data, metrics):
@@ -162,6 +166,56 @@ class ControlledCoverTests(unittest.IsolatedAsyncioTestCase):
                 text.assert_awaited_once(); image.assert_not_called()
             self.assert_free()
 
+    async def test_only_explicit_visible_fields_reach_text_and_image_models(self):
+        biography = "BIOGRAPHY_MUST_NOT_LEAVE_CARD"
+        cards = "\n".join(("# 人物设定表", "- **姓名：**阿晏", "- **身份**：" + biography,
+            "- **外貌特征**：黑色短发，经历（摘要）：" + biography, "  灰色眼睛", "  - **经历**",
+            "    " + biography, "- 外貌：黑色短发", "  - **过去经历（摘要）**：" + biography,
+            "    " + biography, "- 服饰：黑色风衣；经历：" + biography, "- 可见饰物：银色耳环",
+            "## 经历", "  " + biography, "姓名：小舟", "外观：栗色头发。经历：" + biography, "隐藏秘密：" + biography))
+        body = payload(source={"idea": "", "characters": cards})
+        text = AsyncMock(return_value=json.dumps(plan(2)))
+        image = AsyncMock(return_value=RESULT)
+        body["input"]["count"] = 2
+        body["request_fingerprint"] = request_fingerprint(body["connection"], "cover_generate", body["input"])
+        with patch.object(covers.model_client, "request_text", text), patch.object(covers, "request_image", image):
+            events = self.events(await self.post(body))
+        self.assertEqual(events[-1]["type"], "done"); text.assert_awaited_once(); self.assertEqual(image.call_count, 2)
+        messages = text.call_args.args[1]
+        self.assertNotIn(biography, json.dumps(messages, ensure_ascii=False))
+        user = json.loads(messages[1]["content"])
+        self.assertEqual(set(user), {"characters", "count", "edit_kind"})
+        for visible in ("阿晏", "黑色短发", "灰色眼睛", "黑色风衣", "银色耳环", "小舟", "栗色头发"):
+            self.assertIn(visible, user["characters"])
+            for call in image.call_args_list:
+                self.assertIn(visible, call.args[2]["prompt"])
+                self.assertNotIn(biography, call.args[2]["prompt"])
+                self.assertIn(covers.STYLES["cinematic"][1], call.args[2]["prompt"])
+        self.assertNotIn(user["characters"], response_text := "\n".join(json.dumps(event, ensure_ascii=False) for event in events))
+        self.assertNotIn(PRIVATE, response_text); self.assert_free()
+
+    async def test_missing_appearance_rejects_unlabeled_cards_before_any_model_call(self):
+        cards = ("", " ", "姓名：阿晏\n身份：侦探\n经历：穿越了城市", "黑色短发，灰色眼睛，黑色风衣",
+                 "姓名：阿晏\n  别名一\n  别名二", "外貌特征：\n经历：穿黑色风衣", "# 外貌特征\n黑色短发")
+        with patch.object(covers.model_client, "request_text") as text, patch.object(covers, "request_image") as image:
+            for characters in cards:
+                response = await self.post(payload(source={"idea": "", "characters": characters}))
+                self.assertEqual(response.status_code, 400 if not characters.strip() else 422, response.text)
+                if characters.strip():
+                    self.assertEqual(response.json()["error"]["code"], "cover_missing_appearance")
+            text.assert_not_called(); image.assert_not_called()
+        self.assert_free()
+
+    async def test_appearance_limit_and_later_invalid_variant_stop_before_first_image(self):
+        with patch.object(covers.model_client, "request_text") as text, patch.object(covers, "request_image") as image:
+            response = await self.post(payload(source={"idea": "", "characters": "外貌特征：" + "x" * 2400}))
+            self.assertEqual(response.status_code, 400); text.assert_not_called(); image.assert_not_called()
+        invalid = plan(2); invalid["variants"][1]["subject"] = ""
+        with patch.object(covers.model_client, "request_text", AsyncMock(return_value=json.dumps(invalid))) as text, patch.object(covers, "request_image") as image:
+            events = self.events(await self.post(payload(2)))
+        self.assertEqual(events[-1]["code"], "invalid_cover_plan"); text.assert_awaited_once(); image.assert_not_called()
+        self.assert_free()
+
     async def test_explicit_prompt_only_accepts_one_fenced_json_without_repair(self):
         policy = {**default_policy("custom"), "structured": "prompt_only"}
         text = text_connection(preset="custom", base_url="https://text.example/v1", policy=policy)
@@ -178,11 +232,30 @@ class ControlledCoverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[-1]["requested"], 4); self.assertEqual(image.call_count, 3)
         self.assertNotIn(PRIVATE, response.text); self.assertNotIn(IMAGE_KEY, response.text); self.assert_free()
 
+    async def test_classified_image_failure_preserves_cover_event_identity_and_partial_results(self):
+        for code, status in (("image_content_rejected", 422), ("image_quota_or_rate_limited", 429), ("image_outcome_unknown", 502)):
+            body = payload(2)
+            image = AsyncMock(side_effect=[RESULT, ImageProviderError(code)])
+            with patch.object(covers.model_client, "request_text", AsyncMock(return_value=json.dumps(plan(2)))), patch.object(covers, "request_image", image):
+                response = await self.post(body)
+            events = self.events(response)
+            self.assertEqual([event["type"] for event in events], ["started", "text_started", "text_done", "image_started", "image", "image_started", "error"])
+            self.assertEqual(image.call_count, 2)
+            self.assertEqual(events[-1]["code"], code); self.assertEqual(events[-1]["status"], status)
+            self.assertEqual(events[-1]["completed"], 1); self.assertEqual(events[-1]["requested"], 2)
+            for seq, event in enumerate(events, 1):
+                self.assertEqual(event["seq"], seq)
+                self.assertEqual(event["request_fingerprint"], body["request_fingerprint"])
+                self.assertEqual(event["execution_fingerprint"], body["connection"]["execution_fingerprint"])
+                self.assertEqual(event["text_execution_fingerprint"], body["input"]["text_connection"]["execution_fingerprint"])
+            self.assertNotIn(PRIVATE, response.text); self.assertNotIn(IMAGE_KEY, response.text); self.assertNotIn(TEXT_KEY, response.text)
+            self.assert_free()
+
     async def test_request_boundary_rejects_raw_prompt_and_tampering_before_either_key_is_sent(self):
         cases = []
         for field, value in (("prompt", PRIVATE), ("style_id", "custom"), ("count", True), ("count", 3), ("size", "4K")):
             body = payload(); body["input"][field] = value; cases.append(body)
-        for field, value in (("idea", ""), ("characters", "x" * 12001), ("prompt", PRIVATE)):
+        for field, value in (("idea", "雨城的侦探与古老神话"), ("characters", "x" * 12001), ("prompt", PRIVATE)):
             body = payload(); body["input"]["source"][field] = value; cases.append(body)
         for field in ("execution_fingerprint", "base_url"):
             body = payload(); body["input"]["text_connection"][field] = "forged"; cases.append(body)
@@ -249,12 +322,29 @@ class ControlledCoverTests(unittest.IsolatedAsyncioTestCase):
         for field, value in (("edit_kind", "lighting"), ("image", {"mime_type": "image/png", "data_base64": base64.b64encode(metadata_png()).decode()})):
             self.assertNotEqual(request_fingerprint(body["connection"], "cover_edit", {**body["input"], field: value}), body["request_fingerprint"])
 
+    async def test_template_one_fingerprint_is_rejected_before_either_model_call(self):
+        original_digest = provider_catalog.digest
+        def old_template(value):
+            if value.startswith("{") and '"cover_protocol"' in value:
+                envelope = json.loads(value)
+                envelope.update(cover_protocol=1, template_version=1)
+                value = json.dumps(envelope, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            return original_digest(value)
+        body = payload()
+        with patch.object(provider_catalog, "digest", side_effect=old_template):
+            body["request_fingerprint"] = request_fingerprint(body["connection"], "cover_generate", body["input"])
+        with patch.object(covers.model_client, "request_text") as text, patch.object(covers, "request_image") as image:
+            response = await self.post(body)
+        self.assertEqual(response.status_code, 400, response.text)
+        text.assert_not_called(); image.assert_not_called(); self.assert_free()
+
     async def test_capabilities_expose_only_style_directory_and_budgets(self):
         result = (await self.client.get("/api/capabilities")).json()["cover_generation"]
         self.assertEqual(result["counts"], [1, 2, 4]); self.assertEqual(covers.budget_seconds(4), 630)
         self.assertEqual({style["id"] for style in result["styles"]}, set(covers.STYLES))
         self.assertTrue(all(set(style) == {"id", "label"} for style in result["styles"]))
         self.assertNotIn(covers.SYSTEM, json.dumps(result))
+        self.assertEqual(result["template_version"], 2)
 
 
 class CoverHarness:

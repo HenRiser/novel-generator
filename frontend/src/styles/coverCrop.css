@@ -1,0 +1,12 @@
+.cover-upload { display:flex; flex-direction:column; gap:12px; padding:16px; border:1px solid var(--border); border-radius:9px; min-width:0; }
+.cover-upload h3 { margin:0; font-size:16px; color:var(--ink); }
+.cover-upload p { margin:0; line-height:1.8; overflow-wrap:anywhere; }
+.cover-upload input[type=file] { width:100%; min-width:0; font:inherit; font-size:12px; }
+.cover-crop-editor { display:flex; flex-direction:column; gap:12px; }
+.cover-crop-stage { position:relative; align-self:center; overflow:hidden; background:#222; }
+.cover-crop-stage img { display:block; width:100%; height:100%; object-fit:contain; }
+.cover-crop-box { position:absolute; box-sizing:border-box; border:2px solid #fff; box-shadow:0 0 0 1000px rgba(0,0,0,.55); cursor:move; touch-action:none; }
+.cover-crop-box:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+.cover-crop-box span { position:absolute; top:5px; left:5px; padding:1px 4px; border-radius:3px; background:rgba(0,0,0,.6); color:#fff; font-size:12px; }
+.cover-crop-editor input[type=range] { width:100%; margin:0; accent-color:var(--accent); min-height:28px; }
+@media(max-width:600px) { .cover-upload { padding:12px; } .cover-upload .ant-btn { white-space:normal; height:auto; min-height:32px; max-width:100%; } }

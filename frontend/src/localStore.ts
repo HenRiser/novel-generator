@@ -122,13 +122,17 @@ function validateCover(cover: unknown): asserts cover is CoverState {
       typeof layout.authorSize !== 'number' || !Number.isFinite(layout.authorSize) || layout.authorSize < 1 || layout.authorSize > 8) return invalid();
   const ids = new Set<string>(), media = new Set<string>();
   for (const version of cover.versions) {
-    if (!object(version) || !fields(version, ['id', 'media_id', 'parent_id', 'style_id', 'template_version', 'text_model', 'source', 'connection', 'created_at', 'width', 'height', 'mime_type']) ||
+    if (!object(version) || !fields(version, ['id', 'media_id', 'origin', 'parent_id', 'style_id', 'template_version', 'text_model', 'source', 'connection', 'created_at', 'width', 'height', 'mime_type']) ||
         !identifier(version.id) || !identifier(version.media_id) || ids.has(String(version.id)) || media.has(String(version.media_id)) ||
         !text(version.created_at, 100) || !Number.isFinite(Date.parse(version.created_at as string)) ||
         !['image/png', 'image/jpeg', 'image/webp'].includes(String(version.mime_type)) ||
         !Number.isSafeInteger(version.width) || !Number.isSafeInteger(version.height) || (version.width as number) <= 0 || (version.height as number) <= 0 ||
         (version.width as number) > 16384 || (version.height as number) > 16384 || (version.width as number) * (version.height as number) > 64 * 1024 * 1024 ||
         !object(version.source) || !fields(version.source, ['idea', 'characters']) || !text(version.source.idea, 100000) || !text(version.source.characters, 100000)) return invalid();
+    if (version.origin !== undefined && (typeof version.origin !== 'string' || !['model', 'upload'].includes(version.origin))) return invalid();
+    if (version.origin === 'upload' && ((version.width as number) * 3 !== (version.height as number) * 2 ||
+        version.source.idea !== '' || version.source.characters !== '' ||
+        ['connection', 'text_model', 'style_id', 'template_version'].some(key => version[key] !== undefined))) return invalid();
     if (version.style_id !== undefined && (typeof version.style_id !== 'string' || !coverStyles.includes(version.style_id))) return invalid();
     if (version.template_version !== undefined && (!Number.isSafeInteger(version.template_version) || (version.template_version as number) < 1)) return invalid();
     if (version.text_model !== undefined && (!text(version.text_model, 200) || !(version.text_model as string).trim())) return invalid();
@@ -155,15 +159,52 @@ function coverMime(bytes: Uint8Array): CoverVersion['mime_type'] {
 
 export async function inspectCoverBlob(blob: Blob): Promise<{ mime_type: CoverVersion['mime_type']; width: number; height: number }> {
   if (!(blob instanceof Blob) || !blob.size || blob.size > MAX_COVER_BYTES) throw new Error('封面图片不能为空或超过 8 MiB。');
-  const mime_type = coverMime(new Uint8Array(await blob.slice(0, 40).arrayBuffer()));
+  const bytes = new Uint8Array(await blob.arrayBuffer()), mime_type = coverMime(bytes);
   if (blob.type !== mime_type) throw new Error('封面图片的文件类型与实际内容不一致。');
+  // Bound decoded allocation before giving compressed bytes to the browser.
+  const declared = coverImageDimensions(bytes, mime_type);
+  checkCoverDimensions(declared.width, declared.height);
   if (typeof createImageBitmap !== 'function') throw new Error('此浏览器无法校验图片，请使用新版浏览器。');
   let image: ImageBitmap;
-  try { image = await createImageBitmap(blob); } catch { throw new Error('封面图片损坏或无法解码。'); }
+  try { image = await createImageBitmap(blob, { imageOrientation: 'from-image' }); } catch { throw new Error('封面图片损坏或无法解码。'); }
   const { width, height } = image;
   image.close();
-  if (!width || !height || width > 16384 || height > 16384 || width * height > 64 * 1024 * 1024) throw new Error('封面图片尺寸过大。');
+  checkCoverDimensions(width, height);
+  // EXIF orientation can exchange JPEG width and height during browser decoding.
+  if (!(width === declared.width && height === declared.height) && !(mime_type === 'image/jpeg' && width === declared.height && height === declared.width)) throw new Error('封面图片声明尺寸与实际内容不一致。');
   return { mime_type, width, height };
+}
+
+function checkCoverDimensions(width: number, height: number): void {
+  if (!width || !height || width > 16384 || height > 16384 || width * height > 64 * 1024 * 1024) throw new Error('封面图片尺寸过大。');
+}
+
+function coverImageDimensions(bytes: Uint8Array, mime: CoverVersion['mime_type']): { width: number; height: number } {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (mime === 'image/png') return { width: view.getUint32(16), height: view.getUint32(20) };
+  if (mime === 'image/jpeg') {
+    for (let offset = 2; offset + 4 <= bytes.length;) {
+      if (bytes[offset++] !== 255) break;
+      while (bytes[offset] === 255) offset++;
+      const marker = bytes[offset++];
+      if (marker === 1 || marker === 216 || (marker >= 208 && marker <= 215)) continue;
+      if (marker === 217 || marker === 218 || offset + 2 > bytes.length) break;
+      const length = view.getUint16(offset);
+      if (length < 2 || offset + length > bytes.length) break;
+      if (marker >= 192 && marker <= 207 && ![196, 200, 204].includes(marker) && length >= 8) return { width: view.getUint16(offset + 5), height: view.getUint16(offset + 3) };
+      offset += length;
+    }
+  } else {
+    for (let offset = 12; offset + 8 <= bytes.length;) {
+      const kind = String.fromCharCode(...bytes.subarray(offset, offset + 4)), length = view.getUint32(offset + 4, true), data = offset + 8;
+      if (data + length > bytes.length) break;
+      if (kind === 'VP8X' && length >= 10) return { width: 1 + bytes[data + 4] + (bytes[data + 5] << 8) + (bytes[data + 6] << 16), height: 1 + bytes[data + 7] + (bytes[data + 8] << 8) + (bytes[data + 9] << 16) };
+      if (kind === 'VP8 ' && length >= 10 && bytes[data + 3] === 157 && bytes[data + 4] === 1 && bytes[data + 5] === 42) return { width: view.getUint16(data + 6, true) & 16383, height: view.getUint16(data + 8, true) & 16383 };
+      if (kind === 'VP8L' && length >= 5 && bytes[data] === 47) { const packed = view.getUint32(data + 1, true); return { width: 1 + (packed & 16383), height: 1 + ((packed >>> 14) & 16383) }; }
+      offset = data + length + (length % 2);
+    }
+  }
+  throw new Error('封面图片损坏或无法读取尺寸。');
 }
 
 export function validateProject(value: unknown): asserts value is LocalProject {
@@ -295,10 +336,13 @@ export function getCoverBlob(mediaId: string): Promise<Blob> {
 }
 
 export async function saveCoverVersion(ref: string, metadata: CoverVersionInput, blob: Blob, guard?: ConnectionGuard | ConnectionGuard[],
-  options: { preserveAttempt?: boolean; attemptId?: string } = {}): Promise<CoverVersion> {
+  options: { preserveAttempt?: boolean; attemptId?: string; isCurrent?: () => boolean } = {}): Promise<CoverVersion> {
+  const checkCurrent = () => { if (options.isCurrent && !options.isCurrent()) throw new Error('封面操作已结束，旧结果未写入。'); };
+  checkCurrent();
   const guards = guard ? Array.isArray(guard) ? guard : [guard] : [];
   if (guards.length && metadata.connection?.profile_id !== guards[0].profile_id) throw new Error('封面结果与生成所用连接不一致。');
   const image = await inspectCoverBlob(blob);
+  checkCurrent();
   if (metadata.width !== image.width || metadata.height !== image.height) throw new Error('封面尺寸与实际图片不一致。');
   const version: CoverVersion = { ...structuredClone(metadata), ...image, id: `cover_${crypto.randomUUID()}`, media_id: `media_${crypto.randomUUID()}`, created_at: new Date().toISOString() };
   removeLegacyCoverPrompts({ cover: { versions: [version] } });
@@ -307,6 +351,7 @@ export async function saveCoverVersion(ref: string, metadata: CoverVersionInput,
     const store = tx.objectStore('projects'), request = store.get(ref);
     request.onsuccess = () => {
       const save = () => { try {
+        checkCurrent();
         const project = request.result as LocalProject | undefined;
         if (!project) throw new Error('此浏览器中找不到该项目。');
         const cover = projectCover(project);

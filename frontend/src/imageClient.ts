@@ -5,12 +5,19 @@ import { requestFingerprint, type ConnectionLease } from './providerConnections'
 import type { CoverStyleId, CoverEditKind } from './providerTypes';
 
 export type ImageData = { mime_type: 'image/png' | 'image/jpeg' | 'image/webp'; data_base64: string; width: number; height: number };
-export type CoverImageResult = { image: ImageData; model: string; style_id: CoverStyleId; template_version: 1; text_model: string };
+export type CoverImageResult = { image: ImageData; model: string; style_id: CoverStyleId; template_version: 2; text_model: string };
 export type ImageModelsResult = { models: Array<{ id: string; name: string }>; catalog_supported?: boolean; truncated?: boolean };
 export type CoverImageInput = { source: { idea: string; characters: string }; style_id: CoverStyleId; count: 1 | 2 | 4; size: '2K'; image?: Pick<ImageData, 'mime_type' | 'data_base64'>; edit_kind?: CoverEditKind };
 export type CoverImageHandlers = { onProgress?: (stage: 'text' | 'image', index: number, requested: number) => void; onImage: (result: CoverImageResult, index: number) => Promise<void> };
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024, MAX_JSON_BYTES = 12 * 1024 * 1024;
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+export class CoverRequestError extends Error {
+  constructor(message: string, readonly code: string, readonly status: number, readonly completed: number, readonly stage: 'preflight' | 'text' | 'image') { super(message); this.name = 'CoverRequestError'; }
+}
+export function canOfferSeedreamFallback(error: unknown, preset: string): boolean {
+  const statuses: Record<string, number> = { image_permission_denied: 403, image_quota_or_rate_limited: 429, image_unavailable: 503 };
+  return preset === 'gemini' && error instanceof CoverRequestError && error.stage === 'image' && error.completed === 0 && statuses[error.code] === error.status;
+}
 function abortable<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const aborted = () => { signal.removeEventListener('abort', aborted); reject(signal.reason); };
@@ -89,8 +96,8 @@ export async function requestCoverImages(input: CoverImageInput, imageLease: Con
   if (!isImageProtocol(image.protocol) || !image.model || !['chat_completions', 'messages'].includes(text.protocol) || !text.model) throw new Error('请选择可用的图片连接和文字连接。');
   const allowed = ['source', 'style_id', 'count', 'size', 'image', 'edit_kind'];
   if (!record(frozen) || Object.keys(frozen).some(key => !allowed.includes(key)) || !record(frozen.source) || Object.keys(frozen.source).sort().join(',') !== 'characters,idea'
-    || typeof frozen.source.idea !== 'string' || typeof frozen.source.characters !== 'string' || !frozen.source.idea.trim() || frozen.source.idea.length > 6000 || frozen.source.characters.length > 12000
-    || !['cinematic', 'ink', 'anime', 'fantasy', 'minimal'].includes(frozen.style_id) || ![1, 2, 4].includes(frozen.count) || frozen.size !== '2K') throw new Error('请保存白话设定，并选择封面风格和 1、2 或 4 张候选。白话设定限 6000 字，人物卡限 12000 字。');
+    || frozen.source.idea !== '' || typeof frozen.source.characters !== 'string' || !frozen.source.characters.trim() || frozen.source.characters.length > 12000
+    || !['cinematic', 'ink', 'anime', 'fantasy', 'minimal'].includes(frozen.style_id) || ![1, 2, 4].includes(frozen.count) || frozen.size !== '2K') throw new Error('请先保存包含明确外貌特征的 12000 字内人物卡，并选择封面风格和 1、2 或 4 张候选。');
   if (operation === 'cover_edit' ? !['restyle', 'simplify_background', 'lighting'].includes(frozen.edit_kind || '') : frozen.edit_kind !== undefined) throw new Error('请选择原图的修改目标。');
   if (frozen.image) {
     if (!record(frozen.image) || Object.keys(frozen.image).sort().join(',') !== 'data_base64,mime_type') throw new Error('修改封面需要有效原图。');
@@ -109,7 +116,8 @@ export async function requestCoverImages(input: CoverImageInput, imageLease: Con
   catch (error) { active.throwIfAborted(); if (error instanceof TypeError) throw new Error('图片连接中断，结果未确认。再次生成可能计费。'); throw error; }
   if (!response.ok) {
     const payload = await responseJson(response, active); await check();
-    throw new Error(safePublicMessage(record(payload) && record(payload.error) ? payload.error.message : undefined, `封面请求失败（${response.status}），不会自动重试。`));
+    const error = record(payload) && record(payload.error) ? payload.error : {};
+    throw new CoverRequestError(safePublicMessage(error.message, `封面请求失败（${response.status}），不会自动重试。`), typeof error.code === 'string' ? error.code : 'unknown', response.status, 0, 'preflight');
   }
   if (!response.headers.get('content-type')?.toLowerCase().includes('application/x-ndjson') || !response.body) throw new Error('封面响应格式无效，未应用结果。');
   const reader = response.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true });
@@ -128,14 +136,14 @@ export async function requestCoverImages(input: CoverImageInput, imageLease: Con
     else if (kind === 'image_started' && phase === 'ready' && value.index === completed && completed < frozen.count) { phase = 'image'; handlers.onProgress?.('image', completed, frozen.count); }
     else if (kind === 'image' && phase === 'image' && value.index === completed && record(value.result)) {
       const result = value.result;
-      if (Object.keys(result).sort().join(',') !== 'image,model,style_id,template_version,text_model' || result.model !== image.model || result.text_model !== text.model || result.style_id !== frozen.style_id || result.template_version !== 1) throw new Error('图片结果的模型或风格信息无效，未应用结果。');
+      if (Object.keys(result).sort().join(',') !== 'image,model,style_id,template_version,text_model' || result.model !== image.model || result.text_model !== text.model || result.style_id !== frozen.style_id || result.template_version !== 2) throw new Error('图片结果的模型或风格信息无效，未应用结果。');
       const { dimensions } = await abortable(imageBlob(result.image), active);
       if (!record(result.image) || Object.keys(result.image).sort().join(',') !== 'data_base64,height,mime_type,width' || result.image.width !== dimensions.width || result.image.height !== dimensions.height) throw new Error('图片结果的尺寸信息无效，未应用结果。');
       // Let an accepted local save finish before reporting cancellation; it cannot overwrite the later failure state.
       await check(); await handlers.onImage(result as CoverImageResult, completed); completed++; await check(); phase = 'ready';
     } else if (kind === 'done' && phase === 'ready' && value.completed === completed && completed === frozen.count && value.requested === frozen.count) phase = 'done';
-    else if (kind === 'error' && phase !== 'initial' && phase !== 'done' && value.completed === completed && value.requested === frozen.count && typeof value.code === 'string' && typeof value.status === 'number') {
-      throw new Error(safePublicMessage(value.message, `封面生成中断，已保存 ${completed}/${frozen.count} 张；不会自动重试。`));
+    else if (kind === 'error' && phase !== 'initial' && phase !== 'done' && value.completed === completed && value.requested === frozen.count && typeof value.code === 'string' && Number.isInteger(value.status) && Number(value.status) >= 400 && Number(value.status) <= 599) {
+      throw new CoverRequestError(safePublicMessage(value.message, `封面生成中断，已保存 ${completed}/${frozen.count} 张；不会自动重试。`), value.code, Number(value.status), completed, phase === 'image' ? 'image' : 'text');
     } else throw new Error('封面响应的阶段或图片顺序无效，已保存的候选会保留。');
   };
   try {

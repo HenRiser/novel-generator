@@ -75,7 +75,7 @@ function fixture() {
     const base = { ...identity(payload), protocol_version: 2, destination_fingerprint: payload.connection.destination_fingerprint, execution_fingerprint: payload.connection.execution_fingerprint,
       text_destination_fingerprint: payload.input.text_connection.destination_fingerprint, text_execution_fingerprint: payload.input.text_connection.execution_fingerprint, event_version: 1 };
     const events = [{ type: 'started', requested: payload.input.count }, { type: 'text_started' }, { type: 'text_done' }];
-    for (let index = 0; index < payload.input.count; index++) events.push({ type: 'image_started', index }, { type: 'image', index, result: { model: payload.connection.model, style_id: payload.input.style_id, template_version: 1, text_model: payload.input.text_connection.model, image: { mime_type: 'image/png', data_base64: PNG, width: 1, height: 1 } } });
+    for (let index = 0; index < payload.input.count; index++) events.push({ type: 'image_started', index }, { type: 'image', index, result: { model: payload.connection.model, style_id: payload.input.style_id, template_version: 2, text_model: payload.input.text_connection.model, image: { mime_type: 'image/png', data_base64: PNG, width: 1, height: 1 } } });
     events.push({ type: 'done', requested: payload.input.count, completed: payload.input.count });
     return events.map((value, index) => ({ ...base, seq: index + 1, ...value }));
   }
@@ -115,7 +115,7 @@ test('配置校验即使返回有效新指纹，也不能静默替换用户填�
   assert.equal((await f.ic.imageConnections()).length, 0);
 });
 
-const coverInput = (count = 1) => ({ source: { idea: '合成白话设定：未来的影子。', characters: '青年江舟' }, style_id: 'cinematic', count, size: '2K' });
+const coverInput = (count = 1) => ({ source: { idea: '', characters: '姓名：江舟\n外貌特征：黑色短发，黑色眼睛' }, style_id: 'cinematic', count, size: '2K' });
 async function leased(f) { const profile = await f.connection(), image = await f.ic.acquireImageConnection(profile.revisions[0]), text = await f.textConnection(); return { profile, image, text, close: () => { image.close(); text.close(); } }; }
 
 test('受控封面4张逐图等待保存，生成和编辑使用两份冻结连接且不发送生成描述', async () => {
@@ -153,7 +153,7 @@ test('身份、两连接指纹、模型风格、解码尺寸、隐藏字段与�
       f.setHandler(payload => f.coverReply(payload, events => events.map(event => ({ ...event, ...patch }))));
       await assert.rejects(f.client.requestCoverImages(coverInput(), leases.image, leases.text, { onImage: async () => assert.fail('不应应用不匹配结果') }), /版本不匹配/);
     }
-    for (const mutate of [result => { result.image.width = 2; }, result => { result.model = 'wrong'; }, result => { result.text_model = 'wrong'; }, result => { result.style_id = 'ink'; }, result => { result.template_version = 2; }, result => { result.prompt = '服务器不应公开'; }]) {
+    for (const mutate of [result => { result.image.width = 2; }, result => { result.model = 'wrong'; }, result => { result.text_model = 'wrong'; }, result => { result.style_id = 'ink'; }, result => { result.template_version = 1; }, result => { result.prompt = '服务器不应公开'; }]) {
       f.setHandler(payload => f.coverReply(payload, events => { mutate(events[4].result); return events; }));
       await assert.rejects(f.client.requestCoverImages(coverInput(), leases.image, leases.text, { onImage: async () => assert.fail('不应应用异常图片') }), /信息无效/);
     }
@@ -183,4 +183,53 @@ test('图片已开始本地保存时先等待保存结束，再报告停止，�
   await begun; controller.abort(new Error('保存时停止'));
   await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(rejected, false); assert.equal(finished, false);
   release(); await assert.rejects(pending, /保存时停止/); assert.equal(finished, true); leases.close();
+});
+
+test('兜底仅保存 Seedream 5.0 Flash 连接引用；无模型调用，可停用', async () => {
+  const f = fixture(), seedream = await f.connection(), gemini = await f.connection(f.ic.IMAGE_PRESETS.find(p => p.id === 'gemini'));
+  await f.ic.setDefaultImageConnection(gemini.id);
+  const before = f.calls.length;
+  await f.ic.setFallbackImageConnection(seedream.id);
+  assert.equal(await f.ic.fallbackImageConnectionId(), seedream.id);
+  assert.equal(await f.ic.defaultImageConnectionId(), gemini.id);
+  await assert.rejects(f.ic.setFallbackImageConnection(gemini.id), /Seedream/);
+  await f.ic.setFallbackImageConnection(''); assert.equal(await f.ic.fallbackImageConnectionId(), '');
+  assert.equal(f.calls.length, before);
+});
+
+test('兜底选项展示后另一处保存为4.5时拒绝，不临时覆盖模型绕过当前修订', async () => {
+  const f = fixture(), seedream = await f.connection();
+  await f.ic.setFallbackImageConnection(seedream.id);
+  const old = seedream.revisions.find(r => r.revision === seedream.head);
+  const current = await f.ic.saveImageConnection('另处修改', { ...old, model: 'doubao-seedream-4-5-251128' });
+  assert.equal(current.revisions.find(r => r.revision === current.head).model, 'doubao-seedream-4-5-251128');
+  const before = f.calls.length;
+  await assert.rejects(f.ic.resolveFallbackImageConnection(seedream.id), /兜底连接已更改/);
+  assert.equal(f.calls.length, before); assert.equal(await f.ic.fallbackImageConnectionId(), seedream.id);
+});
+
+test('只按已验证机器码提供确认兜底，内容拒绝、文本失败、已保存图片和未知结果不兜底', async () => {
+  const f = fixture();
+  for (const [code, status] of [['image_permission_denied', 403], ['image_quota_or_rate_limited', 429], ['image_unavailable', 503]]) {
+    const error = new f.client.CoverRequestError('固定错误', code, status, 0, 'image');
+    assert.equal(f.client.canOfferSeedreamFallback(error, 'gemini'), true);
+    assert.equal(f.client.canOfferSeedreamFallback(error, 'custom'), false);
+    assert.equal(f.client.canOfferSeedreamFallback(new f.client.CoverRequestError('固定错误', code, status, 1, 'image'), 'gemini'), false);
+    assert.equal(f.client.canOfferSeedreamFallback(new f.client.CoverRequestError('固定错误', code, status, 0, 'text'), 'gemini'), false);
+    assert.equal(f.client.canOfferSeedreamFallback(new f.client.CoverRequestError('固定错误', code, 502, 0, 'image'), 'gemini'), false);
+  }
+  for (const [code, status] of [['image_content_rejected', 422], ['cover_unsuitable', 422], ['compute_timeout', 504], ['image_outcome_unknown', 502], ['image_auth_error', 401], ['invalid_cover_plan', 502], ['cover_missing_appearance', 422]]) assert.equal(f.client.canOfferSeedreamFallback(new f.client.CoverRequestError('固定错误', code, status, 0, 'image'), 'gemini'), false);
+  assert.equal(f.client.canOfferSeedreamFallback(new Error('限流或额度不足'), 'gemini'), false);
+});
+
+test('流式失败保留code/status/completed/stage；预检错误不能伪装为图片供应商失败', async () => {
+  const f = fixture(), leases = await leased(f);
+  try {
+    f.setHandler(payload => f.coverReply(payload, events => [...events.slice(0, 4), { ...events[4], result: undefined, type: 'error', index: undefined, code: 'image_quota_or_rate_limited', status: 429, message: '固定额度提示', completed: 0, requested: 1 }]));
+    const before = f.calls.length;
+    await assert.rejects(f.client.requestCoverImages(coverInput(), leases.image, leases.text, { onImage: async () => assert.fail('失败不能保存图片') }), error => error instanceof f.client.CoverRequestError && error.code === 'image_quota_or_rate_limited' && error.status === 429 && error.completed === 0 && error.stage === 'image');
+    assert.equal(f.calls.length, before + 1);
+    f.setHandler(() => Response.json({ error: { code: 'image_quota_or_rate_limited', message: '固定提示' } }, { status: 429 }));
+    await assert.rejects(f.client.requestCoverImages(coverInput(), leases.image, leases.text, { onImage: async () => {} }), error => error.stage === 'preflight' && !f.client.canOfferSeedreamFallback(error, 'gemini'));
+  } finally { leases.close(); }
 });

@@ -6,7 +6,7 @@ const BINDING_KEY = 'local-folder-sync.v1';
 const LOCK_NAME = 'braipen:local-folder-sync';
 const MERGE_DELAY = 1500;
 const ACTIVE_DELAY = 30_000;
-const ENVIRONMENT_KEYS = ['default_connection', 'default_image_connection', 'default_model'] as const;
+const ENVIRONMENT_KEYS = ['default_connection', 'default_image_connection', 'fallback_image_connection', 'default_model'] as const;
 
 // File System Access permission methods are not included in every DOM type library.
 type SyncFileHandle = {

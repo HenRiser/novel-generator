@@ -28,13 +28,13 @@ const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BA
 await server.listen();
 const origin = server.resolvedUrls.local[0].replace(/\/$/, ''), browser = await chromium.launch({ channel: 'msedge', headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, acceptDownloads: true }), page = await context.newPage();
-const results = [], requests = [], pageErrors = [], consoleErrors = [];
+const results = [], requests = [], pageErrors = [], consoleErrors = [], coverStages = [], externalRequests = [], applyDiagnostics = [];
 const IMAGE_WIDTH = 1000, IMAGE_HEIGHT = 1500;
 let imageData, projectRef, profileId, textProfileId, modelsEmpty = false, abortNext = false, coverMode = 'full', releaseHeld;
 page.on('pageerror', error => pageErrors.push(error.message));
 page.on('console', event => { if (event.type() === 'error') consoleErrors.push(event.text()); });
 await context.addInitScript(() => localStorage.setItem('braipen:intro-hidden', 'true'));
-await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort('blockedbyclient'));
+await context.route('**/*', route => { if (new URL(route.request().url()).origin === origin) return route.continue(); externalRequests.push(route.request().url()); return route.abort('blockedbyclient'); });
 await context.route('**/api/**', async route => {
   const url = route.request().url();
   if (url.endsWith('/health')) return route.fulfill({ json: { status: 'ok' } });
@@ -48,27 +48,41 @@ await context.route('**/api/**', async route => {
     return route.fulfill({ json: { ...identity(payload), protocol_version: 2, destination_fingerprint: connection.destination_fingerprint, execution_fingerprint: connection.execution_fingerprint, result: { connection } } });
   }
   assert.equal(payload.request_fingerprint, fingerprint(payload, url.includes('/cover/') ? 'cover_' + operation : operation));
-  assert.equal(payload.credentials.api_key, 'SYNTHETIC_IMAGE_UI_KEY');
+  assert.equal(payload.credentials.api_key, payload.connection.preset === 'gemini' ? 'SYNTHETIC_GEMINI_UI_KEY' : payload.connection.preset === 'seedream' ? 'SYNTHETIC_SEEDREAM_UI_KEY' : 'SYNTHETIC_IMAGE_UI_KEY');
   if (operation === 'models') return route.fulfill({ json: { ...identity(payload), result: modelsEmpty ? { models: [], catalog_supported: false } : { models: [{ id: 'org/mock-image:cover', name: '合成图片模型' }], catalog_supported: true } } });
   assert.ok(['generate', 'edit'].includes(operation)); assert.equal(payload.input.size, '2K');
   assert.ok(url.includes('/images/cover/')); assert.equal(payload.credentials.text_api_key, 'SYNTHETIC_TEXT_UI_KEY');
   assert.equal(payload.input.prompt, undefined); assert.deepEqual(Object.keys(payload.input.source).sort(), ['characters', 'idea']);
   if (abortNext) { abortNext = false; return route.abort('failed'); }
+  if (coverMode === 'missing') return route.fulfill({ status: 422, json: { ...identity(payload), error: { code: 'cover_missing_appearance', message: '合成：人物卡缺少明确外貌特征。' } } });
   const base = { ...identity(payload), text_destination_fingerprint: payload.input.text_connection.destination_fingerprint, text_execution_fingerprint: payload.input.text_connection.execution_fingerprint, event_version: 1 };
   const events = [{ type: 'started', requested: payload.input.count }, { type: 'text_started' }, { type: 'text_done' }];
-  for (let index = 0; index < payload.input.count; index++) {
-    events.push({ type: 'image_started', index }, { type: 'image', index, result: { image: { ...imageData[operation === 'edit' ? 1 : 0], width: IMAGE_WIDTH, height: IMAGE_HEIGHT, mime_type: 'image/png' }, model: payload.connection.model, text_model: payload.input.text_connection.model, style_id: payload.input.style_id, template_version: 1 } });
-    if (coverMode === 'partial') { events.push({ type: 'error', code: 'image_failed', status: 502, message: '合成第2张失败，已完成的候选已保留。', completed: index + 1, requested: payload.input.count }); break; }
+  const failures = { permission: ['image_permission_denied', 403], quota: ['image_quota_or_rate_limited', 429], unavailable: ['image_unavailable', 503], rejected: ['image_content_rejected', 422], invalidplan: ['invalid_cover_plan', 502], textquota: ['image_quota_or_rate_limited', 429], timeout: ['image_timeout', 504], unknown: ['image_outcome_unknown', 502], hold_quota: ['image_quota_or_rate_limited', 429] };
+  const failure = failures[coverMode];
+  if (failure) {
+    if (['invalidplan', 'textquota'].includes(coverMode)) events.pop(); else events.push({ type: 'image_started', index: 0 });
+    events.push({ type: 'error', code: failure[0], status: failure[1], message: `合成：${coverMode}，未自动重试。`, completed: 0, requested: payload.input.count });
   }
-  if (coverMode !== 'partial') events.push({ type: 'done', completed: payload.input.count, requested: payload.input.count });
-  if (coverMode === 'hold') await new Promise(resolve => { releaseHeld = resolve; });
+  for (let index = 0; !failure && index < payload.input.count; index++) {
+    events.push({ type: 'image_started', index }, { type: 'image', index, result: { image: { ...imageData[operation === 'edit' ? 1 : 0], width: IMAGE_WIDTH, height: IMAGE_HEIGHT, mime_type: 'image/png' }, model: payload.connection.model, text_model: payload.input.text_connection.model, style_id: payload.input.style_id, template_version: 2 } });
+    if (coverMode === 'partial') { events.push({ type: 'error', code: 'image_failed', status: 502, message: '合成第2张失败，已完成的候选已保留。', completed: index + 1, requested: payload.input.count }); break; }
+    if (coverMode === 'partial_quota') { events.push({ type: 'image_started', index: index + 1 }, { type: 'error', code: 'image_quota_or_rate_limited', status: 429, message: '合成：已保存第1张，第2张额度不足。', completed: index + 1, requested: payload.input.count }); break; }
+  }
+  if (!failure && !['partial', 'partial_quota'].includes(coverMode)) events.push({ type: 'done', completed: payload.input.count, requested: payload.input.count });
+  coverStages.push({ attempt_id: payload.attempt_id, preset: payload.connection.preset, types: events.map(event => event.type) });
+  if (['hold', 'hold_quota'].includes(coverMode)) await new Promise(resolve => { releaseHeld = resolve; });
   return route.fulfill({ contentType: 'application/x-ndjson', body: events.map((value, index) => JSON.stringify({ ...base, seq: index + 1, ...value })).join('\n') + '\n' }).catch(error => { if (!/Target.*closed|Invalid InterceptionId|Route is already handled|Request.*handled/i.test(error.message)) throw error; });
 });
 const paidCalls = () => requests.filter(r => ['generate', 'edit'].includes(r.operation));
 async function step(name, task) {
   try { await task(); results.push({ name, status: 'passed' }); console.log('PASS ' + name); }
-  catch (error) { results.push({ name, status: 'failed', error: error.message }); await page.screenshot({ path: join(report, 'failure.png'), fullPage: true }).catch(() => {}); throw error; }
+  catch (error) { results.push({ name, status: 'failed', error: error.message }); await diagnoseApply('failure: ' + name).catch(() => {}); await page.screenshot({ path: join(report, 'failure.png'), fullPage: true }).catch(() => {}); throw error; }
 }
+async function diagnoseApply(label) {
+  applyDiagnostics.push({ label, texts: await page.getByRole('button').allTextContents(), exactCount: await page.getByRole('button', { name: '设为作品封面', exact: true }).count(),
+    html: await page.locator('.cover-result button').evaluateAll(elements => elements.map(button => ({ text: button.textContent, disabled: button.disabled, html: button.outerHTML }))), aria: await page.locator('.cover-result').ariaSnapshot() });
+}
+async function applyCover() { await diagnoseApply('before adopt ' + applyDiagnostics.length); await page.getByRole('button', { name: '设为作品封面', exact: true }).click(); }
 async function load() {
   await page.evaluate(async () => {
     window.store = await import('/src/localStore.ts'); window.pc = await import('/src/providerConnections.ts'); window.ic = await import('/src/imageConnections.ts');
@@ -88,7 +102,7 @@ try {
   ({ projectRef, imageData } = await page.evaluate(async ({ width, height }) => {
     const { emptyProject } = await import('/src/localTypes.ts'), preferences = await import('/src/workspacePreferences.ts');
     const p = emptyProject('取反合成封面故事', { raw_story_idea: '合成白话设定：修钟青年发现影子来自未来。' });
-    p.assets.characters = '人物卡：青年江舟，谨慎而执着。'; p.assets.outline = 'DO_NOT_UPLOAD_THIS_OUTLINE';
+    p.assets.characters = '姓名：江舟\n外貌特征：黑色短发，黑色眼睛\n过去经历：DO_NOT_USE_THIS_BIOGRAPHY'; p.assets.outline = 'DO_NOT_UPLOAD_THIS_OUTLINE';
     await store.putProject(p); preferences.rememberProject(p.project_ref);
     await pc.ensureConnections(); await pc.storeConnectionKey('legacy-deepseek', 'SYNTHETIC_TEXT_UI_KEY');
     const imageData = ['#204b8a', '#aa4326'].map(color => {
@@ -151,13 +165,13 @@ try {
     await page.evaluate(ref => wait(async () => (await store.getProject(ref)).cover?.versions.length === 4 && !(await store.getProject(ref)).cover?.attempt), projectRef);
     const p = await project(); assert.equal(p.cover.selected_id, undefined); assert.equal(p.cover.versions[0].width, IMAGE_WIDTH);
     const request = paidCalls()[0]; assert.equal(request.operation, 'generate'); assert.equal(request.payload.input.image, undefined);
-    assert.equal(request.payload.input.count, 4); assert.equal(request.payload.input.style_id, 'anime'); assert.equal(request.payload.input.source.idea, p.config.raw_story_idea); assert.equal(request.payload.input.source.characters, p.assets.characters); assert.ok(!JSON.stringify(request.payload).includes('DO_NOT_UPLOAD_THIS_OUTLINE'));
-    assert.deepEqual(p.config, configBefore); assert.equal(p.cover.text_connection_id, textProfileId); assert.equal(p.cover.style_id, 'anime'); assert.equal(p.cover.count, 4); assert.ok(p.cover.versions.every(v => v.style_id === 'anime' && v.template_version === 1 && !('prompt' in v)));
+    assert.equal(request.payload.input.count, 4); assert.equal(request.payload.input.style_id, 'anime'); assert.equal(request.payload.input.source.idea, ''); assert.equal(request.payload.input.source.characters, p.assets.characters); assert.ok(!JSON.stringify(request.payload).includes('DO_NOT_UPLOAD_THIS_OUTLINE')); assert.ok(!JSON.stringify(request.payload).includes(p.config.raw_story_idea));
+    assert.deepEqual(p.config, configBefore); assert.equal(p.cover.text_connection_id, textProfileId); assert.equal(p.cover.style_id, 'anime'); assert.equal(p.cover.count, 4); assert.ok(p.cover.versions.every(v => v.origin === 'model' && v.style_id === 'anime' && v.template_version === 2 && !('prompt' in v)));
     await rendered('.cover-result canvas'); await rendered('.cover-version-grid canvas', 384); await capture('cover-generated.png');
     await page.getByRole('button', { name: '预览图片版本 1', exact: true }).click();
   });
   await step('采用候选后，概览和阅读页使用真实canvas显示作品封面', async () => {
-    await page.getByRole('button', { name: '设为作品封面', exact: true }).click();
+    await applyCover();
     await page.evaluate(ref => wait(async () => !!(await store.getProject(ref)).cover?.selected_id), projectRef);
     await nav('创作概览'); await rendered('.book-card .book-cover canvas', 512); await capture('dashboard-cover.png');
     await nav('阅读空间'); await rendered('.reader-cover canvas', 512); await capture('reader-cover.png');
@@ -180,7 +194,7 @@ try {
     const p = await project(); assert.equal(p.cover.versions[4].parent_id, p.cover.versions[0].id); assert.equal(p.cover.selected_id, p.cover.versions[0].id);
     const request = paidCalls().at(-1); assert.equal(request.operation, 'edit'); assert.equal(request.payload.input.image.mime_type, 'image/png'); assert.equal(request.payload.input.image.data_base64, imageData[0].data_base64);
     assert.equal(request.payload.input.edit_kind, 'lighting');
-    await rendered('.cover-result canvas'); await page.getByRole('button', { name: '设为作品封面', exact: true }).click();
+    await rendered('.cover-result canvas'); await applyCover();
     await page.evaluate(ref => wait(async () => { const p = await store.getProject(ref); return p.cover.selected_id === p.cover.versions[4].id; }), projectRef);
     await capture('cover-edited.png');
   });
@@ -197,9 +211,9 @@ try {
   });
   await step('版本回退只改变已采用版本，旧原图及源故事材料保持不变', async () => {
     await page.getByRole('button', { name: '预览图片版本 1', exact: true }).click();
-    await page.getByRole('button', { name: '设为作品封面', exact: true }).click();
+    await applyCover();
     await page.evaluate(ref => wait(async () => { const p = await store.getProject(ref); return p.cover.selected_id === p.cover.versions[0].id; }), projectRef);
-    const p = await project(); assert.equal(p.cover.versions.length, 5); assert.equal(p.assets.outline, 'DO_NOT_UPLOAD_THIS_OUTLINE'); assert.equal(p.assets.characters, '人物卡：青年江舟，谨慎而执着。'); assert.equal(paidCalls().length, 2);
+    const p = await project(); assert.equal(p.cover.versions.length, 5); assert.equal(p.assets.outline, 'DO_NOT_UPLOAD_THIS_OUTLINE'); assert.equal(p.assets.characters, '姓名：江舟\n外貌特征：黑色短发，黑色眼睛\n过去经历：DO_NOT_USE_THIS_BIOGRAPHY'); assert.equal(paidCalls().length, 2);
   });
   await step('批次第2张失败仍保存第1张，失败状态记录1/4且不重试', async () => {
     coverMode = 'partial';
@@ -237,10 +251,81 @@ try {
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2));
     assert.deepEqual(pageErrors, []); assert.ok(!await page.locator('vite-error-overlay').count());
   });
+  let geminiId, seedreamId, originalDefault;
+  const fallbackButton = () => page.getByRole('button', { name: '使用 Seedream 兜底 · 可能计费', exact: true });
+  const generateButton = () => page.getByRole('button', { name: '生成候选图片 · 调用模型', exact: true });
+  async function settled() { await page.waitForFunction(() => [...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '生成候选图片 · 调用模型' && !button.disabled && !button.classList.contains('ant-btn-loading'))); }
+  async function chooseCount(value) { await page.getByRole('combobox', { name: '封面候选张数', exact: true }).click(); await page.getByTitle(`${value} 张`, { exact: true }).last().click(); await page.evaluate(({ ref, value }) => wait(async () => (await store.getProject(ref)).cover.count === value), { ref: projectRef, value }); }
+  async function failWith(mode, status) {
+    const previous = (await project()).cover.attempt?.id, before = paidCalls().length; coverMode = mode;
+    await generateButton().click();
+    await page.evaluate(({ ref, previous, status }) => wait(async () => { const attempt = (await store.getProject(ref)).cover.attempt; return attempt?.id !== previous && attempt?.status === status; }), { ref: projectRef, previous, status });
+    await settled(); assert.equal(paidCalls().length, before + 1); return paidCalls().at(-1).payload;
+  }
+  await step('配置合成Gemini默认与Seedream兜底，GUI选择兜底不调用模型且项目绑定准确', async () => {
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    ({ geminiId, seedreamId, originalDefault } = await page.evaluate(async ({ imageId, textId }) => {
+      await pc.storeConnectionKey(imageId, 'SYNTHETIC_IMAGE_UI_KEY'); await pc.storeConnectionKey(textId, 'SYNTHETIC_TEXT_UI_KEY');
+      const originalDefault = await ic.defaultImageConnectionId();
+      const gemini = await ic.saveImageConnection('合成 Gemini 主连接', ic.blankImageConnection(ic.IMAGE_PRESETS.find(p => p.id === 'gemini')));
+      const seedream = await ic.saveImageConnection('合成 Seedream 确认后兜底', ic.blankImageConnection(ic.IMAGE_PRESETS.find(p => p.id === 'seedream')));
+      await pc.storeConnectionKey(gemini.id, 'SYNTHETIC_GEMINI_UI_KEY'); await pc.storeConnectionKey(seedream.id, 'SYNTHETIC_SEEDREAM_UI_KEY'); await ic.setDefaultImageConnection(gemini.id);
+      return { geminiId: gemini.id, seedreamId: seedream.id, originalDefault };
+    }, { imageId: profileId, textId: textProfileId }));
+    const before = paidCalls().length;
+    await page.getByRole('combobox', { name: '封面图片连接', exact: true }).click(); await page.getByTitle('合成 Gemini 主连接', { exact: true }).last().click();
+    await page.getByRole('combobox', { name: '封面兜底连接', exact: true }).click(); await page.getByTitle('合成 Seedream 确认后兜底', { exact: true }).last().click();
+    await page.evaluate(({ ref, geminiId, seedreamId }) => wait(async () => (await store.getProject(ref)).cover.connection_id === geminiId && await ic.fallbackImageConnectionId() === seedreamId), { ref: projectRef, geminiId, seedreamId });
+    assert.equal(await page.evaluate(() => ic.defaultImageConnectionId()), geminiId); assert.equal(paidCalls().length, before);
+    await chooseCount(1); await page.getByText('Gemini Flash 生图 API 不提供免费层级。额度或服务问题会明确提示；仅在你确认后才使用 Seedream，内容拒绝、超时或结果未知不会触发兜底。', { exact: true }).waitFor({ state: 'visible' });
+  });
+  for (const mode of ['permission', 'quota', 'unavailable']) await step(`Gemini ${mode}图片阶段0候选只显示手动兜底，确认前零额外请求${mode === 'quota' ? '；取消无调用，确认产生独立Seedream任务' : ''}`, async () => {
+    const prior = await project(), failed = await failWith(mode, 'failed'), count = paidCalls().length;
+    await fallbackButton().waitFor({ state: 'visible' }); await page.waitForTimeout(150); assert.equal(paidCalls().length, count); assert.equal((await project()).cover.versions.length, prior.cover.versions.length);
+    assert.equal(failed.connection.profile_id, geminiId); assert.equal(failed.credentials.api_key, 'SYNTHETIC_GEMINI_UI_KEY');
+    if (mode === 'quota') {
+      await capture('gemini-quota-offer.png'); await page.locator('.cover-workspace > .ant-alert').filter({ hasText: '可确认后使用 Seedream 兜底' }).screenshot({ path: join(report, 'gemini-quota-offer-detail.png') });
+      await fallbackButton().click(); await page.getByRole('button', { name: '确认调用', exact: true }).waitFor({ state: 'visible' }); assert.equal(paidCalls().length, count);
+      await capture('seedream-confirmation.png'); await page.getByRole('button', { name: /^取\s*消$/ }).click(); assert.equal(paidCalls().length, count); assert.equal((await project()).cover.versions.length, prior.cover.versions.length);
+      coverMode = 'full'; await fallbackButton().click(); await page.getByRole('button', { name: '确认调用', exact: true }).click();
+      await page.evaluate(({ ref, count }) => wait(async () => { const p = await store.getProject(ref); return p.cover.versions.length === count && !p.cover.attempt; }), { ref: projectRef, count: prior.cover.versions.length + 1 }); await settled();
+      const fallback = paidCalls().at(-1).payload, saved = await project(); assert.equal(paidCalls().length, count + 1);
+      assert.equal(fallback.connection.profile_id, seedreamId); assert.equal(fallback.connection.preset, 'seedream'); assert.equal(fallback.connection.model, 'doubao-seedream-5-0-flash-260915');
+      assert.notEqual(fallback.attempt_id, failed.attempt_id); assert.notEqual(fallback.run_id, failed.run_id); assert.notEqual(fallback.request_fingerprint, failed.request_fingerprint); assert.notEqual(fallback.connection.execution_fingerprint, failed.connection.execution_fingerprint);
+      assert.equal(fallback.credentials.api_key, 'SYNTHETIC_SEEDREAM_UI_KEY'); assert.equal(fallback.credentials.text_api_key, 'SYNTHETIC_TEXT_UI_KEY'); assert.equal(fallback.input.text_connection.profile_id, failed.input.text_connection.profile_id);
+      for (const request of [failed, fallback]) { const stages = coverStages.find(item => item.attempt_id === request.attempt_id).types; assert.equal(stages.filter(type => type === 'text_started').length, 1); assert.equal(stages.filter(type => type === 'text_done').length, 1); }
+      assert.equal(saved.cover.connection_id, geminiId); assert.equal(await page.evaluate(() => ic.defaultImageConnectionId()), geminiId); assert.equal(saved.cover.selected_id, prior.cover.selected_id); assert.deepEqual(saved.cover.versions.slice(0, prior.cover.versions.length), prior.cover.versions);
+      assert.equal(saved.cover.versions.at(-1).connection.profile_id, seedreamId); await capture('seedream-fallback-candidate.png');
+    }
+  });
+  for (const [mode, status] of [['rejected', 'failed'], ['missing', 'failed'], ['invalidplan', 'failed'], ['textquota', 'failed'], ['timeout', 'unknown'], ['unknown', 'unknown']]) await step(`Gemini ${mode}明确拒绝/非图片失败/不确定结果不给兜底按钮且不重试`, async () => {
+    const prior = await project(); await failWith(mode, status); const count = paidCalls().length;
+    assert.equal(await fallbackButton().count(), 0); await page.waitForTimeout(100); assert.equal(paidCalls().length, count); assert.equal((await project()).cover.versions.length, prior.cover.versions.length);
+    if (mode === 'rejected' || mode === 'unknown') await capture(`gemini-${mode}-no-fallback.png`);
+  });
+  await step('Gemini已保存1候选后第2张quota失败保留候选，不显示兜底、不重复计费请求', async () => {
+    await chooseCount(2); const prior = await project(); await failWith('partial_quota', 'failed'); const p = await project(), count = paidCalls().length;
+    assert.equal(p.cover.versions.length, prior.cover.versions.length + 1); assert.equal(p.cover.attempt.completed, 1); assert.equal(p.cover.attempt.requested, 2); assert.equal(p.cover.selected_id, prior.cover.selected_id); assert.equal(await fallbackButton().count(), 0);
+    await page.waitForTimeout(100); assert.equal(paidCalls().length, count); await capture('gemini-partial-quota-no-fallback.png'); await chooseCount(1);
+  });
+  for (const kind of ['stop', 'image', 'text']) await step(`Gemini可能兜底的quota挂起时${kind === 'stop' ? '用户停止' : kind === 'image' ? '图片Key撤销' : '文字Key撤销'}不显示兜底且旧结果不落库`, async () => {
+    const prior = await project(), count = paidCalls().length; coverMode = 'hold_quota'; releaseHeld = undefined;
+    await generateButton().click(); for (let tries = 0; tries < 300 && !releaseHeld; tries++) await page.waitForTimeout(20); assert.ok(releaseHeld); assert.equal(paidCalls().length, count + 1);
+    if (kind === 'stop') await page.getByRole('button', { name: '停止封面生成', exact: true }).click(); else await page.evaluate(id => pc.manageConnection(id, 'lock'), kind === 'image' ? geminiId : textProfileId);
+    await page.evaluate(ref => wait(async () => (await store.getProject(ref)).cover.attempt?.status === 'unknown'), projectRef); releaseHeld(); releaseHeld = undefined; coverMode = 'full'; await settled();
+    assert.equal(await fallbackButton().count(), 0); assert.equal((await project()).cover.versions.length, prior.cover.versions.length); await page.waitForTimeout(100); assert.equal(paidCalls().length, count + 1);
+    if (kind !== 'stop') await page.evaluate(({ id, key }) => pc.storeConnectionKey(id, key), { id: kind === 'image' ? geminiId : textProfileId, key: kind === 'image' ? 'SYNTHETIC_GEMINI_UI_KEY' : 'SYNTHETIC_TEXT_UI_KEY' });
+  });
+  await step('手动兜底验收结束恢复原主连接/count4，全球兜底与项目主绑定保持独立', async () => {
+    await page.getByRole('combobox', { name: '封面图片连接', exact: true }).click(); await page.getByTitle('合成图片连接', { exact: true }).last().click(); await chooseCount(4); coverMode = 'full';
+    await page.evaluate(id => store.setSetting('default_image_connection', id), originalDefault);
+    await page.evaluate(({ ref, id }) => wait(async () => (await store.getProject(ref)).cover.connection_id === id), { ref: projectRef, id: profileId });
+    assert.equal(await page.evaluate(() => ic.fallbackImageConnectionId()), seedreamId); assert.equal(await page.evaluate(() => ic.defaultImageConnectionId()), originalDefault); assert.equal(await fallbackButton().count(), 0); assert.deepEqual(pageErrors, []); assert.deepEqual(externalRequests, []);
+  });
   await step('容量前检 existing+count：29版本不能再生成4张，不提交请求', async () => {
     await page.evaluate(async ref => {
       let p = await store.getProject(ref); const { getCoverBlob } = await import('/src/coverStorage.ts'), blob = await getCoverBlob(p.cover.versions[0].media_id);
-      const first = p.cover.versions[0], metadata = { source: first.source, width: first.width, height: first.height, style_id: first.style_id, template_version: 1, text_model: first.text_model, connection: first.connection };
+      const first = p.cover.versions[0], metadata = { source: first.source, width: first.width, height: first.height, style_id: first.style_id, template_version: 2, text_model: first.text_model, connection: first.connection };
       while (p.cover.versions.length < 29) { await store.saveCoverVersion(ref, metadata, blob); p = await store.getProject(ref); }
     }, projectRef);
     const before = paidCalls().length; await page.getByRole('button', { name: '生成候选图片 · 调用模型', exact: true }).click();
@@ -248,6 +333,8 @@ try {
   });
   console.log('PASS ' + results.length + ' cover UI scenarios');
 } finally {
-  await writeFile(join(report, 'cover-workflow.json'), JSON.stringify({ results, request_counts: { total: requests.length, image_generation_or_edit: paidCalls().length }, pageErrors, consoleErrors }, null, 2));
+  await writeFile(join(report, 'cover-workflow.json'), JSON.stringify({ results, request_counts: { total: requests.length, image_generation_or_edit: paidCalls().length, by_preset: Object.fromEntries(['custom', 'gemini', 'seedream'].map(preset => [preset, paidCalls().filter(request => request.payload.connection.preset === preset).length])), mocked_text_started: coverStages.reduce((count, stages) => count + stages.types.filter(type => type === 'text_started').length, 0) }, pageErrors, consoleErrors, externalRequests, upstream_calls: 0, declaration: 'All provider responses and credentials are synthetic; no upstream API, external request, billing, or real credential used.' }, null, 2));
+  await writeFile(join(report, 'apply-button-diagnostics.json'), JSON.stringify(applyDiagnostics, null, 2));
+  await writeFile(join(report, 'cover-workflow.log'), results.map(result => `${result.status.toUpperCase()} ${result.name}${result.error ? ': ' + result.error : ''}`).join('\n') + `\nMock image generation/edit requests: ${paidCalls().length}; external requests: ${externalRequests.length}; page errors: ${pageErrors.length}; real upstream calls: 0\n`);
   await browser.close(); await server.close();
 }
