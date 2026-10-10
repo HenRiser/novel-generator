@@ -151,6 +151,29 @@ class ImageContracts(unittest.TestCase):
         with patch.object(images, "MAX_IMAGE_BYTES", 20), self.assertRaises(ValueError):
             images._decode(B64)
 
+    def test_gemini_public_error_details_are_fixed_and_bound_to_the_public_code(self):
+        quota = "image_quota_or_rate_limited"
+        messages = {reason: images.ImageProviderError(quota, reason=reason).public_message
+                    for reason in ("quota_exceeded", "rate_limit_exceeded", "too_many_requests")}
+        self.assertIn("日配额", messages["quota_exceeded"])
+        self.assertIn("请求过于频繁", messages["rate_limit_exceeded"])
+        self.assertIn("配额与限流", messages["too_many_requests"])
+        self.assertNotIn("过于频繁", messages["too_many_requests"])
+        self.assertEqual(len(set(messages.values())), 3)
+        for code, reason in ((quota, KEY), (quota, {"message": KEY}), ("image_content_rejected", "quota_exceeded")):
+            error = images.ImageProviderError(code, reason=reason)
+            self.assertIsNone(error.reason)
+            self.assertEqual(error.public_message, images.IMAGE_ERRORS[code][1])
+            self.assertNotIn(KEY, str(error))
+        error = images.ImageProviderError(quota, reason="quota_exceeded")
+        error.args = (KEY,)
+        self.assertEqual(route._exception(error), (429, quota, messages["quota_exceeded"]))
+        error.reason = KEY
+        self.assertEqual(route._exception(error), (429, quota, images.IMAGE_ERRORS[quota][1]))
+        error.reason = "quota_exceeded"
+        error.code = "image_outcome_unknown"
+        self.assertEqual(route._exception(error), (502, error.code, images.IMAGE_ERRORS[error.code][1]))
+
 
 class ImageAdapters(unittest.IsolatedAsyncioTestCase):
     async def test_seedream_exact_payload_and_result_download_has_no_credentials(self):
@@ -292,6 +315,108 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn(KEY, result.text); self.assertNotIn("signed.example", result.text)
                 self.assertNotIn("freeTierNotAvailable", result.text)
                 self.assertNotIn("set-cookie", result.headers); self.assertNotIn("x-provider-secret", result.headers)
+
+    async def test_native_gemini_error_codes_are_shared_by_official_and_custom_without_raw_echo(self):
+        cases = (("authentication", 401, "image_auth_error", 401),
+                 ("permission_denied", 403, "image_permission_denied", 403),
+                 ("invalid_request", 400, "image_invalid_request", 400),
+                 ("failed_precondition", 400, "image_invalid_request", 400),
+                 ("parameter_unknown", 400, "image_invalid_request", 400),
+                 ("out_of_range", 416, "image_invalid_request", 400),
+                 ("not_found", 404, "image_invalid_request", 400),
+                 ("model_not_found", 404, "image_invalid_request", 400),
+                 ("quota_exceeded", 200, "image_quota_or_rate_limited", 429),
+                 ("rate_limit_exceeded", 429, "image_quota_or_rate_limited", 429),
+                 ("too_many_requests", 429, "image_quota_or_rate_limited", 429),
+                 ("api_error", 500, "image_unavailable", 503),
+                 ("service_unavailable", 503, "image_unavailable", 503))
+        for preset in ("gemini", "custom"):
+            conn = connection(preset, protocol="gemini_images")
+            for native_code, upstream_http, code, expected_http in cases:
+                with self.subTest(preset=preset, native_code=native_code):
+                    seen = []
+                    def upstream(req):
+                        seen.append(req)
+                        return response({"error": {"code": native_code, "status": "UNAVAILABLE",
+                            "message": "limit: 0; SAFETY quota " + KEY,
+                            "details": [{"reason": KEY, "url": "https://signed.example/?secret"}]}}, upstream_http,
+                            {"set-cookie": KEY, "x-provider-secret": KEY})
+                    with patch.object(images, "_client", factory(upstream)):
+                        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                            result = await client.post("/api/compute/images/generate", json=payload(conn=conn))
+                    self.assertEqual(result.status_code, expected_http, result.text)
+                    error = result.json()["error"]
+                    self.assertEqual(error["code"], code)
+                    self.assertEqual(error["message"], images.ImageProviderError(code, reason=native_code).public_message)
+                    self.assertEqual(len(seen), 1)
+                    self.assertNotIn(KEY, result.text); self.assertNotIn("signed.example", result.text)
+                    self.assertNotIn("limit: 0", result.text)
+                    self.assertNotIn("set-cookie", result.headers); self.assertNotIn("x-provider-secret", result.headers)
+
+    async def test_native_gemini_content_and_unknown_codes_do_not_offer_availability_errors(self):
+        rejected = ("safety", "recitation", "language", "prohibited_content", "spii", "blocklist",
+                    "image_safety", "image_prohibited_content", "image_recitation", "image_other", "content_blocked")
+        unknown = ("deadline_exceeded", "cancelled", "no_image", "malformed_function_call", "malformed_tool_call",
+                   "unexpected_tool_call", "too_many_tool_calls", "missing_thought_signature", "payment_required", KEY, {}, [], True)
+        for preset in ("gemini", "custom"):
+            for native_code, expected_code in [(code, "image_content_rejected") for code in rejected] + [(code, "image_outcome_unknown") for code in unknown]:
+                with self.subTest(preset=preset, native_code=native_code):
+                    seen = []
+                    def upstream(req):
+                        seen.append(req)
+                        return response({"error": {"code": native_code, "status": "RESOURCE_EXHAUSTED", "message": KEY}}, 429)
+                    with patch.object(images, "_client", factory(upstream)):
+                        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                            result = await client.post("/api/compute/images/generate", json=payload(conn=connection(preset, protocol="gemini_images")))
+                    status, message = images.IMAGE_ERRORS[expected_code]
+                    self.assertEqual(result.status_code, status, result.text)
+                    self.assertEqual(result.json()["error"], {"code": expected_code, "message": message})
+                    self.assertEqual(len(seen), 1); self.assertNotIn(KEY, result.text)
+
+    async def test_native_gemini_result_error_lists_are_only_content_rejected_when_unambiguous(self):
+        rejected = [{"code": "image_safety", "message": KEY}, {"code": "recitation", "message": KEY}]
+        cases = ((rejected, "image_content_rejected"),
+                 (rejected + [{"code": "quota_exceeded", "message": KEY}], "image_outcome_unknown"),
+                 ([{"code": "rate_limit_exceeded", "message": KEY}], "image_outcome_unknown"),
+                 ([{"code": KEY, "message": KEY}], "image_outcome_unknown"),
+                 ([None], "image_outcome_unknown"), ({}, "image_outcome_unknown"), (None, "image_outcome_unknown"))
+        for preset in ("gemini", "custom"):
+            for failures, expected_code in cases:
+                with self.subTest(preset=preset, failures=failures):
+                    seen = []
+                    def upstream(req):
+                        seen.append(req)
+                        return response({"status": "completed", "errors": failures,
+                            "steps": [{"type": "model_output", "content": [{"type": "image", "data": B64}]}],
+                            "candidates": [{"finishReason": "STOP", "content": {"parts": [{"inlineData": {"data": B64}}]}}]})
+                    with patch.object(images, "_client", factory(upstream)), self.assertRaises(images.ImageProviderError) as caught:
+                        await images.request_image(images.ImageConfig(connection(preset, protocol="gemini_images"), KEY), "generate", {"prompt": "封面"}, {})
+                    self.assertEqual(caught.exception.code, expected_code)
+                    self.assertEqual(len(seen), 1); self.assertNotIn(KEY, str(caught.exception))
+
+    async def test_native_error_lists_prevent_http_or_singular_error_availability_fallback(self):
+        blocked = {"code": "safety", "message": KEY}
+        cases = ((429, {"errors": [blocked]}, "image_content_rejected", 422),
+                 (503, {"errors": [None]}, "image_outcome_unknown", 502),
+                 (429, {"errors": [blocked, {"code": "quota_exceeded"}]}, "image_outcome_unknown", 502),
+                 (429, {"error": {"code": "too_many_requests"}, "errors": [blocked]}, "image_outcome_unknown", 502),
+                 (503, {"error": {"code": "service_unavailable"}, "errors": None}, "image_outcome_unknown", 502),
+                 (429, {"error": {"status": "RESOURCE_EXHAUSTED"}, "errors": [None]}, "image_outcome_unknown", 502),
+                 (429, {"error": {"code": "too_many_requests"}, "errors": []}, "image_quota_or_rate_limited", 429))
+        for preset in ("gemini", "custom"):
+            for upstream_http, raw, expected_code, expected_http in cases:
+                with self.subTest(preset=preset, status=upstream_http, code=expected_code):
+                    seen = []
+                    def upstream(req):
+                        seen.append(req)
+                        return response(raw, upstream_http)
+                    with patch.object(images, "_client", factory(upstream)):
+                        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+                            result = await client.post("/api/compute/images/generate", json=payload(conn=connection(preset, protocol="gemini_images")))
+                    self.assertEqual(result.status_code, expected_http, result.text)
+                    self.assertEqual(result.json()["error"]["code"], expected_code)
+                    self.assertNotIn(KEY, result.text)
+                    self.assertEqual(len(seen), 1)
 
     async def test_gemini_content_rejection_and_unknown_output_stay_distinct(self):
         blocked = [{"promptFeedback": {"blockReason": reason, "blockReasonMessage": KEY}}

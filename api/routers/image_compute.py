@@ -99,7 +99,7 @@ def _exception(exc):
     if isinstance(exc, ImageProviderError):
         code = exc.code if exc.code in IMAGE_ERRORS else "image_outcome_unknown"
         status, message = IMAGE_ERRORS[code]
-        return status, code, message
+        return status, code, exc.public_message if code == exc.code else message
     if isinstance(exc, DeepSeekClientError):
         return 502, "provider_error", "图片服务请求失败，请检查 Key、模型权限、额度及参数后手动重试。"
     if isinstance(exc, ComputeError):

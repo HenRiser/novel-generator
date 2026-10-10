@@ -54,6 +54,23 @@ _GEMINI_STATUSES = {"UNAUTHENTICATED": "image_auth_error", "PERMISSION_DENIED": 
 _GEMINI_HTTP_ERRORS = {400: "image_invalid_request", 401: "image_auth_error", 403: "image_permission_denied",
                        404: "image_invalid_request", 429: "image_quota_or_rate_limited", 500: "image_unavailable",
                        502: "image_unavailable", 503: "image_unavailable"}
+_GEMINI_NATIVE_REJECTIONS = {"safety", "recitation", "language", "prohibited_content", "spii", "blocklist",
+                             "image_safety", "image_prohibited_content", "image_recitation", "image_other", "content_blocked"}
+_GEMINI_NATIVE_ERRORS = {
+    "authentication": "image_auth_error", "permission_denied": "image_permission_denied",
+    "invalid_request": "image_invalid_request", "failed_precondition": "image_invalid_request",
+    "parameter_unknown": "image_invalid_request", "out_of_range": "image_invalid_request",
+    "not_found": "image_invalid_request", "model_not_found": "image_invalid_request",
+    "quota_exceeded": "image_quota_or_rate_limited", "rate_limit_exceeded": "image_quota_or_rate_limited",
+    "too_many_requests": "image_quota_or_rate_limited", "api_error": "image_unavailable",
+    "service_unavailable": "image_unavailable",
+    **{reason: "image_content_rejected" for reason in _GEMINI_NATIVE_REJECTIONS},
+}
+_GEMINI_NATIVE_MESSAGES = {
+    "quota_exceeded": ("image_quota_or_rate_limited", "Gemini 图片服务报告日配额不足，未自动重试；请在 Google AI Studio 查看该项目与模型的额度及重置时间。"),
+    "rate_limit_exceeded": ("image_quota_or_rate_limited", "Gemini 图片服务请求过于频繁，未自动重试；请稍候再试，或在 Google AI Studio 查看该项目与模型的速率限制。"),
+    "too_many_requests": ("image_quota_or_rate_limited", "Gemini 图片服务触发请求限制，未自动重试；请在 Google AI Studio 查看当前生图模型的配额与限流，核对可用额度后再试。"),
+}
 _GEMINI_BLOCK_REASONS = {"SAFETY", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY"}
 _GEMINI_REJECTED_FINISHES = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY",
                             "IMAGE_PROHIBITED_CONTENT", "IMAGE_RECITATION", "ESCALATION", "PUP_LIMITED_DISABLED"}
@@ -62,14 +79,31 @@ _GEMINI_REJECTED_FINISHES = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CO
 class ImageProviderError(DeepSeekClientError):
     """Only fixed public codes and messages; never retain upstream response text."""
 
-    def __init__(self, code):
+    def __init__(self, code, *, reason=None):
         self.code = code if code in IMAGE_ERRORS else "image_outcome_unknown"
-        super().__init__(IMAGE_ERRORS[self.code][1])
+        self.reason = reason if isinstance(reason, str) and _GEMINI_NATIVE_ERRORS.get(reason) == self.code else None
+        super().__init__(self.public_message)
+
+    @property
+    def public_message(self):
+        detail = _GEMINI_NATIVE_MESSAGES.get(self.reason) if isinstance(self.reason, str) else None
+        return detail[1] if detail and detail[0] == self.code else IMAGE_ERRORS[self.code][1]
 
 
 def _gemini_error(raw, status):
     error = raw.get("error") if isinstance(raw, dict) else None
+    if isinstance(raw, dict) and "errors" in raw and raw["errors"] != []:
+        failures = raw["errors"]
+        if not error and isinstance(failures, list) and failures and all(isinstance(item, dict) and isinstance(item.get("code"), str)
+                and item["code"] in _GEMINI_NATIVE_REJECTIONS for item in failures):
+            raise ImageProviderError("image_content_rejected")
+        raise ImageProviderError("image_outcome_unknown")
     if status >= 400 or error:
+        native_code = error.get("code") if isinstance(error, dict) else None
+        if isinstance(native_code, str):
+            raise ImageProviderError(_GEMINI_NATIVE_ERRORS.get(native_code, "image_outcome_unknown"), reason=native_code)
+        if native_code is not None and type(native_code) is not int:
+            raise ImageProviderError("image_outcome_unknown")
         upstream_status = error.get("status") if isinstance(error, dict) else None
         code = _GEMINI_STATUSES.get(upstream_status) if isinstance(upstream_status, str) else None
         raise ImageProviderError(code or _GEMINI_HTTP_ERRORS.get(status, "image_outcome_unknown"))
