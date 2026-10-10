@@ -96,7 +96,7 @@ def normalize_image_connection(raw: dict, *, verify=False) -> dict:
     if protocol not in IMAGE_PROTOCOLS:
         raise ValueError("不支持此图片API协议。")
     url = canonical_url(raw.get("base_url"))
-    if url.endswith(("/images/generations", "/images/edits", "/generation")) or ":generateContent" in url:
+    if url.endswith(("/images/generations", "/images/edits", "/generation", "/interactions")) or ":generateContent" in url:
         raise ValueError("请填写图片 API Base URL，不包含生成或编辑路径。")
     preset = raw.get("preset", "custom")
     if preset != "custom":
@@ -410,11 +410,12 @@ async def _download(config, raw):
 def _usage(raw):
     value = raw.get("usage") or raw.get("usageMetadata") or {}
     allowed = {"input_tokens", "output_tokens", "total_tokens", "image_tokens", "text_tokens", "input_tokens_details", "output_tokens_details",
-               "promptTokenCount", "candidatesTokenCount", "totalTokenCount", "thoughtsTokenCount", "image_count", "output_image_count", "input_image_count", "output_height", "output_width", "width", "height"}
+               "promptTokenCount", "candidatesTokenCount", "totalTokenCount", "thoughtsTokenCount", "total_input_tokens", "total_output_tokens",
+               "total_thought_tokens", "total_cached_tokens", "total_tool_use_tokens", "image_count", "output_image_count", "input_image_count", "output_height", "output_width", "width", "height"}
     if not isinstance(value, dict):
         return {}
-    return {k: v if type(v) in (int, float) and v >= 0 else {child: count for child, count in v.items() if child in allowed and type(count) is int and count >= 0}
-            for k, v in value.items() if k in allowed and (type(v) in (int, float) and 0 <= v < 2**53 or isinstance(v, dict))}
+    return {k: v if type(v) in (int, float) else {child: count for child, count in v.items() if child in allowed and type(count) is int and 0 <= count < 2**53}
+            for k, v in value.items() if k in allowed and (type(v) in (int, float) and 0 <= v < 2**53 or k in {"input_tokens_details", "output_tokens_details"} and isinstance(v, dict))}
 
 
 async def list_models(config):
@@ -469,11 +470,19 @@ async def request_image(config, operation, data, metrics):
     elif protocol == "gemini_images":
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", model):
             raise ValueError("Gemini 图片模型ID不允许路径字符。")
-        path = "/models/" + model + ":generateContent"
-        parts = [{"text": data["prompt"]}]
-        if image:
-            parts.insert(0, {"inlineData": {"mimeType": image["mime_type"], "data": image_base64}})
-        kwargs["json"] = {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"], "responseFormat": {"image": {"aspectRatio": "2:3", "imageSize": "2K"}}}}
+        if connection["preset"] == "gemini":
+            path = "/interactions"
+            parts = [{"type": "text", "text": data["prompt"]}]
+            if image:
+                parts.append({"type": "image", "mime_type": image["mime_type"], "data": image_base64})
+            kwargs["json"] = {"model": model, "input": parts, "store": False,
+                              "response_format": {"type": "image", "aspect_ratio": "2:3", "image_size": "2K", "delivery": "inline"}}
+        else:
+            path = "/models/" + model + ":generateContent"
+            parts = [{"text": data["prompt"]}]
+            if image:
+                parts.insert(0, {"inlineData": {"mimeType": image["mime_type"], "data": image_base64}})
+            kwargs["json"] = {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"], "responseFormat": {"image": {"aspectRatio": "2:3", "imageSize": "2K"}}}}
     else:
         path = "/services/aigc/multimodal-generation/generation"
         parts = [{"text": data["prompt"]}]
@@ -491,7 +500,25 @@ async def request_image(config, operation, data, metrics):
         if not isinstance(raw, dict) or raw.get("error") or raw.get("code"):
             raise DeepSeekClientError("图片服务返回错误，未保存图片。")
         declared = None
-        if protocol == "gemini_images":
+        if connection["preset"] == "gemini":
+            if raw.get("status") != "completed" or raw.get("errors", []) != []:
+                raise ImageProviderError("image_outcome_unknown")
+            steps = raw.get("steps")
+            if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+                raise ImageProviderError("image_outcome_unknown")
+            outputs = []
+            for step in steps:
+                if step.get("type") != "model_output":
+                    continue
+                parts = step.get("content")
+                if not isinstance(parts, list) or any(not isinstance(part, dict) for part in parts):
+                    raise ImageProviderError("image_outcome_unknown")
+                outputs.extend(part for part in parts if part.get("type") == "image" and not part.get("thought"))
+            if len(outputs) != 1:
+                raise ImageProviderError("image_outcome_unknown")
+            content = _decode(outputs[0].get("data"))
+            declared = outputs[0].get("mime_type")
+        elif protocol == "gemini_images":
             candidates = raw.get("candidates") or []
             candidate = candidates[0] if candidates else {}
             finish = candidate.get("finishReason")
@@ -526,7 +553,8 @@ async def request_image(config, operation, data, metrics):
         result = {"image": {"mime_type": mime, "data_base64": base64.b64encode(content).decode("ascii"), "width": width, "height": height}, "model": model}
         if usage:
             result["usage"] = usage
-            for source, target in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens"), ("promptTokenCount", "prompt_tokens"), ("candidatesTokenCount", "completion_tokens")):
+            for source, target in (("input_tokens", "prompt_tokens"), ("output_tokens", "completion_tokens"), ("promptTokenCount", "prompt_tokens"), ("candidatesTokenCount", "completion_tokens"),
+                                   ("total_input_tokens", "prompt_tokens"), ("total_output_tokens", "completion_tokens"), ("total_thought_tokens", "reasoning_tokens"), ("total_cached_tokens", "prompt_cache_hit_tokens")):
                 if type(usage.get(source)) is int:
                     metrics[target] = usage[source]
         return result

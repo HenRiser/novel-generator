@@ -86,6 +86,13 @@ class ImageContracts(unittest.TestCase):
         self.assertEqual(result.json()["result"]["connection"], connection())
         network.assert_not_called()
 
+    def test_complete_interactions_endpoint_is_not_a_base_url(self):
+        with patch.object(images, "_client") as network:
+            for base_url in ("https://image.example/v1beta/interactions", "https://image.example/v1beta/interactions/"):
+                with self.subTest(base_url=base_url), self.assertRaises(ValueError):
+                    connection("custom", protocol="gemini_images", base_url=base_url)
+        network.assert_not_called()
+
     def test_identity_and_both_fingerprints_are_checked_before_provider(self):
         cases = []
         body = payload(); body["run_id"] = "with spaces"; cases.append(body)
@@ -194,27 +201,59 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
         self.assertIn(PNG, seen[1].content)
         self.assertEqual(metrics["prompt_tokens"], 4); self.assertEqual(result["usage"]["output_tokens"], 5)
 
-    async def test_gemini_json_edit_omits_thought_images_and_uses_header_key(self):
+    async def test_custom_gemini_json_edit_keeps_legacy_protocol(self):
         seen = []
         def upstream(req):
             seen.append(req)
             return response({"candidates": [{"finishReason": "STOP", "content": {"parts": [{"thought": True, "inlineData": {"data": "bad"}}, {"inlineData": {"mimeType": "image/png", "data": B64}}]}}], "usageMetadata": {"promptTokenCount": 4}})
         with patch.object(images, "_client", factory(upstream)):
-            result = await images.request_image(images.ImageConfig(connection("gemini"), KEY), "edit", {"prompt": "加雪", "image": ORIGINAL}, {})
+            result = await images.request_image(images.ImageConfig(connection("custom", protocol="gemini_images", model="custom-gemini-image"), KEY), "edit", {"prompt": "加雪", "image": ORIGINAL}, {})
         req = seen[0]; body = json.loads(req.content)
-        self.assertEqual(req.url.path, "/v1beta/models/gemini-3.1-flash-image:generateContent")
+        self.assertEqual(req.url.path, "/v1/models/custom-gemini-image:generateContent")
         self.assertNotIn("key=", str(req.url)); self.assertNotIn("authorization", req.headers)
         self.assertEqual(req.headers["x-goog-api-key"], KEY)
         self.assertEqual(body["contents"][0]["parts"][0]["inlineData"], {"mimeType": "image/png", "data": B64})
         self.assertEqual(body["generationConfig"]["responseFormat"]["image"], {"aspectRatio": "2:3", "imageSize": "2K"})
         self.assertEqual(result["image"]["data_base64"], B64)
 
+    async def test_official_gemini_interactions_generate_and_edit_use_inline_private_requests(self):
+        seen = []
+        native_usage = {"total_input_tokens": 4, "total_output_tokens": 5, "total_thought_tokens": 2,
+                        "total_cached_tokens": 1, "total_tool_use_tokens": 0, "total_tokens": 11}
+        def upstream(req):
+            seen.append(req)
+            return response({"id": KEY, "input": KEY, "status": "completed", "errors": [],
+                "steps": [{"type": "thought", "summary": [{"type": "image", "data": "invalid", "mime_type": "image/png"}]},
+                          {"type": "user_input", "content": [{"type": "image", "data": "invalid"}]},
+                          {"type": "model_output", "content": [{"type": "text", "text": KEY},
+                             {"type": "image", "data": B64, "mime_type": "image/png"}]}],
+                "usage": {**native_usage, "input_tokens_by_modality": [{"modality": KEY, "tokens": 4}], "prompt": KEY, "id": KEY}})
+        with patch.object(images, "_client", factory(upstream)):
+            config = images.ImageConfig(connection("gemini"), KEY)
+            for operation, data in (("generate", {"prompt": "封面"}), ("edit", {"prompt": "加雪", "image": ORIGINAL})):
+                metrics = {}
+                result = await images.request_image(config, operation, data, metrics)
+                req = seen[-1]
+                expected = [{"type": "text", "text": data["prompt"]}]
+                if operation == "edit":
+                    expected.append({"type": "image", "mime_type": "image/png", "data": B64})
+                self.assertEqual(req.method, "POST")
+                self.assertEqual(str(req.url), "https://generativelanguage.googleapis.com/v1beta/interactions")
+                self.assertEqual(json.loads(req.content), {"model": "gemini-3.1-flash-image", "input": expected, "store": False,
+                    "response_format": {"type": "image", "aspect_ratio": "2:3", "image_size": "2K", "delivery": "inline"}})
+                self.assertEqual(req.headers["x-goog-api-key"], KEY)
+                self.assertNotIn("authorization", req.headers); self.assertNotIn("api-revision", req.headers)
+                self.assertEqual(result, {"model": config.connection["model"], "image": {**ORIGINAL, "width": 2, "height": 3}, "usage": native_usage})
+                self.assertEqual(metrics, {"call_count": 1, "prompt_tokens": 4, "completion_tokens": 5, "reasoning_tokens": 2, "prompt_cache_hit_tokens": 1})
+                self.assertNotIn(KEY, json.dumps(result))
+        self.assertEqual(len(seen), 2)
+
     async def test_gemini_auth_key_is_opaque_and_only_sent_in_header(self):
         key = "AQ.fake.auth-key-for-mock-only"
         seen = []
         def upstream(req):
             seen.append(req)
-            return response({"candidates": [{"finishReason": "STOP", "content": {"parts": [{"inlineData": {"mimeType": "image/png", "data": B64}}]}}]})
+            return response({"status": "completed", "steps": [{"type": "model_output", "content": [{"type": "image", "mime_type": "image/png", "data": B64}]}]})
         with patch.object(images, "_client", factory(upstream)):
             result = await images.request_image(images.ImageConfig(connection("gemini"), key), "generate", {"prompt": "封面"}, {})
         self.assertEqual(len(seen), 1)
@@ -267,9 +306,49 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
             def upstream(req):
                 seen.append(req); return response(raw)
             with patch.object(images, "_client", factory(upstream)), self.assertRaises(images.ImageProviderError) as caught:
-                await images.request_image(images.ImageConfig(connection("gemini"), KEY), "generate", {"prompt": "封面"}, {})
+                await images.request_image(images.ImageConfig(connection("custom", protocol="gemini_images"), KEY), "generate", {"prompt": "封面"}, {})
             self.assertEqual(caught.exception.code, code)
             self.assertNotIn(KEY, str(caught.exception)); self.assertEqual(len(seen), 1)
+
+    async def test_interactions_rejects_incomplete_errors_ambiguous_and_nonfinal_images(self):
+        image = {"type": "image", "mime_type": "image/png", "data": B64}
+        completed = {"status": "completed", "steps": [{"type": "model_output", "content": [image]}]}
+        failures = [{**completed, "status": status} for status in (None, "failed", "in_progress", "requires_action", "cancelled", "incomplete", "queued", KEY)]
+        failures += [{**completed, "errors": errors} for errors in ([{"code": KEY, "message": KEY}], [None], {}, None, KEY)]
+        failures += [{"status": "completed", "steps": steps} for steps in (
+            None, {}, [None], [], [{"type": "model_output", "content": None}], [{"type": "model_output", "content": [None]}],
+            [{"type": "model_output", "content": []}], [{"type": "model_output", "content": [{"type": "text", "text": "refused " + KEY}]}],
+            [{"type": "thought", "summary": [image]}], [{"type": "user_input", "content": [image]}],
+            [{"type": "model_output", "content": [{**image, "thought": True}]}],
+            [{"type": "model_output", "content": [image, image]}],
+            [{"type": "model_output", "content": [image]}, {"type": "model_output", "content": [image]}],
+            [{"type": "model_output", "content": [{"type": "image", "uri": "https://signed.example/?" + KEY}]}],
+            [{"type": "model_output", "content": [{**image, "mime_type": "image/jpeg"}]}],
+            [{"type": "model_output", "content": [{**image, "mime_type": KEY}]}],
+            [{"type": "model_output", "content": [{**image, "data": "invalid"}]}],
+        )]
+        failures += [{}, {**completed, "code": KEY}]
+        for raw in failures:
+            with self.subTest(status=raw.get("status"), errors=raw.get("errors")):
+                seen = []
+                def upstream(req):
+                    seen.append(req); return response(raw)
+                with patch.object(images, "_client", factory(upstream)), patch.object(images, "_download") as download, self.assertRaises(images.ImageProviderError) as caught:
+                    await images.request_image(images.ImageConfig(connection("gemini"), KEY), "generate", {"prompt": "封面"}, {})
+                self.assertEqual(caught.exception.code, "image_outcome_unknown")
+                self.assertNotIn(KEY, str(caught.exception)); self.assertNotIn("signed.example", str(caught.exception))
+                self.assertEqual(len(seen), 1); download.assert_not_called()
+
+    async def test_interactions_optional_mime_and_numeric_usage_are_inspected_without_echo(self):
+        raw = {"status": "completed", "steps": [{"type": "model_output", "content": [{"type": "image", "data": B64}]}],
+               "usage": {"total_input_tokens": True, "total_output_tokens": -1, "total_thought_tokens": float("nan"),
+                         "total_cached_tokens": float("inf"), "total_tool_use_tokens": 2**53, "total_tokens": {"input_tokens": 1, "prompt": KEY}}}
+        with patch.object(images, "_client", factory(lambda _: response(raw))):
+            metrics = {}
+            result = await images.request_image(images.ImageConfig(connection("gemini"), KEY), "generate", {"prompt": "封面"}, metrics)
+        self.assertEqual(result["image"], {**ORIGINAL, "width": 2, "height": 3})
+        self.assertNotIn("usage", result)
+        self.assertEqual(metrics, {"call_count": 1})
 
     async def test_gemini_malformed_bounded_response_and_network_failure_are_unknown(self):
         failures = (response(b"not-json"), response({"error": {"status": "RESOURCE_EXHAUSTED", "message": KEY}}, 429, {"content-length": "100000"}),

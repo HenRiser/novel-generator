@@ -229,6 +229,33 @@ class ImageMetadata(unittest.TestCase):
 
 
 class MetadataTransport(unittest.IsolatedAsyncioTestCase):
+    async def test_official_interactions_edit_cleans_inline_input_and_final_output_metadata(self):
+        raw_image = metadata_png()
+        original = {"mime_type": "image/png", "data_base64": base64.b64encode(raw_image).decode()}
+        seen = []
+        def upstream(request):
+            seen.append(request)
+            raw = {"status": "completed", "steps": [{"type": "model_output", "content": [
+                {"type": "image", "mime_type": "image/png", "data": original["data_base64"]}]}]}
+            return httpx.Response(200, stream=httpx.ByteStream(json.dumps(raw).encode()))
+        config = images.ImageConfig(images.normalize_image_connection({
+            "profile_id": "metadata-test", "revision": 1, "preset": "gemini", "protocol": "gemini_images",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta", "model": "gemini-3.1-flash-image",
+            "policy": default_policy("custom"), "auth_mode": "key"}), "fake-metadata-test-key")
+        def client(url, custom=False):
+            return httpx.AsyncClient(transport=httpx.MockTransport(upstream), trust_env=False)
+        with patch.object(images, "_client", client):
+            result = await images.request_image(config, "edit", {"prompt": "edit", "image": original}, {})
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0].url.path, "/v1beta/interactions")
+        body = json.loads(seen[0].content)
+        self.assertFalse(body["store"])
+        self.assertEqual(body["input"][1]["mime_type"], "image/png")
+        self.assertEqual(base64.b64decode(body["input"][1]["data"]), PNG)
+        self.assertEqual(base64.b64decode(result["image"]["data_base64"]), PNG)
+        self.assertEqual((result["image"]["width"], result["image"]["height"]), (2, 3))
+        self.assertEqual(original["data_base64"], base64.b64encode(raw_image).decode())
+
     async def test_every_adapter_sends_and_returns_cleaned_bytes_without_real_network_or_key(self):
         raw_image = metadata_png(private_color_profile() if ImageCms is not None else b"opaque-private-icc:" + SECRET)
         original = {"mime_type": "image/png", "data_base64": base64.b64encode(raw_image).decode()}
