@@ -182,22 +182,8 @@ async def compute_endpoint(operation: str, request: Request):
             _CALLS.release()
 
 
-class _ComputeStream(StreamingResponse):
-    # Own admission for the entire ASGI response, even when disconnected before iteration.
-    async def __call__(self, scope, receive, send):
-        try:
-            await super().__call__(scope, receive, send)
-        finally:
-            try:
-                await self.body_iterator.aclose()
-            except Exception:
-                pass  # A cleanup error must not log provider bodies after response headers were sent.
-            finally:
-                _CALLS.release()
-
-
 class _PlanningComputeStream(StreamingResponse):
-    """One lifetime deadline includes ASGI send, even while the graph is idle."""
+    """Shared lifetime deadline for planning, prose and cover streams, including send."""
 
     def __init__(self, body, deadline: float):
         super().__init__(body, media_type="application/x-ndjson", headers=HEADERS)
@@ -311,17 +297,14 @@ async def _planning_stream_body(identity, data, credentials, started: float, dea
         await iterator.aclose()
 
 
-async def _stream_body(operation, identity, data, credentials):
-    started = monotonic()
+async def _stream_body(operation, identity, data, credentials, started: float):
     metrics: dict[str, Any] = {}
     iterator = stream_compute(operation, data, credentials, metrics)
     try:
         while True:
-            remaining = MAX_COMPUTE_SECONDS - (monotonic() - started)
-            if remaining <= 0:
-                raise asyncio.TimeoutError()
             try:
-                event = await asyncio.wait_for(iterator.__anext__(), remaining)
+                # The response owns the reader and cancellation cleanup in one task.
+                event = await iterator.__anext__()
             except StopAsyncIteration:
                 break
             event = {**event, **identity}
@@ -335,7 +318,7 @@ async def _stream_body(operation, identity, data, credentials):
         try:
             await iterator.aclose()
         except Exception:
-            pass  # Admission release is owned by _ComputeStream, not this iterator.
+            pass  # Admission release is owned by the response, not this iterator.
 
 
 @router.post("/compute/{operation}/stream", response_model=None)
@@ -352,12 +335,16 @@ async def compute_stream_endpoint(operation: str, request: Request):
             if issues:
                 raise ComputeError("策划输入无效，请确认连续前文与章节约束。")
         acquired = _acquire(operation)
+        started = monotonic()
+        deadline = started + MAX_COMPUTE_SECONDS
         if operation == "plan_chapter":
-            started = monotonic()
-            return _PlanningComputeStream(_planning_stream_body(identity, data, credentials, started, started + MAX_COMPUTE_SECONDS),
-                                          started + MAX_COMPUTE_SECONDS)
+            body = _planning_stream_body(identity, data, credentials, started, deadline)
+        else:
+            body = _stream_body(operation, identity, data, credentials, started)
+        response = _PlanningComputeStream(body, deadline)
+        acquired = False  # Response owns admission through the real send and cleanup.
+        return response
     except Exception as exc:
         if acquired:
             _CALLS.release()
         return _error(*_exception(exc))
-    return _ComputeStream(_stream_body(operation, identity, data, credentials), media_type="application/x-ndjson", headers=HEADERS)
