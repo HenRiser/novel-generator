@@ -11,6 +11,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
+from api.ingress import MAX_TEXT_REQUEST_BYTES as MAX_REQUEST_BYTES
+from api.ingress import _bounded_io
 from deepseek_client import DeepSeekClientError, ProviderConfig, MODEL_TIMEOUT_SECONDS
 from provider_catalog import catalog, normalize_connection, request_fingerprint, PROTOCOLS
 from provider_transport import DestinationRejected
@@ -23,7 +25,6 @@ from cover_generation import capabilities as cover_capabilities
 
 router = APIRouter(prefix="/api", tags=["compute"])
 PROTOCOL_VERSION = 2
-MAX_REQUEST_BYTES = 1024 * 1024
 MAX_MODEL_SECONDS = MODEL_TIMEOUT_SECONDS
 MAX_COMPUTE_SECONDS = 180.0
 MAX_CONCURRENT_CALLS = 2
@@ -136,11 +137,13 @@ async def _disconnect(request: Request):
         pass
 
 
-async def _connected(request: Request, coroutine):
+async def _connected(request: Request, coroutine, timeout=None):
     work = asyncio.create_task(coroutine)
     disconnected = asyncio.create_task(_disconnect(request))
     try:
-        done, _ = await asyncio.wait({work, disconnected}, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait({work, disconnected}, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+        if not done:
+            raise asyncio.TimeoutError()
         if disconnected in done and work not in done:
             raise asyncio.CancelledError()
         return await work
@@ -148,7 +151,16 @@ async def _connected(request: Request, coroutine):
         for task in (work, disconnected):
             if not task.done():
                 task.cancel()
-        await asyncio.gather(work, disconnected, return_exceptions=True)
+        closing = asyncio.gather(work, disconnected, return_exceptions=True)
+        cancelled = False
+        while not closing.done():
+            try:
+                await asyncio.shield(closing)
+            except asyncio.CancelledError:
+                cancelled = True
+        closing.result()
+        if cancelled:
+            raise asyncio.CancelledError()
 
 
 @router.get("/capabilities", response_model=None)
@@ -169,11 +181,11 @@ async def compute_endpoint(operation: str, request: Request):
         return _error(404, "unknown_operation", "不支持的计算操作。")
     acquired = False
     try:
-        identity, credentials, data = await asyncio.wait_for(_parse(request, operation), MAX_COMPUTE_SECONDS)
+        identity, credentials, data = await _bounded_io(_parse(request, operation), MAX_COMPUTE_SECONDS)
         acquired = _acquire(operation)
         metrics: dict[str, Any] = {}
         started = monotonic()
-        result = await _connected(request, asyncio.wait_for(run_compute(operation, data, credentials, metrics), MAX_COMPUTE_SECONDS))
+        result = await _connected(request, run_compute(operation, data, credentials, metrics), MAX_COMPUTE_SECONDS)
         return JSONResponse({**identity, "result": result, "metrics": _metrics(operation, started, metrics)}, headers=HEADERS)
     except Exception as exc:
         return _error(*_exception(exc))
@@ -327,7 +339,7 @@ async def compute_stream_endpoint(operation: str, request: Request):
         return _error(400, "stream_not_supported", "该操作不支持流式计算。")
     acquired = False
     try:
-        identity, credentials, data = await asyncio.wait_for(_parse(request, operation), MAX_COMPUTE_SECONDS)
+        identity, credentials, data = await _bounded_io(_parse(request, operation), MAX_COMPUTE_SECONDS)
         if operation == "plan_chapter":
             if identity.get("protocol_version") != 2:
                 raise ComputeError("策划流需要v2连接协议。", "protocol_version")

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from api.ingress import ComputeIngressMiddleware
 from api.routers import (
     audit,
     chapter_function_reviews,
@@ -42,6 +43,7 @@ app = FastAPI(
     openapi_url=None if PUBLIC_MODE else "/openapi.json",
 )
 
+app.add_middleware(ComputeIngressMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

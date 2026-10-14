@@ -8,6 +8,8 @@ from time import monotonic
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from api.ingress import MAX_IMAGE_REQUEST_BYTES as MAX_REQUEST_BYTES
+from api.ingress import _bounded_io
 from api.routers import compute
 import cover_generation
 from deepseek_client import DeepSeekClientError
@@ -18,7 +20,6 @@ from provider_transport import DestinationRejected
 from services.compute_service import ComputeError
 
 router = APIRouter(prefix="/api/compute/images", tags=["image-compute"])
-MAX_REQUEST_BYTES = 12 * 1024 * 1024
 MAX_ERROR_SEND_SECONDS = 1.0
 MAX_COVER_LINE_BYTES = 12 * 1024 * 1024
 MAX_COVER_STREAM_BYTES = 48 * 1024 * 1024
@@ -166,7 +167,7 @@ async def image_endpoint(operation: str, request: Request):
     started = monotonic()
     deadline = started + compute.MAX_COMPUTE_SECONDS
     try:
-        identity, connection, config, data = await asyncio.wait_for(_parse(request, operation), max(0, deadline - monotonic()))
+        identity, connection, config, data = await _bounded_io(_parse(request, operation), max(0, deadline - monotonic()))
         metrics = {}
         if operation == "validate_connection":
             result = {"connection": connection}
@@ -177,9 +178,9 @@ async def image_endpoint(operation: str, request: Request):
                 acquired = True
             if operation == "models":
                 # Preset suggestions need no credentials and do not assert account access.
-                result = await compute._connected(request, asyncio.wait_for(list_models(config or connection), max(0, deadline - monotonic())))
+                result = await compute._connected(request, list_models(config or connection), max(0, deadline - monotonic()))
             else:
-                result = await compute._connected(request, asyncio.wait_for(request_image(config, operation, data, metrics), max(0, deadline - monotonic())))
+                result = await compute._connected(request, request_image(config, operation, data, metrics), max(0, deadline - monotonic()))
         response = _ImageResponse({**identity, "result": result, "metrics": compute._metrics("image_" + operation, started, metrics)},
                                   deadline=deadline, release=compute._CALLS.release if acquired else None)
         acquired = False  # The ASGI response now owns this slot through its final send cleanup.
@@ -233,7 +234,10 @@ def _cover_exception(exc):
         fixed = {"cover_unsuitable": "当前素材不适合生成封面，请调整创意后重试。",
                  "cover_missing_appearance": "人物卡中未找到明确外观描述，请补充「外貌特征：」「服饰：」等字段后重试。",
                  "invalid_cover_plan": "文字模型未返回有效封面方案，请检查连接后手动重试。",
-                 "compute_busy": "当前计算请求较多，请稍后重试。"}
+                 "compute_busy": "当前计算请求较多，请稍后重试。",
+                 "request_timeout": "请求上传超时，请手动重试。",
+                 "request_too_large": "请求体超过大小限制。",
+                 "invalid_content_type": "请求必须使用 application/json。"}
         return exc.status, exc.code if exc.code in fixed else "invalid_cover_input", fixed.get(exc.code, "封面请求字段、连接或素材无效。")
     return _exception(exc)
 
@@ -246,7 +250,7 @@ async def cover_endpoint(operation: str, request: Request):
     acquired = False
     started = monotonic()
     try:
-        identity, _, configs, data = await asyncio.wait_for(_parse(request, operation), MAX_COVER_PARSE_SECONDS)
+        identity, _, configs, data = await _bounded_io(_parse(request, operation), MAX_COVER_PARSE_SECONDS)
         deadline = started + cover_generation.budget_seconds(data["count"])
         if not compute._CALLS.acquire(blocking=False):
             raise ComputeError("当前计算请求较多，请稍后重试。", "compute_busy", 429)
