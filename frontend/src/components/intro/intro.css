@@ -2,25 +2,25 @@
 .neural-sculpture canvas { display: block; width: 100%; height: 100%; }
 .neural-sculpture-fallback { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .65; }
 .neural-sculpture[data-ready="true"] .neural-sculpture-fallback { display: none; }
-.intro-overlay { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; overflow: hidden; background: #f6f5f0; color: #173f35; }
-.intro-overlay::before { content: ""; position: absolute; inset: 18px; border: 1px solid rgba(23,63,53,.13); pointer-events: none; }
+.intro-overlay { position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--paper); color: var(--ink); }
+.intro-overlay::before { content: ""; position: absolute; inset: 18px; border: 1px solid var(--border); pointer-events: none; }
 .intro-overlay-leaving { opacity: 0; visibility: hidden; transition: opacity 400ms ease, visibility 400ms; }
 .intro-topline, .intro-bottomline { position: absolute; left: 42px; right: 42px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
-.intro-topline { top: 39px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 10px; letter-spacing: .13em; color: #6f7d71; }
+.intro-topline { top: 39px; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 10px; letter-spacing: .13em; color: var(--muted); }
 .intro-bottomline { bottom: 38px; }
 .intro-stage { display: flex; flex-direction: column; align-items: center; width: min(560px, 92vw); padding-bottom: 18px; }
 .intro-art { width: min(360px, 72vw); height: min(300px, 54vh); animation: intro-reveal 1000ms ease both; }
 .intro-wordmark { margin-top: -11px; font-family: Georgia, "Times New Roman", serif; font-size: clamp(60px, 11vw, 94px); font-weight: 400; line-height: 1.12; letter-spacing: -.065em; animation: intro-reveal 700ms 150ms both; }
-.intro-wordmark span { color: #bd6d45; }
-.intro-statement { margin: 20px 0 30px; font-family: "Noto Serif SC", "Songti SC", SimSun, serif; font-size: 19px; letter-spacing: .28em; color: #526757; animation: intro-reveal 700ms 350ms both; }
-.intro-rule { height: 1px; width: 140px; overflow: hidden; background: #dce1d6; }
-.intro-rule span { display: block; height: 100%; background: #597461; transform-origin: left; animation: intro-progress 2900ms linear both; }
-.intro-preference { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: #6f7d71; cursor: pointer; }
-.intro-preference input { accent-color: #173f35; width: 14px; height: 14px; }
-.intro-skip { display: flex; align-items: center; gap: 14px; border: 1px solid #cad2c6; border-radius: 6px; background: transparent; padding: 11px 15px; color: #173f35; font: inherit; font-size: 12px; cursor: pointer; transition: background 150ms, border-color 150ms; }
-.intro-skip:hover { background: #e9ede3; border-color: #9caf9e; }
-.intro-skip:focus-visible, .intro-preference input:focus-visible { outline: 2px solid #bd6d45; outline-offset: 4px; }
-.intro-skip kbd { font: 10px ui-monospace, monospace; color: #768472; border-left: 1px solid #cad2c6; padding-left: 12px; }
+.intro-wordmark span { color: var(--accent); }
+.intro-statement { margin: 20px 0 30px; font-family:var(--serif); font-size: 19px; letter-spacing: .28em; color: var(--muted); animation: intro-reveal 700ms 350ms both; }
+.intro-rule { height: 1px; width: 140px; overflow: hidden; background: var(--border); }
+.intro-rule span { display: block; height: 100%; background: var(--accent); transform-origin: left; animation: intro-progress 2900ms linear both; }
+.intro-preference { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.intro-preference input { accent-color: var(--ink); width: 14px; height: 14px; }
+.intro-skip { display: flex; align-items: center; gap: 14px; border: 1px solid var(--border); border-radius: 6px; background: transparent; padding: 11px 15px; color: var(--ink); font: inherit; font-size: 12px; cursor: pointer; transition: background 150ms, border-color 150ms; }
+.intro-skip:hover { background: var(--surface-soft); border-color: var(--accent); }
+.intro-skip:focus-visible, .intro-preference input:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.intro-skip kbd { font: 10px ui-monospace, monospace; color: var(--muted); border-left: 1px solid var(--border); padding-left: 12px; }
 @keyframes intro-reveal { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes intro-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (max-width: 600px) { .intro-overlay::before { inset: 10px; } .intro-topline, .intro-bottomline { left: 25px; right: 25px; } .intro-topline { top: 29px; } .intro-topline span:last-child { display: none; } .intro-bottomline { bottom: 29px; gap: 12px; } .intro-skip kbd { display: none; } .intro-skip { padding: 10px 12px; gap: 10px; } .intro-preference { font-size: 11px; } }

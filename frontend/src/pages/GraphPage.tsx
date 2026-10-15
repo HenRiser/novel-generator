@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Card, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Spin, Tag } from "antd";
-import { ArrowRightOutlined, DeleteOutlined, EditOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, ImportOutlined, SearchOutlined } from "@ant-design/icons";
+import { ArrowRightOutlined, DeleteOutlined, EditOutlined, LinkOutlined, PlusOutlined, ReloadOutlined, ImportOutlined, SearchOutlined, NodeIndexOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import type { NarrativeGraphDocument, NarrativeGraphNode, NarrativeGraphNodeType } from "../types";
 import { createNarrativeGraphEdge, createNarrativeGraphNode, deleteNarrativeGraphEdge, deleteNarrativeGraphNode, getNarrativeGraph, importNarrativeGraphAssets, updateNarrativeGraphNode } from "../api";
@@ -179,13 +179,13 @@ export default function GraphPage() {
             <div className="graph-stage-heading"><span>故事网络 <span className="graph-count">{graph ? `${nodes.length} 节点 / ${edges.length} 关系` : "等待加载"}</span></span><span>拖动探索 · 双击编辑</span></div>
             <Spin spinning={loading}>
               <GraphCanvas projectRef={selectedProjectRef} graph={graph} loading={loading} selectedNodeId={selectedNodeId} onNodeClick={setSelectedNodeId} onNodeDoubleClick={openEditNode} onBlankClick={() => setSelectedNodeId(null)} />
-              {!loading && graph && nodes.length === 0 && <div className="graph-empty"><div className="graph-empty-orbit" aria-hidden="true"><span /><span /><span /></div><h3>每个故事，从一个联系开始</h3><p>从已有资料导入角色与设定，或亲手放下第一个节点。</p><Button type="primary" icon={<PlusOutlined />} disabled={!canEdit} onClick={openCreateNode}>添加第一个节点</Button></div>}
+              {!loading && graph && nodes.length === 0 && <div className="graph-empty"><NodeIndexOutlined className="graph-empty-icon" /><h3>每个故事，从一个联系开始</h3><p>从已有资料导入角色与设定，或亲手放下第一个节点。</p><Button type="primary" icon={<PlusOutlined />} disabled={!canEdit} onClick={openCreateNode}>添加第一个节点</Button></div>}
             </Spin>
             <div className="graph-legend">{NODE_TYPES.filter((type) => nodes.some((node) => node.type === type.value) || nodes.length === 0 && ["character", "scene", "foreshadowing", "world_fact"].includes(type.value)).map((type) => <span key={type.value}><i style={{ background: NODE_COLORS[type.value] }} />{type.label}</span>)}<span className="graph-legend-note">节点大小表示重要度</span></div>
           </section>
           <aside className="graph-inspector">
-            <div className="graph-inspector-heading"><span className="eyebrow">INSPECTOR</span><span>{selectedNode ? readableType(selectedNode.type) : "节点详情"}</span></div>
-            {!selectedNode ? <div className="graph-inspector-empty"><div className="inspector-glyph" aria-hidden="true">↗</div><h3>循着联系，走进故事</h3><p>点击节点查看资料，或使用搜索直接定位。你可以随时补充关系，让故事的脉络更清晰。</p><div className="graph-tip"><strong>由你确认，才成为设定。</strong><br />模型提取的候选资料会先进入知识审核，接受后加入正式图谱。</div></div> : <>
+            <div className="graph-inspector-heading"><span className="eyebrow">当前节点</span><span>{selectedNode ? readableType(selectedNode.type) : "节点详情"}</span></div>
+            {!selectedNode ? <div className="graph-inspector-empty"><div className="inspector-glyph" aria-hidden="true"><ArrowRightOutlined rotate={-45} /></div><h3>循着联系，走进故事</h3><p>点击节点查看资料，或使用搜索直接定位。你可以随时补充关系，让故事的脉络更清晰。</p><div className="graph-tip"><strong>由你确认，才成为设定。</strong><br />模型提取的候选资料会先进入知识审核，接受后加入正式图谱。</div></div> : <>
               <h2 className="graph-node-title">{selectedNode.label}</h2>
               <div className="graph-node-tags"><Tag>{readableType(selectedNode.type)}</Tag><Tag>{({ active: "活跃", draft: "草稿", retired: "已弃用", deprecated: "已弃用", planned: "计划中", confirmed: "已确认" } as Record<string, string>)[selectedNode.status] || selectedNode.status}</Tag><Tag>重要度 {selectedNode.importance}/10</Tag></div>
               <p className="graph-node-summary">{selectedNode.summary || "还没有描述。补充一段说明，记录它在故事中的位置。"}</p>

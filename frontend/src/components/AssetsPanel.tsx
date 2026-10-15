@@ -106,7 +106,7 @@ export default function AssetsPanel() {
         whiteSpace: "pre-wrap",
         fontSize: 13,
         lineHeight: 1.7,
-        color: "#4a4036",
+        color: "var(--ink)",
         maxHeight: "calc(100vh - 320px)",
         overflowY: "auto",
       }}

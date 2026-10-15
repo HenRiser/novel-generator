@@ -21,12 +21,12 @@ function CandidateEditor({ candidate, disabled, onSave }: { candidate: ImportCan
     onSave({ ...candidate, label: label.trim(), summary: summary.trim(), aliases: aliases.split(/[,，]/).map(value => value.trim()).filter(Boolean),
       status, provenance: modified || !candidate.evidence ? 'user_setting' : candidate.provenance });
   }
-  return <div style={{ borderTop: '1px solid var(--border-color, #ddd)', paddingBlock: 12 }}>
+  return <div style={{ borderTop: '1px solid var(--border)', paddingBlock: 12 }}>
     <Space wrap><Tag>{kindLabels[candidate.kind]}</Tag><Tag color={candidate.status === 'accepted' ? 'green' : candidate.status === 'rejected' ? 'default' : 'orange'}>{({ pending: '待审核', accepted: '已接受', rejected: '已拒绝' })[candidate.status]}</Tag><span>{candidate.provenance === 'user_setting' ? '用户设定' : '有原文证据'}</span></Space>
     <label style={{ display: 'block', marginTop: 8 }}>名称<Input aria-label={`候选名称 ${candidate.id}`} value={label} onChange={event => setLabel(event.target.value)} disabled={disabled} /></label>
     <label style={{ display: 'block', marginTop: 8 }}>描述<Input.TextArea aria-label={`候选描述 ${candidate.id}`} value={summary} onChange={event => setSummary(event.target.value)} disabled={disabled} autoSize={{ minRows: 2, maxRows: 6 }} /></label>
     {candidate.kind === 'characters' && <label style={{ display: 'block', marginTop: 8 }}>别名（逗号分隔）<Input value={aliases} onChange={event => setAliases(event.target.value)} disabled={disabled} /></label>}
-    <blockquote style={{ margin: '12px 0', paddingLeft: 12, borderLeft: '3px solid #b8cbbd', whiteSpace: 'pre-wrap' }}>{candidate.evidence || '无原文证据，仅可作为用户设定。'}</blockquote>
+    <blockquote style={{ margin: '12px 0', paddingLeft: 12, borderLeft: '3px solid var(--border-strong)', whiteSpace: 'pre-wrap' }}>{candidate.evidence || '无原文证据，仅可作为用户设定。'}</blockquote>
     {modified && <p>修改后的内容将标为“用户设定”，不会冒充原文事实。点击接受后保存。</p>}
     <Space><Button disabled={disabled || !label.trim() || !summary.trim()} onClick={() => save('accepted')}>接受并保存</Button><Button disabled={disabled} onClick={() => save('rejected')}>拒绝</Button></Space>
   </div>;

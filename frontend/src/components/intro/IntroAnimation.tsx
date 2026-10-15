@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isIntroHidden, markIntroSeen, setIntroHidden } from "../../appConfig";
-import NeuralSculpture from "./NeuralSculpture";
 import "./intro.css";
 
 type IntroAnimationProps = { onFinish: () => void };
@@ -56,9 +55,8 @@ export default function IntroAnimation({ onFinish }: IntroAnimationProps) {
 
   return (
     <div className={`intro-overlay${leaving ? " intro-overlay-leaving" : ""}`} role="dialog" aria-modal="true" aria-label="Braipen 品牌进场">
-      <div className="intro-topline"><span>BRAIPEN / CREATIVE INTELLIGENCE</span><span>从一个念头开始</span></div>
+      <div className="intro-topline"><span>BRAIPEN / 写作空间</span><span>从一个念头开始</span></div>
       <div className="intro-stage">
-        <div className="intro-art"><NeuralSculpture /></div>
         <div className="intro-wordmark">braipen<span>.</span></div>
         <p className="intro-statement">思想，有迹可循。</p>
         <div className="intro-rule" aria-hidden="true"><span /></div>

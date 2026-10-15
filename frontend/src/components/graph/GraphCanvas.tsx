@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Alert, Button, Space, Tooltip } from "antd";
 import { FullscreenOutlined, MinusOutlined, PlusOutlined } from "@ant-design/icons";
 import type { Graph } from "@antv/g6";
 import type { NarrativeGraphDocument } from "../../types";
+import { useAppearance } from "../AppearanceProvider";
+import { appearancePalettes } from "../../theme";
 
 type GraphCanvasProps = {
   projectRef: string; graph: NarrativeGraphDocument | null; loading: boolean;
@@ -10,8 +12,8 @@ type GraphCanvasProps = {
   onNodeClick: (nodeId: string) => void; onNodeDoubleClick: (nodeId: string) => void; onBlankClick: () => void;
 };
 export const NODE_COLORS: Record<string, string> = {
-  character: "#326451", scene: "#809987", item: "#7390a1", foreshadowing: "#bd6d45",
-  relationship_note: "#957980", plot_direction: "#8481a0", world_fact: "#9b9376", event: "#b89856", organization: "#496777",
+  character: "#9a655c", scene: "#6a8974", item: "#6d879b", foreshadowing: "#ac7c4f",
+  relationship_note: "#957980", plot_direction: "#8481a0", world_fact: "#95855e", event: "#a18a57", organization: "#688795",
 };
 function dataField(value: unknown, key: string): string | number | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -27,6 +29,9 @@ export default function GraphCanvas({ projectRef, graph, loading, selectedNodeId
   const [ready, setReady] = useState(false);
   const [renderError, setRenderError] = useState("");
   const [retry, setRetry] = useState(0);
+  const { appearance } = useAppearance();
+  const palette = useRef(appearancePalettes[appearance]);
+  useLayoutEffect(() => { palette.current = appearancePalettes[appearance]; }, [appearance]);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,15 +53,15 @@ export default function GraphCanvas({ projectRef, graph, loading, selectedNodeId
           behaviors: ["drag-canvas", "zoom-canvas", "drag-element"],
           node: { style: {
             labelText: (d: unknown) => String(dataField(d, "label") ?? ""), labelPlacement: "bottom", labelOffsetY: 10,
-            labelFill: "#263e35", labelFontSize: 12, labelFontFamily: "Segoe UI, Microsoft YaHei, sans-serif",
+            labelFill: () => palette.current.ink, labelFontSize: 13, labelFontFamily: "Segoe UI, Microsoft YaHei, sans-serif",
             fill: (d: unknown) => NODE_COLORS[String(dataField(d, "type"))] ?? "#869185",
-            stroke: "#ffffff", lineWidth: 3,
+            stroke: () => palette.current.paper, lineWidth: 2,
             size: (d: unknown) => 24 + Math.max(1, Math.min(10, Number(dataField(d, "importance") ?? 5))) * 3,
-            shadowColor: "rgba(28, 63, 49, 0.12)", shadowBlur: 12,
+            shadowColor: "transparent", shadowBlur: 0,
           } },
           edge: { style: {
-            stroke: "#b5c1b5", lineWidth: 1, labelText: (d: unknown) => String(dataField(d, "label") ?? ""),
-            labelFontSize: 10, labelFill: "#7b877d", labelBackground: true, labelBackgroundFill: "#fafbf7", endArrow: true,
+            stroke: () => palette.current["border-strong"], lineWidth: 1, labelText: (d: unknown) => String(dataField(d, "label") ?? ""),
+            labelFontSize: 12, labelFill: () => palette.current.muted, labelBackground: true, labelBackgroundFill: () => palette.current.paper, endArrow: true,
           } },
           data: {
             nodes: graph!.graph.nodes.map((node) => ({ id: node.id, data: node })),
@@ -91,6 +96,17 @@ export default function GraphCanvas({ projectRef, graph, loading, selectedNodeId
       instance?.destroy();
     };
   }, [graph, projectRef, retry]);
+
+  useEffect(() => {
+    // Invalidate G6's mapped styles; draw alone reuses the old label colors.
+    // Updating styles preserves the current layout and viewport.
+    const instance = graphRef.current;
+    if (!ready || !instance) return;
+    const options = instance.getOptions();
+    instance.setNode({ ...options.node });
+    instance.setEdge({ ...options.edge });
+    void instance.draw().catch(() => undefined);
+  }, [appearance, ready]);
 
   useEffect(() => {
     if (ready && selectedNodeId && graph?.graph.nodes.some((node) => node.id === selectedNodeId)) {

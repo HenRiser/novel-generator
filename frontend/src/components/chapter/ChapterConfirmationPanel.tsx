@@ -147,7 +147,7 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
     }
   };
 
-  return <section className="chapter-confirmation" aria-label="正文确认与摘要" aria-live="polite">
+  return <section className="chapter-confirmation" data-status={workflow?.status} data-editing={editing} aria-label="正文确认与摘要" aria-live="polite">
     <div className="chapter-confirmation-heading"><strong>正文确认</strong><Space wrap>
       {loading && <Spin size="small" />}
       {workflow && <Tag color={workflow.status === "confirmed" ? "success" : "gold"}>{workflow.status === "confirmed" ? "已确认正文" : "待你确认"}</Tag>}
@@ -157,7 +157,7 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
     {workflow && <>
       {!workflow.editable && <Alert showIcon type="info" message={workflow.lock_reason || (workflow.locked_by_chapter ? `第 ${workflow.locked_by_chapter} 章已开始，前文已锁定。` : "本章当前不可修改。")} />}
       {!sameFile && !readingLoading && <Alert showIcon type="warning" message="当前阅读文件不是最新正文，不能直接提交这一版本。" description="刷新章节正文后，再编辑和确认最新版本。" />}
-      {workflow.status === "awaiting_confirmation" && <p className="chapter-confirmation-hint">先阅读正文。可以保留原稿，也可以修改后确认；确认后才在后台生成摘要并检查内容。</p>}
+      {workflow.status === "awaiting_confirmation" && <p className="chapter-confirmation-hint">阅读后可编辑或确认正文；确认后生成摘要并检查内容。</p>}
       <div className="chapter-background-status">
         <span>摘要：{({ not_requested: "确认后生成", pending: "等待后台生成", running: "后台生成中", ready: "已完成", failed: "生成失败" })[workflow.summary_status]}</span>
         <span>{workflow.review_scope === "semantic_and_rules" ? "逻辑与规则检查" : "规则检查"}：{({ not_requested: "尚未检查", pending: "等待后台检查", running: "后台检查中", ready: workflow.warnings.length ? `发现 ${workflow.warnings.length} 条疑似冲突` : "本轮未发现疑似冲突", failed: "检查失败，尚无结论" })[workflow.review_status]}</span>
@@ -169,12 +169,12 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
       {editing ? <>
         {restoredDraft && <Alert type="info" showIcon message="已恢复本标签页暂存的未提交编辑稿。" description="编辑稿仍需确认；提交前会核对原正文版本，避免覆盖后续修改。" />}
         {storageUnavailable && <Alert type="warning" showIcon message="浏览器会话存储不可用，编辑稿目前只在当前页面会话中保留。" description="切换章节和应用内页面仍可恢复；刷新或关闭标签页前请先保存，或复制修改内容。" />}
-        <Input.TextArea className="chapter-confirmation-editor" aria-label="编辑本章正文" value={draft} onChange={(event) => updateDraft(event.target.value)} autoSize={{ minRows: 12, maxRows: 28 }} disabled={saving || !workflow.editable || busy} />
+        <Input.TextArea className="chapter-confirmation-editor" aria-label="编辑本章正文" value={draft} onChange={(event) => updateDraft(event.target.value)} autoSize={{ minRows: 8, maxRows: 12 }} autoFocus disabled={saving || !workflow.editable || busy} />
         {staleDraft && <Alert type="warning" showIcon message="最新正文已变化，当前编辑稿尚未保存。" description="可先复制你的修改，再取消编辑并重新打开最新正文。" />}
-        <Space wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={blocked || staleDraft || !draft.trim()} onClick={() => void confirm()}>保存并确认</Button><Button disabled={saving} onClick={cancelEdit}>取消编辑</Button><span className="muted-note">{draft.length} 字{dirty ? " · 有未保存修改" : ""}</span></Space>
-      </> : <Space wrap>
-        {workflow.status === "awaiting_confirmation" && <Button type="primary" icon={<CheckOutlined />} loading={saving} disabled={blocked} onClick={() => void confirm()}>保留原稿并确认</Button>}
+        <Space className="chapter-confirmation-actions" wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={blocked || staleDraft || !draft.trim()} onClick={() => void confirm()}>保存并确认</Button><Button disabled={saving} onClick={cancelEdit}>取消编辑</Button><span className="muted-note">{draft.length} 字{dirty ? " · 有未保存修改" : ""}</span></Space>
+      </> : <Space className="chapter-confirmation-actions" wrap>
         <Button icon={<EditOutlined />} disabled={blocked} onClick={beginEdit}>编辑正文</Button>
+        {workflow.status === "awaiting_confirmation" && <Button type="primary" icon={<CheckOutlined />} loading={saving} disabled={blocked} onClick={() => void confirm()}>保留原稿并确认</Button>}
         {workflow.status === "confirmed" && (workflow.summary_status === "failed" || workflow.review_status === "failed") && <Button icon={<ReloadOutlined />} loading={saving} disabled={blocked} onClick={() => void confirm()}>重试后台处理</Button>}
       </Space>}
       {workflow.summary_status === "ready" && workflow.summary && <details className="chapter-summary"><summary>查看本版正文的摘要</summary><p>{workflow.summary}</p></details>}

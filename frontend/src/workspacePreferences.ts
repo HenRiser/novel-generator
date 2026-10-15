@@ -20,7 +20,7 @@ const isReaderFont = (value: unknown): value is ReaderFont => value === "serif" 
 const isReaderTheme = (value: unknown): value is ReaderTheme => typeof value === "string" && ["auto", "paper", "white", "night"].includes(value);
 
 function readPreferences(): Preferences {
-  const result: Preferences = { recentProject: null, fontSize: 18, font: "serif", theme: "auto", projects: Object.create(null), positions: Object.create(null) };
+  const result: Preferences = { recentProject: null, fontSize: 20, font: "serif", theme: "auto", projects: Object.create(null), positions: Object.create(null) };
   try {
     const raw: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
     if (!isRecord(raw)) return result;

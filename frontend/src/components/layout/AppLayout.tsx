@@ -6,6 +6,7 @@ import { selectGenerationBusy, useAppStore } from "../../store/useAppStore";
 import LocalTasksPanel from "../LocalTasksPanel";
 import PageBoundary from "./PageBoundary";
 import { useBatchGeneration } from "../../hooks/useBatchGeneration";
+import { AppearancePicker } from "../AppearanceProvider";
 
 const NAV_ITEMS = [
   { path: "/dashboard", icon: <AppstoreOutlined />, label: "创作概览", number: "01" },
@@ -17,13 +18,9 @@ const NAV_ITEMS = [
 ];
 const API_STATUS = {
   loading: { status: "processing" as const, text: "连接中" },
-  online: { status: "success" as const, text: "本地服务已连接" },
-  offline: { status: "default" as const, text: "本地服务未连接" },
+  online: { status: "success" as const, text: "创作服务已连接" },
+  offline: { status: "default" as const, text: "创作服务暂未连接" },
 };
-
-export function BrandMark() {
-  return <svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="M17 7c-3-5-11-1-9 4-6 2-5 10 0 11-2 6 5 10 9 5V7Zm4 0c3-5 11-1 9 4 6 2 5 10 0 11 2 6-5 10-9 5V7Z" stroke="currentColor" strokeWidth="1.5"/><path d="M8 11c4 0 5 3 4 6m-4 5c4 0 6-2 5-5m17-6c-4 0-5 3-4 6m4 5c-4 0-6-2-5-5M19 4v28m-3-3 3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
-}
 
 export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void }) {
   useBatchGeneration();
@@ -45,15 +42,13 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
   useEffect(() => { setMenuOpen(false); document.title = `${title} · Braipen`; window.scrollTo(0, 0); }, [location.pathname, title]);
 
   const navigation = <>
-    <Link to="/dashboard" className="brand"><BrandMark /><span>braipen<small>思想，有迹可循。</small></span></Link>
-    <div className="sidebar-label">WORKSPACE <span>工作空间</span></div>
+    <Link to="/dashboard" className="brand"><span>braipen<small>思想，有迹可循。</small></span></Link>
     <nav aria-label="主导航" className="main-nav">
       {NAV_ITEMS.map(item => <NavLink key={item.path} to={item.path} className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>
         {item.icon}<span>{item.label}</span><small>{item.number}</small>
       </NavLink>)}
     </nav>
     <div className="sidebar-foot">
-      <div className="lab-note"><span className="lab-dot" /> AN INDEPENDENT EXPLORATION<p>在故事里，探索 AI 的可能。</p></div>
       <NavLink to="/settings" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><SettingOutlined /><span>偏好设置</span></NavLink>
       <button className="nav-item" onClick={() => { setAboutOpen(true); setMenuOpen(false); }}><ExperimentOutlined /><span>关于这次探索</span><ArrowUpOutlined rotate={45} /></button>
     </div>
@@ -64,11 +59,12 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
     <aside className="app-sidebar">{navigation}</aside>
     <Drawer className="mobile-nav" placement="left" open={menuOpen} onClose={() => setMenuOpen(false)} styles={{ body: { padding: 20 }, wrapper: { width: 260 } }} title="工作空间">{navigation}</Drawer>
     <div className="app-main">
-      <header className="app-header">
-        <div className="header-location"><Button className="mobile-menu-button" type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setMenuOpen(true)} /><span className="header-section">工作空间</span><span className="header-slash">/</span><strong>{title}</strong></div>
+      <header className={`app-header${location.pathname === "/writing" && selectedProjectRef ? " app-header-studio" : ""}`}>
+        <div className="header-location"><Button className="mobile-menu-button" type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setMenuOpen(true)} /><span className="header-section">工作空间</span><span className="header-slash">/</span>{location.pathname === "/writing" && selectedProjectRef ? <h1>{title}</h1> : <strong>{title}</strong>}</div>
         <div className="header-tools">
           <Select aria-label="当前项目" className="header-project" placeholder="选择一个故事" showSearch allowClear loading={projectsLoading} disabled={busy} value={selectedProjectRef ?? undefined} optionFilterProp="label" onChange={changeProject} options={projects.map(p => ({ value: p.project_ref, label: p.title }))} notFoundContent={projectsLoading ? "正在读取项目…" : "还没有故事，从概览新建"} />
           <span className="connection-status" title={status.text}><Badge status={status.status} /><span>{status.text}</span></span>
+          <AppearancePicker />
         </div>
       </header>
       <LocalTasksPanel />

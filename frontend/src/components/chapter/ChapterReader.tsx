@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
-import { Alert, Button, ConfigProvider, Drawer, Empty, Space, Spin, Tooltip, theme as antdTheme } from "antd";
-import { DownloadOutlined, EditOutlined, MinusOutlined, PlusOutlined } from "@ant-design/icons";
+import { Alert, Button, ConfigProvider, Drawer, Empty, Space, Spin } from "antd";
+import { DownloadOutlined, EditOutlined, FontSizeOutlined, MinusOutlined, PlusOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import { downloadChapter, getChapters } from "../../api";
 import { selectGenerationBusy, useAppStore } from "../../store/useAppStore";
@@ -11,6 +11,8 @@ import type { ReaderFont, ReaderTheme } from "../../workspacePreferences";
 import type { ChapterWorkflow } from "../../types";
 import ContinueWriter from "./ContinueWriter";
 import ChapterConfirmationPanel from "./ChapterConfirmationPanel";
+import { useAppearance } from "../AppearanceProvider";
+import { appearancePalettes, getAppearanceTheme } from "../../theme";
 import "./reader.css";
 
 type ChapterReaderProps = { chapterNumber: number | null; onWorkflowChange?: (workflow: ChapterWorkflow | null) => void; footer?: ReactNode };
@@ -25,34 +27,21 @@ export default function ChapterReader({ chapterNumber, onWorkflowChange, footer 
   const [selectedText, setSelectedText] = useState<string | null>(null);
   const [writePanelOpen, setWritePanelOpen] = useState(false);
   const { fontSize, setFontSize, font, setFont, theme, setTheme } = useReaderPreferences();
-  const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
-  useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const update = () => setSystemDark(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  const readerTheme = theme === "auto" ? systemDark ? "night" : "paper" : theme;
+  const { appearance } = useAppearance();
+  const readerTheme = theme === "auto" ? "app" : theme;
   const controlTheme = useMemo(() => {
-    const dark = readerTheme === "night";
-    const paper = readerTheme === "paper";
+    const resolved = readerTheme === "app" ? appearance : readerTheme === "night" ? "night" : "editorial";
+    const palette = appearancePalettes[resolved];
+    const base = getAppearanceTheme(resolved);
     return {
-      inherit: false,
-      algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+      ...base, inherit: false,
       token: {
-        colorPrimary: dark ? "#9fbea5" : "#244d3c",
-        colorTextLightSolid: dark ? "#18241c" : "#ffffff",
-        colorBgContainer: dark ? "#202522" : paper ? "#fffdf6" : "#fcfcfa",
-        colorBgElevated: dark ? "#202522" : paper ? "#fffdf6" : "#fcfcfa",
-        colorText: dark ? "#d8d9cf" : "#343a34",
-        colorTextSecondary: dark ? "#b2b7ac" : "#696c60",
-        colorBorder: dark ? "#414940" : "#dcdace",
-        borderRadius: 8,
-        fontFamily: '"Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+        ...base.token,
+        colorBgContainer: readerTheme === "paper" ? "#f8f2e8" : readerTheme === "white" ? "#ffffff" : palette.paper,
+        colorBgElevated: readerTheme === "paper" ? "#f8f2e8" : readerTheme === "white" ? "#ffffff" : palette.surface,
       },
     };
-  }, [readerTheme]);
+  }, [readerTheme, appearance]);
   const readerStyle = { "--reader-font-size": `${fontSize}px` } as CSSProperties;
   const proseRef = useRef<HTMLElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -174,9 +163,11 @@ export default function ChapterReader({ chapterNumber, onWorkflowChange, footer 
     {selectedProjectRef && chapterNumber !== null && <header className="chapter-reader-toolbar">
       <span>第 {chapterNumber} 章 {chapter?.is_version ? `· v${chapter.version}` : ""}</span>
       <div className="reader-preference-controls">
+        <details className="reader-settings" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}><summary><FontSizeOutlined /> 排版</summary><div className="reader-settings-content" role="group" aria-label="阅读排版设置">
         <label className="reader-preference-label">字体<select className="reader-preference-select" aria-label="阅读字体" value={font} onChange={(event) => changeTypography(() => setFont(event.target.value as ReaderFont))}><option value="serif">书页 · 宋体</option><option value="sans">清晰 · 黑体</option></select></label>
-        <Space.Compact><Tooltip title="缩小字号"><Button type="text" size="small" aria-label="缩小阅读字号" disabled={fontSize <= 14} icon={<MinusOutlined />} onClick={() => changeTypography(() => setFontSize((size) => size - 1))} /></Tooltip><output className="reader-font-value" aria-label="阅读字号" aria-live="polite">{fontSize}</output><Tooltip title="放大字号"><Button type="text" size="small" aria-label="放大阅读字号" disabled={fontSize >= 28} icon={<PlusOutlined />} onClick={() => changeTypography(() => setFontSize((size) => size + 1))} /></Tooltip></Space.Compact>
-        <label className="reader-preference-label">底色<select className="reader-preference-select" aria-label="阅读底色" value={theme} onChange={(event) => setTheme(event.target.value as ReaderTheme)}><option value="auto">随系统</option><option value="paper">暖纸</option><option value="white">清白</option><option value="night">夜读</option></select></label>
+        <Space.Compact><Button type="text" size="small" aria-label="缩小阅读字号" title="缩小字号" disabled={fontSize <= 14} icon={<MinusOutlined />} onClick={() => changeTypography(() => setFontSize((size) => size - 1))} /><output className="reader-font-value" aria-label="阅读字号" aria-live="polite">{fontSize}</output><Button type="text" size="small" aria-label="放大阅读字号" title="放大字号" disabled={fontSize >= 28} icon={<PlusOutlined />} onClick={() => changeTypography(() => setFontSize((size) => size + 1))} /></Space.Compact>
+        <label className="reader-preference-label">底色<select className="reader-preference-select" aria-label="阅读底色" value={theme} onChange={(event) => setTheme(event.target.value as ReaderTheme)}><option value="auto">随界面</option><option value="paper">暖纸</option><option value="white">清白</option><option value="night">夜读</option></select></label>
+        </div></details>
         <Button size="small" type="text" icon={<DownloadOutlined />} onClick={() => void downloadChapter(selectedProjectRef, chapterNumber)}>下载</Button><Button size="small" icon={<EditOutlined />} disabled={!canContinue} onClick={() => { setAnchorText(null); setWritePanelOpen(true); }}>续写</Button>
       </div>
     </header>}
@@ -184,9 +175,9 @@ export default function ChapterReader({ chapterNumber, onWorkflowChange, footer 
     {selectedText && canContinue && <div className="reader-selection-actions" ref={selectionActionsRef} role="group" aria-label="选中文本操作"><span>已选中 {selectedText.length} 字</span><Button size="small" onClick={() => { setAnchorText(selectedText); setSelectedText(null); setWritePanelOpen(true); }}>以此为参考续写</Button><Button size="small" type="text" onClick={() => setSelectedText(null)}>收起</Button></div>}
     {locationError && <Alert type="info" showIcon message={locationError} closable onClose={() => setLocationError("")} />}
     {located && evidenceMatches.length > 0 && <div className="reader-evidence-actions" role="group" aria-label="原文定位"><span role="status">{evidenceMatches.length > 1 ? `共 ${evidenceMatches.length} 处相同原文，当前第 ${located.index + 1} 处` : "已定位原文"}</span>{evidenceMatches.length > 1 && <><Button size="small" disabled={located.index === 0} onClick={() => setLocated({ ...located, index: located.index - 1 })}>上一处</Button><Button size="small" disabled={located.index >= evidenceMatches.length - 1} onClick={() => setLocated({ ...located, index: located.index + 1 })}>下一处</Button></>}<Button size="small" type="text" onClick={() => { locateButtonRef.current?.scrollIntoView({ block: "center" }); locateButtonRef.current?.focus({ preventScroll: true }); }}>返回提示</Button><Button size="small" type="text" onClick={() => setLocated(null)}>关闭定位</Button></div>}
-    <div className="chapter-reader-scroll" ref={scrollRef}>
-    {selectedProjectRef && chapterNumber !== null && <ChapterConfirmationPanel key={`${selectedProjectRef}:${chapterNumber}`} projectRef={selectedProjectRef} chapterNumber={chapterNumber} displayedFilename={filename} readingLoading={loading} refreshToken={refreshToken} onWorkflowChange={handleWorkflow} onConfirmed={handleConfirmed} onLocateEvidence={locateEvidence} />}
-      {loading ? <div className="reader-loading"><Spin /><p>正在翻开这一页…</p></div> : error ? <Alert type="error" showIcon message={error} action={<Button size="small" onClick={() => setRefreshToken((current) => current + 1)}>重试</Button>} /> : content ? <article className="reader-prose" ref={proseRef} onMouseUp={handleSelection} onKeyUp={handleSelection}><div className="reader-chapter-kicker">CHAPTER {String(chapterNumber).padStart(2, "0")}</div><h2>{highlightedText(displayTitle, "title")}</h2><div className="reader-chapter-rule" /><div className="reader-prose-body" style={{ fontSize }}>{highlightedText(manuscriptBody || "", "body")}</div><div className="reader-end-mark" aria-hidden="true">✦</div></article> : <div className="reader-blank"><span className="eyebrow">THE NEXT PAGE</span><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={!selectedProjectRef ? "选择一本作品，翻开故事。" : chapterNumber === null ? "从目录中选择一章，或开始写下新的故事。" : "这一章还没有正文。"}><Button icon={<EditOutlined />} onClick={() => navigate(selectedProjectRef ? "/writing" : "/dashboard")}>{selectedProjectRef ? "前往创作台" : "前往作品概览"}</Button></Empty></div>}
+    <div className="chapter-reader-scroll" ref={scrollRef} tabIndex={0} role="region" aria-label="章节正文">
+      {loading ? <div className="reader-loading"><Spin /><p>正在翻开这一页…</p></div> : error ? <Alert type="error" showIcon message={error} action={<Button size="small" onClick={() => setRefreshToken((current) => current + 1)}>重试</Button>} /> : content ? <article className="reader-prose" ref={proseRef} onMouseUp={handleSelection} onKeyUp={handleSelection}><div className="reader-chapter-kicker">第 {chapterNumber} 章</div><div className="reader-title-row"><h2>{highlightedText(displayTitle, "title")}</h2><span>{(manuscriptBody || "").replace(/\s/g, "").length.toLocaleString()} 字</span></div><div className="reader-chapter-rule" /><div className="reader-prose-body" style={{ fontSize }}>{highlightedText(manuscriptBody || "", "body")}</div></article> : <div className="reader-blank"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={!selectedProjectRef ? "选择一本作品，翻开故事。" : chapterNumber === null ? "从目录中选择一章，或开始写下新的故事。" : "这一章还没有正文。"}><Button icon={<EditOutlined />} onClick={() => navigate(selectedProjectRef ? "/writing" : "/dashboard")}>{selectedProjectRef ? "前往创作台" : "前往作品概览"}</Button></Empty></div>}
+      {selectedProjectRef && chapterNumber !== null && <ChapterConfirmationPanel key={`${selectedProjectRef}:${chapterNumber}`} projectRef={selectedProjectRef} chapterNumber={chapterNumber} displayedFilename={filename} readingLoading={loading} refreshToken={refreshToken} onWorkflowChange={handleWorkflow} onConfirmed={handleConfirmed} onLocateEvidence={locateEvidence} />}
     </div>
     {footer}
     <Drawer title="接着这一页，继续写" rootClassName={`reader-drawer reader-theme-${readerTheme} reader-font-${font}`} rootStyle={readerStyle} open={writePanelOpen && Boolean(content)} onClose={() => setWritePanelOpen(false)} size={520} destroyOnHidden>

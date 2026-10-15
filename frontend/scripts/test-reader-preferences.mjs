@@ -46,11 +46,11 @@ test("旧字号、项目、章节和阅读进度保留，新偏好使用默认�
 test("非法阅读偏好回退，合法范围包含旧小字号与新增大字号", () => {
   for (const fontSize of [null, "20", 13, 29, 18.5]) {
     const preferences = load(storage(JSON.stringify({ fontSize, font: {}, theme: "unknown" })));
-    assert.equal(preferences.getReaderFontSize(), 18);
+    assert.equal(preferences.getReaderFontSize(), 20);
     assert.equal(preferences.getReaderFont(), "serif");
     assert.equal(preferences.getReaderTheme(), "auto");
   }
-  for (const fontSize of [14, 15, 23, 28]) {
+  for (const fontSize of [14, 15, 18, 23, 28]) {
     assert.equal(load(storage(JSON.stringify({ fontSize }))).getReaderFontSize(), fontSize);
   }
 });
@@ -92,7 +92,7 @@ test("损坏或不可用的浏览器存储不阻断会话内偏好", () => {
   };
   for (const saved of [storage("{broken"), storage("null"), storage("[]"), unavailable, undefined]) {
     const preferences = load(saved);
-    assert.equal(preferences.getReaderFontSize(), 18);
+    assert.equal(preferences.getReaderFontSize(), 20);
     preferences.rememberReaderFontSize(22);
     preferences.rememberReaderFont("sans");
     preferences.rememberReaderTheme("paper");

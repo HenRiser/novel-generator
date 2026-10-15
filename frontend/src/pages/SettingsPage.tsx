@@ -30,6 +30,7 @@ import ProviderConnectionsPanel from "../components/ProviderConnectionsPanel";
 import ImageConnectionsPanel from "../components/ImageConnectionsPanel";
 import ConnectionPicker from "../components/ConnectionPicker";
 import LocalDataPanel from "../components/LocalDataPanel";
+import { AppearanceSettings } from "../components/AppearanceProvider";
 
 const apiStatusConfig = {
   loading: { status: "processing" as const, text: "检测中" },
@@ -123,11 +124,12 @@ export default function SettingsPage() {
 
   const systemTab = (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <AppearanceSettings />
       <Card
         size="small"
         title={
           <Space>
-            <ApiOutlined style={{ color: "#5f4b32" }} />
+            <ApiOutlined style={{ color: "var(--muted)" }} />
             <span>后端状态</span>
           </Space>
         }
@@ -152,7 +154,7 @@ export default function SettingsPage() {
         size="small"
         title={
           <Space>
-            <ReloadOutlined style={{ color: "#5f4b32" }} />
+            <ReloadOutlined style={{ color: "var(--muted)" }} />
             <span>生成状态</span>
           </Space>
         }
@@ -253,7 +255,6 @@ export default function SettingsPage() {
           ]}
         />
       </div>
-      <aside className="settings-note"><span className="note-number">B / P</span><h3>工具顺手，思想自由。</h3><p>连接配置作用于整个工作空间。故事偏好只影响当前选择的项目，可以在创作台为单次生成调整。</p><p>模型负责给出可能性，取舍由你完成。</p></aside>
       </div>
     </div>
   );

@@ -557,8 +557,8 @@ export function KnowledgeDraftReviewPanel({
                       cursor: "pointer",
                       padding: "8px 10px",
                       borderRadius: 8,
-                      border: selected ? "1px solid #9eb5a5" : "1px solid transparent",
-                      background: selected ? "#edf2e9" : "transparent",
+                      border: selected ? "1px solid var(--accent)" : "1px solid transparent",
+                      background: selected ? "var(--accent-soft)" : "transparent",
                     }}
                     onClick={() => {
                       if (busyChangeId) return;
@@ -692,7 +692,7 @@ export function KnowledgeDraftReviewPanel({
                           <Descriptions.Item label="来源">{change.source || "-"}</Descriptions.Item>
                           <Descriptions.Item label="变更 ID">{change.id}</Descriptions.Item>
                         </Descriptions>
-                        <pre style={{ background: "#f1f3ed", padding: 12, borderRadius: 6, fontSize: 12, overflow: "auto" }}>
+                        <pre style={{ background: "var(--surface-soft)", padding: 12, borderRadius: 6, fontSize: 12, overflow: "auto" }}>
                           {formatJson(change.payload)}
                         </pre>
                       </details>
