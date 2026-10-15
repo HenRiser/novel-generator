@@ -7,6 +7,7 @@ from typing import Any
 
 from . import chapter_task_service as tasks
 from . import scene_plan_service as scenes
+from .work_limits import WorkloadLimitError, check_goal, check_graph_counts
 
 CONSTRAINT_FIELDS = {"canon_budget", "required_characters", "forbidden_advances"}
 SETTING_FIELDS = {"protagonist", "supporting_characters", "worldview", "core_conflict", "genre", "style"}
@@ -183,6 +184,7 @@ def filter_planning_graph(document: Any, prefix_number: int) -> tuple[dict[str, 
     graph = document["graph"]
     if any(not isinstance(graph.get(field), list) for field in ("nodes", "edges")):
         raise ValueError("graph nodes and edges must be lists.")
+    check_graph_counts(document)
     selected: dict[str, list[dict[str, Any]]] = {"nodes": [], "edges": []}
     excluded = 0
     node_ids: set[str] = set()
@@ -212,6 +214,9 @@ def validate_input(data: Any) -> tuple[dict[str, Any] | None, list[dict[str, str
     issues: list[dict[str, str]] = []
     if not _closed(data, INPUT_FIELDS, "input", issues):
         return None, issues
+    check_graph_counts(data["graph"])
+    if isinstance(data["author_intent"], str):
+        check_goal(data["author_intent"])
     fixed = _constraints(data["constraints"], issues)
     if _types(data, {"project_ref", "author_intent"}, set(), "input", issues):
         for field in ("project_ref", "author_intent"):
@@ -250,6 +255,8 @@ def validate_input(data: Any) -> tuple[dict[str, Any] | None, list[dict[str, str
     if isinstance(prefix, list):
         try:
             safe_graph, additional_excluded = filter_planning_graph(data["graph"], len(prefix))
+        except WorkloadLimitError:
+            raise
         except ValueError as exc:
             _issue(issues, "invalid_graph", "input.graph", str(exc))
     if issues:

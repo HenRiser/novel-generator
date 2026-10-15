@@ -95,7 +95,7 @@ async def _parse(request, operation):
 def _exception(exc):
     if isinstance(exc, DestinationRejected):
         return 403, "destination_rejected", "图片目的地或下载域名未通过安全检查。"
-    if isinstance(exc, asyncio.TimeoutError):
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return 504, "compute_timeout", "图片计算超时，上游结果未知且可能已产生费用；请核对记录，勿自动重试。"
     if isinstance(exc, ImageProviderError):
         code = exc.code if exc.code in IMAGE_ERRORS else "image_outcome_unknown"

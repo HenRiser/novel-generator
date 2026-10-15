@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from .narrative_graph_service import load_narrative_graph
 from .common import clean_text
+from .work_limits import check_context_workload
 
 
 DEFAULT_MIN_IMPORTANCE = 5
@@ -113,20 +113,6 @@ def _importance(value: Any) -> int:
     except (TypeError, ValueError):
         return 1
     return max(1, min(10, parsed))
-
-
-def _tokenize(text: str) -> list[str]:
-    normalized = text.lower()
-    raw = re.findall(r"[\w\u4e00-\u9fff]+", normalized)
-    seen: set[str] = set()
-    result: list[str] = []
-    for item in raw:
-        if len(item) <= 1 and not re.search(r"[\u4e00-\u9fff]", item):
-            continue
-        if item not in seen:
-            seen.add(item)
-            result.append(item)
-    return result
 
 
 def _string_values(value: Any) -> list[str]:
@@ -312,6 +298,7 @@ def build_context_pack(project_ref: str, request: dict[str, Any]) -> ContextPack
 
 def build_context_pack_from_graph(project_ref: str, request: dict[str, Any], document: dict[str, Any]) -> ContextPackResult:
     """Use a supplied immutable snapshot; no filesystem access or state mutation."""
+    tokens = check_context_workload(document, request.get("chapter_goal"))
     options, error = _validate_request(request)
     if options is None:
         return ContextPackResult(False, project_ref=project_ref, message=error)
@@ -322,7 +309,6 @@ def build_context_pack_from_graph(project_ref: str, request: dict[str, Any], doc
     tag_registry = _dict(document.get("tag_registry"))
     node_by_id = {clean_text(node.get("id")): node for node in nodes if clean_text(node.get("id"))}
     node_labels = {node_id: clean_text(node.get("label")) or node_id for node_id, node in node_by_id.items()}
-    tokens = _tokenize(options["chapter_goal"])
     warnings: list[str] = []
 
     if not nodes and not edges:

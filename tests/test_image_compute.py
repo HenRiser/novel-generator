@@ -634,6 +634,11 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
 
     async def test_timeout_closes_and_releases_without_automatic_retry(self):
         ended = asyncio.Event(); count = 0
+        connected = compute._connected
+        async def model_timeout(request, coroutine, timeout=None):
+            # Exercise provider cancellation after parsing has completed, independently
+            # of cold-start parsing time. Parse deadlines have separate ingress tests.
+            return await connected(request, coroutine, .02)
         async def upstream(*args):
             nonlocal count
             count += 1
@@ -643,7 +648,8 @@ class ImageAdapters(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(.05)  # Finish provider cancellation after the overall deadline.
                 ended.set()
         slots = BoundedSemaphore(1)
-        with patch.object(compute, "_CALLS", slots), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), patch.object(route, "request_image", side_effect=upstream):
+        with patch.object(compute, "_CALLS", slots), patch.object(compute, "MAX_COMPUTE_SECONDS", 10), \
+                patch.object(compute, "_connected", side_effect=model_timeout), patch.object(route, "request_image", side_effect=upstream):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 result = await client.post("/api/compute/images/generate", json=payload())
         self.assertEqual(result.status_code, 504, result.text)
@@ -820,7 +826,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(provider_cleaned.is_set())
                         self.assertFalse(self.slots.acquire(False))
                     harness = ImageSendHarness(application, send, version)
-                    with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), \
+                    with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .2), \
                             patch.object(route, "request_image", side_effect=generate), \
                             patch.object(self.slots, "release", wraps=self.slots.release) as released:
                         task = asyncio.create_task(harness.run()); self.tasks.append(task)
@@ -846,7 +852,7 @@ class ImageResponseLifecycleTests(unittest.IsolatedAsyncioTestCase):
                                 cleanup_began.set()
                                 await cleanup_allow.wait()
                     harness = ImageSendHarness(application, send)
-                    with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .02), \
+                    with patch.object(main, "PUBLIC_MODE", False), patch.object(compute, "MAX_COMPUTE_SECONDS", .2), \
                             patch.object(route, "MAX_ERROR_SEND_SECONDS", .08), patch.object(route, "request_image", side_effect=generate), \
                             patch.object(self.slots, "release", wraps=self.slots.release) as released:
                         task = asyncio.create_task(harness.run()); self.tasks.append(task)

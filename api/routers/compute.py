@@ -20,6 +20,7 @@ from model_client import ModelConfig
 from services.compute_service import MODEL_OPERATIONS, OPERATIONS, STREAM_OPERATIONS, ComputeError, compute as run_compute, stream_compute
 from services.chapter_planning_contract import validate_input as validate_planning_input
 from services.chapter_planning_events import PlanningEventContract
+from services.work_limits import WorkloadLimitError
 from image_provider import image_catalog, MAX_IMAGE_BYTES, MAX_MODEL_SECONDS as MAX_IMAGE_MODEL_SECONDS
 from cover_generation import capabilities as cover_capabilities
 
@@ -39,11 +40,13 @@ def _error(status: int, code: str, message: str) -> JSONResponse:
 
 
 def _exception(exc: Exception) -> tuple[int, str, str]:
+    if isinstance(exc, WorkloadLimitError):
+        return WorkloadLimitError.status, WorkloadLimitError.code, WorkloadLimitError.message
     if isinstance(exc, DestinationRejected):
         return 403, 'destination_rejected', str(exc)
     if isinstance(exc, ComputeError):
         return exc.status, exc.code, exc.message
-    if isinstance(exc, asyncio.TimeoutError):
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return 504, "compute_timeout", "计算超时，已保存内容保留。请手动重试。"
     if isinstance(exc, DeepSeekClientError):
         return 502, "provider_error", str(exc)
@@ -245,7 +248,9 @@ class _PlanningComputeStream(StreamingResponse):
 
 def _planning_error(exc: Exception) -> tuple[int, str, str]:
     # Graph task errors can include arbitrary provider text; do not echo str(exc).
-    if isinstance(exc, asyncio.TimeoutError):
+    if isinstance(exc, WorkloadLimitError):
+        return WorkloadLimitError.status, WorkloadLimitError.code, WorkloadLimitError.message
+    if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return 504, "compute_timeout", "策划计算超时，请手动重试。"
     if isinstance(exc, DestinationRejected):
         return 403, "destination_rejected", "模型目的地未通过安全检查。"

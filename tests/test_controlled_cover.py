@@ -402,7 +402,9 @@ class CoverLifecycleTests(unittest.IsolatedAsyncioTestCase):
                             finally:
                                 cleanup_began.set(); await cleanup_allow.wait(); cleaned.set()
                     harness = CoverHarness(app, send, version)
-                    with patch.object(main, "PUBLIC_MODE", True), patch.object(covers, "budget_seconds", return_value=.05), \
+                    # Leave room for full-stack parsing before testing a blocked send.
+                    # The deadline must still cancel that send and await its cleanup.
+                    with patch.object(main, "PUBLIC_MODE", True), patch.object(covers, "budget_seconds", return_value=.5), \
                          patch.object(covers.model_client, "request_text", AsyncMock(return_value=json.dumps(plan(1)))), patch.object(covers, "request_image", AsyncMock(return_value=RESULT)), \
                          patch.object(self.slots, "release", wraps=self.slots.release) as released:
                         task = asyncio.create_task(harness.run()); self.tasks.append(task)

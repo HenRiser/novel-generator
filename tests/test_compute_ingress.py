@@ -100,6 +100,21 @@ class ComputeIngressTests(unittest.IsolatedAsyncioTestCase):
         self.calls.release()
         self.calls.release()
 
+    async def test_parser_deadline_has_timeout_response_and_releases_capacity(self):
+        paths = ("/api/compute/validate_project", "/api/compute/generate_chapter/stream",
+                 "/api/compute/images/validate_connection", "/api/compute/images/cover/generate")
+        for path in paths:
+            with self.subTest(path=path):
+                upload = IngressHarness(path, chunks=[])
+                with patch.object(ingress, "MAX_READ_SECONDS", 10), \
+                        patch.object(compute, "MAX_COMPUTE_SECONDS", .05), \
+                        patch.object(image_compute, "MAX_COVER_PARSE_SECONDS", .05):
+                    await asyncio.wait_for(upload.run(), 2)
+                self.assertEqual(upload.status, 504)
+                self.assertEqual(upload.error["code"], "compute_timeout")
+                self.assertEqual(upload.active_readers, 0)
+                self.assert_free()
+
     async def test_request_capacity_rejects_before_receive_even_when_model_slots_are_full(self):
         self.calls.acquire()
         self.calls.acquire()
@@ -329,11 +344,11 @@ class ComputeIngressTests(unittest.IsolatedAsyncioTestCase):
             return {}, {}, None, {"count": 4}
         async def body(*args):
             yield b'{"type":"started"}\n'
-            await asyncio.sleep(.08)
+            await asyncio.sleep(.3)
             self.assertEqual(self.admission.requests, 1)
             yield b'{"type":"done"}\n'
         upload = IngressHarness("/api/compute/images/cover/generate")
-        with patch.object(ingress, "MAX_READ_SECONDS", .02), patch.object(ingress, "MAX_SEND_SECONDS", .02), \
+        with patch.object(ingress, "MAX_READ_SECONDS", .1), patch.object(ingress, "MAX_SEND_SECONDS", .1), \
                 patch.object(image_compute, "_parse", side_effect=parse), patch.object(image_compute, "_cover_body", side_effect=body):
             await asyncio.wait_for(upload.run(), 1)
         self.assertEqual(upload.status, 200)
