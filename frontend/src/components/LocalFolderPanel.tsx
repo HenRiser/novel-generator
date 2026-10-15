@@ -36,7 +36,7 @@ export default function LocalFolderPanel() {
           {bound && <Button disabled={blocked} onClick={() => void action(disconnectLocalFolder)}>停止自动同步</Button>}
         </Space>}
         <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-          API Key 仅供当前会话使用，或在此浏览器的本地保险库中加密保存；明文和加密密钥均不写入同步文件。
+          API Key 默认仅供当前会话使用，也可主动选择在此浏览器明文记住；Key 和旧版加密记录均不写入同步文件。
           更换文件夹会立即保存当前数据，旧备份保留。手机或不支持文件夹访问的浏览器可使用下方下载备份与文件恢复。
           从文件恢复会保留连接描述并创建项目副本，需重新配置密钥和默认连接。
         </Typography.Paragraph>

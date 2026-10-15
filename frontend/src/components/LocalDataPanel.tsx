@@ -88,7 +88,7 @@ export default function LocalDataPanel({ onProjectsChanged }: Props) {
             { key: 'persist', label: '持久存储', children: storage.persisted === undefined ? '此浏览器未提供状态' : storage.persisted ? '已获准' : '尚未获准' },
           ]} />
           <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-            持久存储可降低浏览器自动回收数据的风险，仍不能替代备份；主动清理站点数据会删除项目和加密密钥。
+            持久存储可降低浏览器自动回收数据的风险，仍不能替代备份；主动清理站点数据会删除项目和本地保存的 Key。
           </Typography.Paragraph>
           <Button disabled={Boolean(busy) || storage.persisted || !navigator.storage?.persist} loading={busy === 'persist'}
             onClick={() => void action('persist', async () => {

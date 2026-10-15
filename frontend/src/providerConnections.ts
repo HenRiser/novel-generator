@@ -1,6 +1,6 @@
 import { API_BASE_URL, safePublicMessage } from './api';
 import { getSetting, setSetting, listSettings, commitSettings, assertConnectionGuard } from './localStore';
-import { profileKey, loadProfileKey, encryptProfileKey, unlockProfileKey, hasRememberedKey, notifyConnection, onConnectionRevoked, validateKey } from './keyVault';
+import { profileKey, loadProfileKey, restoreProfileKey, keyStorageMode, decryptLegacyProfileKey, notifyConnection, onConnectionRevoked, validateKey } from './keyVault';
 import { LEGACY_CONNECTION, type ConnectionProfile, type ConnectionSnapshot, type ConnectionGuard, type ProviderCapabilities, type CapabilityPolicy } from './providerTypes';
 
 export const hash = async (text:string) => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),b=>b.toString(16).padStart(2,'0')).join('');
@@ -24,8 +24,8 @@ export async function ensureConnections() {
     await setSetting('connection:'+LEGACY_CONNECTION,{id:LEGACY_CONNECTION,name:'DeepSeek',enabled:true,deleted:false,epoch:0,key_version:'legacy',head:1,revisions:[snapshot]} satisfies ConnectionProfile);
   });
 }
-export async function connections() { await ensureConnections(); return (await listSettings<ConnectionProfile>('connection:')).filter(p=>!p.deleted&&['chat_completions','messages'].includes((p.draft||p.revisions.find(r=>r.revision===p.head))?.protocol||'')); }
-export async function getConnection(id:string) { await ensureConnections(); const p=await getSetting<ConnectionProfile>('connection:'+id);if(!p)throw new Error('此连接不存在，请重新关联相同目的地。');return p; }
+export async function connections() { await ensureConnections(); const profiles=(await listSettings<ConnectionProfile>('connection:')).filter(p=>!p.deleted&&['chat_completions','messages'].includes((p.draft||p.revisions.find(r=>r.revision===p.head))?.protocol||''));await Promise.all(profiles.map(async p=>{const s=p.revisions.find(r=>r.revision===p.head);if(s)await restoreProfileKey(p,s);}));return profiles; }
+export async function getConnection(id:string) { await ensureConnections(); const p=await getSetting<ConnectionProfile>('connection:'+id);if(!p)throw new Error('此连接不存在，请重新关联相同目的地。');const s=p.revisions.find(r=>r.revision===p.head);if(s)await restoreProfileKey(p,s);return p; }
 export async function defaultConnectionId() { return await getSetting<string>('default_connection')||LEGACY_CONNECTION; }
 export async function setDefaultConnection(id:string) { const p=await getConnection(id);if(!p.enabled||p.deleted)throw new Error('请先启用连接。');await setSetting('default_connection',id);notifyConnection(id); }
 
@@ -65,20 +65,28 @@ export async function manageConnection(id:string,action:'lock'|'forget'|'disable
     if(action==='delete')p.deleted=true;
     if(action==='disable'||action==='delete')p.enabled=false;
     if(action==='enable'){if(!p.revisions.length)throw new Error('请先验证并保存连接。');p.enabled=true;}
-    await commitSettings([{key:'connection:'+id,value:p},...(['forget','delete'].includes(action)?[{key:'vault:'+id,remove:true},...(id===LEGACY_CONNECTION?[{key:'deepseek-key-vault.v1',remove:true}]:[])]:[])]);
+    // Legacy programmatic lock must also stop automatic plaintext restoration.
+    const removeRemembered=action==='lock'&&(await getSetting<{version:number}>('vault:'+id))?.version===3;
+    await commitSettings([{key:'connection:'+id,value:p},...(['forget','delete'].includes(action)||removeRemembered?[{key:'vault:'+id,remove:true},...(id===LEGACY_CONNECTION?[{key:'deepseek-key-vault.v1',remove:true}]:[])]:[])]);
     notifyConnection(id,true);return p;
   });
 }
-export async function storeConnectionKey(id:string,key:string,passphrase?:string){
+async function storeKeyLocked(p:ConnectionProfile,snapshot:ConnectionSnapshot,key:string,remember:boolean){
+  if(profileKey(p,snapshot)===key.trim()&&await keyStorageMode(p,snapshot)===(remember?'remembered':'session'))return p;
+  const updated={...p,epoch:p.epoch+1,key_version:crypto.randomUUID(),test:undefined};
+  const value=remember?{version:3,api_key:key.trim(),destination:snapshot.destination_fingerprint,key_version:updated.key_version}:undefined;
+  await commitSettings([{key:'connection:'+p.id,value:updated},{key:'vault:'+p.id,...(value?{value}:{remove:true})},...(p.id===LEGACY_CONNECTION?[{key:'deepseek-key-vault.v1',remove:true}]:[])]);
+  notifyConnection(p.id,true);loadProfileKey(updated,snapshot,key);return updated;
+}
+export async function storeConnectionKey(id:string,key:string,remember=false){
+  if(typeof remember!=='boolean')throw new Error('请选择是否在此浏览器记住 API Key。');
   validateKey(key);return connectionLock(id,async()=>{
     const p=await getConnection(id),snapshot=p.revisions.find(r=>r.revision===p.head);if(!snapshot)throw new Error('请先保存连接。');
-    const updated={...p,epoch:p.epoch+1,key_version:crypto.randomUUID(),test:undefined};
-    const encrypted=passphrase?await encryptProfileKey(updated,snapshot,key,passphrase):undefined;
-    await commitSettings([{key:'connection:'+id,value:updated},{key:'vault:'+id,...(encrypted?{value:encrypted}:{remove:true})}]);
-    notifyConnection(id,true);loadProfileKey(updated,snapshot,key);return updated;
+    if(p.deleted)throw new Error('此连接已删除。');
+    return storeKeyLocked(p,snapshot,key,remember);
   });
 }
-export async function unlockConnection(id:string,passphrase:string){return connectionLock(id,async()=>{const p=await getConnection(id);if(!p.enabled||p.deleted)throw new Error('连接未启用。');const s=p.revisions.find(r=>r.revision===p.head);if(!s)throw new Error('连接没有可用修订。');await unlockProfileKey(p,s,passphrase);});}
+export async function migrateEncryptedConnectionKey(id:string,passphrase:string){return connectionLock(id,async()=>{const p=await getConnection(id);if(!p.enabled||p.deleted)throw new Error('请先启用连接，再迁移旧版 Key。');const s=p.revisions.find(r=>r.revision===p.head);if(!s)throw new Error('连接没有可用修订。');const key=await decryptLegacyProfileKey(p,s,passphrase);return storeKeyLocked(p,s,key,true);});}
 export async function resolveConnection(id?:string,model?:string):Promise<ConnectionSnapshot>{
   const p=await getConnection(id||await defaultConnectionId());if(!p.enabled||p.deleted)throw new Error('连接未启用或已删除。');
   const s=p.revisions.find(r=>r.revision===p.head);if(!s)throw new Error('请先验证连接草稿。');
@@ -93,10 +101,11 @@ export async function acquireConnection(snapshot:ConnectionSnapshot,external?:Ab
     const key=snapshot.auth_mode==='none'?'':temporaryKey??profileKey(p,snapshot);
     if(snapshot.auth_mode==='key') {
       if (!key.trim()) {
-        const saved = Boolean(await getSetting('vault:' + p.id)) || (p.id === LEGACY_CONNECTION && await hasRememberedKey());
-        throw new Error(saved
-          ? `模型连接「${p.name}」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。`
-          : `模型连接「${p.name}」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。`);
+        const mode=await keyStorageMode(p,snapshot),settings=snapshot.protocol.endsWith('_images')?'图片模型连接':'模型连接';
+        throw new Error(mode==='legacy'
+          ? `模型连接「${p.name}」保存的是旧版加密 Key。请前往「偏好设置 → ${settings}」迁移旧版 Key，或重新填写 API Key 并保存。`
+          : mode==='invalid'?`模型连接「${p.name}」的本地 Key 记录已损坏或与当前连接不匹配。请前往「偏好设置 → ${settings}」重新填写 API Key 并保存。`
+          : `模型连接「${p.name}」没有可用的 API Key。请前往「偏好设置 → ${settings}」填写并保存；勾选「在此浏览器记住 API Key」后，重新打开网页会自动使用。`);
       }
       validateKey(key);
     }

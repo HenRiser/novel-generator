@@ -399,9 +399,9 @@ await test('连续生成在正文已提交后暂停，刷新续跑只补摘要�
   assert.equal(calls.filter(c=>c.url.endsWith('/summarize_chapter')&&c.data.input.chapter_number===1).length,1);
 });
 
-await test('Key保险箱加解密、错误口令与备份排除Key', async ({page})=>{
-  const result=await page.evaluate(async()=>{await makeProject();const key=vault.getSessionKey();await vault.rememberKey(key,'test-passphrase');vault.setSessionKey('');let wrong=false;try{await vault.unlockKey('incorrect');}catch{wrong=true;}await vault.unlockKey('test-passphrase');return{wrong,key:vault.getSessionKey(),projects:JSON.stringify(await store.listProjects())};});
-  assert.equal(result.wrong,true);assert.equal(result.key,KEY);assert.ok(!result.projects.includes(KEY));
+await test('本机记住的Key可自动恢复且完整备份排除Key', async ({page})=>{
+  const result=await page.evaluate(async()=>{await makeProject();const key=vault.getSessionKey(),pc=await import('/src/providerConnections.ts');await pc.storeConnectionKey('legacy-deepseek',key,true);const profile=await pc.getConnection('legacy-deepseek');return{key:vault.profileKey(profile,profile.revisions[0]),backup:JSON.stringify(await store.createBackup()),stored:await store.getSetting('vault:legacy-deepseek')};});
+  assert.equal(result.key,KEY);assert.equal(result.stored.version,3);assert.ok(!result.backup.includes(KEY));
 });
 
 await test('真实网络流中刷新：连接取消、部分正文保留、未知请求不自动重发', async ({ context, page, load, setHandler, setWire, calls }) => {

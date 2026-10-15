@@ -36,24 +36,25 @@ async function test(name,fn,contextOptions={}){
    window.store=await import('/src/localStore.ts');window.pc=await import('/src/providerConnections.ts');window.vault=await import('/src/keyVault.ts');window.wf=await import('/src/localWorkflow.ts');window.types=await import('/src/localTypes.ts');window.compute=await import('/src/computeClient.ts');window.api=await import('/src/localApi.ts');
    window.wait=async pred=>{for(let i=0;i<300;i++){if(await pred())return;await new Promise(r=>setTimeout(r,20));}throw new Error('condition timed out');};
    window.newProfile=async(url='https://a.example/v1',model='org/model:fast',key='NON_SK_KEY_A')=>{const raw={profile_id:crypto.randomUUID(),revision:1,preset:'custom',protocol:'chat_completions',base_url:url,model,policy:{...pc.defaultPolicy(),structured:'prompt_only'},auth_mode:'key',destination_fingerprint:'',execution_fingerprint:''};const p=await pc.saveConnection('测试连接',raw);await pc.storeConnectionKey(p.id,key);return pc.getConnection(p.id);};
+   window.encryptedProfile=async(profile,value,password)=>{const snapshot=profile.revisions.find(r=>r.revision===profile.head),salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);const derived=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:600000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt']);const aad=new TextEncoder().encode(profile.id+'\n'+snapshot.protocol+'\n'+snapshot.base_url);const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:aad},derived,new TextEncoder().encode(value));await store.setSetting('vault:'+profile.id,{version:2,iterations:600000,salt:[...salt],iv:[...iv],ciphertext:[...new Uint8Array(cipher)],destination:snapshot.destination_fingerprint});};
    window.newProject=async profile=>{const s=profile.revisions.find(r=>r.revision===profile.head);const p=types.emptyProject('测试作品',{connection_id:profile.id,model:s.model,...Object.fromEntries(['protagonist','supporting_characters','worldview','core_conflict','genre','style'].map(k=>[k,'设定']))});p.assets={outline:'大纲',characters:'人物',setting_expansion:''};await store.putProject(p);return p.project_ref;};
  });}
  try{await fn({page,ctx,load,calls,setHandler:h=>{handler=h;}});results.push({name,status:'passed'});console.log('PASS '+name);}catch(e){results.push({name,status:'failed',error:e.message});console.error('FAIL '+name+'\n'+e.stack);throw e;}finally{await ctx.close();}
 }
 try{
-await test('密钥缺失区分无会话和已加密未解锁，无认证连接保持可用',async({page,load,calls})=>{
+await test('密钥缺失区分无会话和旧版加密待迁移，无认证连接保持可用',async({page,load,calls})=>{
  await load();const result=await page.evaluate(async()=>{
   const profile=await newProfile();await pc.manageConnection(profile.id,'lock');
   let missing='',locked='';
   try{const lease=await pc.acquireConnection(profile.revisions[0]);lease.close();}catch(error){missing=error.message;}
-  await pc.storeConnectionKey(profile.id,'SYNTHETIC_ENCRYPTED_KEY','local-test-password');await pc.manageConnection(profile.id,'lock');
+  await encryptedProfile(profile,'SYNTHETIC_ENCRYPTED_KEY','local-test-password');await pc.manageConnection(profile.id,'lock');
   try{const lease=await pc.acquireConnection(profile.revisions[0]);lease.close();}catch(error){locked=error.message;}
   const anonymous=await pc.saveConnection('无需密钥',{...profile.revisions[0],profile_id:crypto.randomUUID(),revision:1,auth_mode:'none'});
   const lease=await pc.acquireConnection(anonymous.revisions[0]);const noKey=lease.apiKey;lease.close();
   return{missing,locked,noKey};
  });
- assert.equal(result.missing,'模型连接「测试连接」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。');
- assert.equal(result.locked,'模型连接「测试连接」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。');
+ assert.equal(result.missing,'模型连接「测试连接」没有可用的 API Key。请前往「偏好设置 → 模型连接」填写并保存；勾选「在此浏览器记住 API Key」后，重新打开网页会自动使用。');
+ assert.equal(result.locked,'模型连接「测试连接」保存的是旧版加密 Key。请前往「偏好设置 → 模型连接」迁移旧版 Key，或重新填写 API Key 并保存。');
  assert.equal(result.noKey,'');assert.equal(calls.length,0);
 });
 
@@ -63,7 +64,7 @@ await test('实际设定扩写页面显示具体密钥原因，失败后按钮�
   await load();const ref=await page.evaluate(async remembered=>{
    const profile=await newProfile(),ref=await newProject(profile);
    await store.updateProject(ref,p=>{p.config.raw_story_idea='合成验收：修钟青年收到未来来信。';});
-   if(remembered)await pc.storeConnectionKey(profile.id,'SYNTHETIC_ENCRYPTED_KEY','local-test-password');
+   if(remembered)await encryptedProfile(profile,'SYNTHETIC_ENCRYPTED_KEY','local-test-password');
    await pc.manageConnection(profile.id,'lock');localStorage.setItem('braipen:intro-hidden','true');
    return ref;
   },remembered);
@@ -71,7 +72,7 @@ await test('实际设定扩写页面显示具体密钥原因，失败后按钮�
   await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
   const button=page.getByRole('button',{name:'用白话生成世界观',exact:true});
   await button.click();
-  const expected=remembered?'模型连接「测试连接」的 API Key 尚未在当前标签页解锁。请前往「偏好设置 → 模型连接」选中此连接，输入本地口令并点击「解锁」。':'模型连接「测试连接」在当前标签页没有可用的 API Key。请前往「偏好设置 → 模型连接」选中此连接，填写 API Key 并点击「保存连接」。仅会话保存的 Key 在刷新或关闭页面后需要重新填写。';
+  const expected=remembered?'模型连接「测试连接」保存的是旧版加密 Key。请前往「偏好设置 → 模型连接」迁移旧版 Key，或重新填写 API Key 并保存。':'模型连接「测试连接」没有可用的 API Key。请前往「偏好设置 → 模型连接」填写并保存；勾选「在此浏览器记住 API Key」后，重新打开网页会自动使用。';
   await page.getByText(expected,{exact:true}).waitFor({state:'visible'});
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.getAttribute('aria-label')==='用白话生成世界观'&&!button.classList.contains('ant-btn-loading')&&!button.disabled));
   assert.equal(calls.length,0);
@@ -85,7 +86,7 @@ await test('Custom非sk Key、组织/模型ID、独立密钥与冻结目的地',
  assert.equal(calls.length,2);assert.ok(calls.every(p=>p.connection.base_url==='https://a.example/v1'&&p.credentials.api_key==='NON_SK_KEY_A'&&p.connection.model==='org/model:fast'));
 });
 
-await test('旧DB升级2、旧标签写入屏障、旧vault解锁迁移事务失败可恢复',async({page,ctx,load})=>{
+await test('旧DB升级、旧标签写入屏障、旧vault一次性迁移事务失败可恢复',async({page,ctx,load})=>{
  const old=await page.evaluate(async()=>{
    const db=await new Promise((ok,bad)=>{const r=indexedDB.open('braipen.local.v1',1);r.onupgradeneeded=()=>{for(const [s,k]of[['projects','project_ref'],['settings','key'],['imports','id']])r.result.createObjectStore(s,{keyPath:k});};r.onsuccess=()=>ok(r.result);r.onerror=()=>bad(r.error);});window.oldDB=db;window.oldClosed=false;db.onversionchange=()=>{db.close();window.oldClosed=true;};
    const salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12)),pw='old-passphrase';const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(pw),'PBKDF2',false,['deriveKey']);const key=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:600000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt']);const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode('sk-'+'a'.repeat(32)));
@@ -96,9 +97,9 @@ await test('旧DB升级2、旧标签写入屏障、旧vault解锁迁移事务失
  assert.equal(await page.evaluate(()=>new Promise(ok=>{const r=indexedDB.open('braipen.local.v1',1);r.onerror=()=>ok(r.error.name);r.onsuccess=()=>{r.result.close();ok('UNSAFE');};})),'VersionError');
  const migrated=await next.evaluate(async()=>{
    const put=IDBObjectStore.prototype.put;IDBObjectStore.prototype.put=function(v,...args){if(v.key==='vault:legacy-deepseek')throw new DOMException('quota','QuotaExceededError');return put.call(this,v,...args);};let failed=false;
-   try{await pc.unlockConnection('legacy-deepseek','old-passphrase');}catch{failed=true;}finally{IDBObjectStore.prototype.put=put;}
-   const preserved=Boolean(await store.getSetting('deepseek-key-vault.v1'));await pc.unlockConnection('legacy-deepseek','old-passphrase');return{failed,preserved,old:await store.getSetting('deepseek-key-vault.v1'),current:await store.getSetting('vault:legacy-deepseek')};
- });assert.equal(migrated.failed,true);assert.equal(migrated.preserved,true);assert.equal(migrated.old,undefined);assert.equal(migrated.current.version,2);
+   try{await pc.migrateEncryptedConnectionKey('legacy-deepseek','old-passphrase');}catch{failed=true;}finally{IDBObjectStore.prototype.put=put;}
+   const preserved=Boolean(await store.getSetting('deepseek-key-vault.v1'));await pc.migrateEncryptedConnectionKey('legacy-deepseek','old-passphrase');return{failed,preserved,old:await store.getSetting('deepseek-key-vault.v1'),current:await store.getSetting('vault:legacy-deepseek')};
+ });assert.equal(migrated.failed,true);assert.equal(migrated.preserved,true);assert.equal(migrated.old,undefined);assert.equal(migrated.current.version,3);
 });
 
 await test('换地址必须新连接、Key不复制、同地址修订保留旧任务策略',async({page,load})=>{
@@ -127,7 +128,7 @@ await test('已提交完整result在连接删除后仍可无Key应用，未提�
 });
 
 await test('备份不含凭据；Custom恢复副本默认禁用直到显式绑定',async({page,load})=>{
- await load();await page.evaluate(async()=>{const p=await newProfile();await pc.storeConnectionKey(p.id,'NON_SK_KEY_A','new-passphrase');await newProject(await pc.getConnection(p.id));});
+ await load();await page.evaluate(async()=>{const p=await newProfile();await encryptedProfile(p,'NON_SK_KEY_A','new-passphrase');await newProject(await pc.getConnection(p.id));});
  const downloaded=page.waitForEvent('download');await page.evaluate(()=>store.exportBackup());const text=await readFile(await(await downloaded).path(),'utf8');assert.ok(!text.includes('NON_SK_KEY_A'));assert.ok(!text.includes('ciphertext'));
  const outcome=await page.evaluate(async text=>{const[ref]=await store.restoreBackup(text),p=await store.getProject(ref),c=await pc.getConnection(String(p.config.connection_id));return{enabled:c.enabled,id:c.id,snapshotId:c.revisions[0].profile_id};},text);assert.equal(outcome.enabled,false);assert.equal(outcome.id,outcome.snapshotId);
 });

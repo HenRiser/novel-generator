@@ -17,7 +17,7 @@ export async function readiness(p: LocalProject, n: number): Promise<GenerationR
   const blockers: GenerationReadiness['blockers'] = [];
   const fields = ['title', 'protagonist', 'supporting_characters', 'worldview', 'core_conflict', 'genre', 'style', 'word_count_range'];
   if (fields.some(k => !String(p.config[k] || '').trim())) blockers.push({ code: 'project_settings_missing', message: '请补全小说设定。', action: 'project_settings' });
-  if (!await connectionConfigured(String(p.config.connection_id || 'legacy-deepseek')).catch(() => false)) blockers.push({ code: 'model_key_missing', message: '请填写或解锁 API Key。', action: 'model_settings' });
+  if (!await connectionConfigured(String(p.config.connection_id || 'legacy-deepseek')).catch(() => false)) blockers.push({ code: 'model_key_missing', message: '请在模型连接中保存 API Key；旧版加密 Key 需先迁移。', action: 'model_settings' });
   const can_generate_assets = blockers.length === 0;
   if (!p.assets.outline || !p.assets.characters) blockers.push({ code: 'assets_missing', message: '请先生成大纲与人物卡。', action: 'generate_assets' });
   for (const c of Object.values(p.chapters)) if (c.chapter_number < n && (c.workflow.status !== 'confirmed' || c.workflow.summary_status !== 'ready')) {
@@ -60,7 +60,7 @@ export async function localRequest(path: string, init: RequestInit = {}): Promis
     if (method === 'POST') {
       const key = String(body.api_key || '').trim();
       if (key && !/^sk-[A-Za-z0-9_-]{16,256}$/.test(key)) throw new Error('API Key 格式无效。');
-      if (!key && !getSessionKey()) throw new Error('请填写或解锁本次会话的 API Key。');
+      if (!key && !getSessionKey()) throw new Error('请填写本次会话的 API Key。');
       const model = String(body.custom_model || body.default_model || 'deepseek-v4-flash').trim();
       if (!/^[A-Za-z0-9._-]{1,100}$/.test(model)) throw new Error('模型名称无效。');
       await setSetting('default_model', model);
@@ -153,7 +153,7 @@ export async function localRequest(path: string, init: RequestInit = {}): Promis
     return (await recoverInterrupted(ref)).batch;
   }
   if (kind === 'outline-characters') {
-    if (!(await readiness(p,1)).can_generate_assets) throw new Error('请先补全设定并解锁 Key。');
+    if (!(await readiness(p,1)).can_generate_assets) throw new Error('请先补全设定，并在模型连接中配置可用的 API Key。');
     if (!p.assets.outline) await runOperation(p, 'generate_outline', contextInput(p,1,body), { signal: init.signal || undefined });
     p = await getProject(ref);
     if (!p.assets.characters) await runOperation(p, 'generate_characters', contextInput(p,1,body), { signal: init.signal || undefined });

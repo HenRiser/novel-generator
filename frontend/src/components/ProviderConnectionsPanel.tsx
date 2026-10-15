@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Alert, App, AutoComplete, Button, Card, Checkbox, Collapse, Input, InputNumber, Popconfirm, Select, Space, Tag, Tooltip } from 'antd';
-import { PlusOutlined, CopyOutlined, LockOutlined, ApiOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, CopyOutlined, ApiOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { acquireConnection, capabilities, connections, defaultConnectionId, defaultPolicy, getConnection, manageConnection, renameConnection, resolveConnection,
-  saveConnection, recordConnectionResult, setDefaultConnection, storeConnectionKey, unlockConnection } from '../providerConnections';
-import { getSetting, setSetting } from '../localStore';
-import { hasRememberedKey, profileKey } from '../keyVault';
+  saveConnection, recordConnectionResult, setDefaultConnection, storeConnectionKey } from '../providerConnections';
+import { keyStorageMode, profileKey } from '../keyVault';
+import ConnectionKeyStorage from './ConnectionKeyStorage';
 import { compute } from '../computeClient';
 import type { ConnectionProfile, ConnectionSnapshot, ProviderPreset } from '../providerTypes';
 
@@ -15,24 +15,26 @@ export default function ProviderConnectionsPanel(){
   const {message}=App.useApp();
   const fieldId=useId();
   const [profiles,setProfiles]=useState<ConnectionProfile[]>([]),[presets,setPresets]=useState<ProviderPreset[]>([]),[selected,setSelected]=useState('');
-  const [form,setForm]=useState<ConnectionSnapshot>(blank),[name,setName]=useState(''),[key,setKey]=useState(''),[password,setPassword]=useState(''),[remember,setRemember]=useState(false);
+  const [form,setForm]=useState<ConnectionSnapshot>(blank),[name,setName]=useState(''),[key,setKey]=useState('');
+  const [remember,setRemember]=useState<boolean|null>(false);
+  const [keySelection,setKeySelection]=useState(0);
   const [defaultId,setDefaultId]=useState(''),[error,setError]=useState(''),[busy,setBusy]=useState(''),[result,setResult]=useState<Record<string,unknown>|null>(null);
-  const [vault,setVault]=useState(false),[models,setModels]=useState<Array<{id:string;name:string}>>([]),[modelsLoaded,setModelsLoaded]=useState(false),[modelsTruncated,setModelsTruncated]=useState(false);
+  const [models,setModels]=useState<Array<{id:string;name:string}>>([]),[modelsLoaded,setModelsLoaded]=useState(false),[modelsTruncated,setModelsTruncated]=useState(false);
   const abort=useRef<AbortController|null>(null),mounted=useRef(true);
   const selectedProfile=profiles.find(p=>p.id===selected);
   async function load(){const [list,id]=await Promise.all([connections(),defaultConnectionId()]);if(mounted.current){setProfiles(list);setDefaultId(id);}return list;}
-  function select(p?:ConnectionProfile){setSelected(p?.id||'');setForm(p?.draft||p?.revisions.find(r=>r.revision===p.head)||blank());setName(p?.name||'新连接');setKey('');setPassword('');setRemember(false);setResult(p?.test?.result||null);setModels(p?.models||[]);setModelsLoaded(p?.models!==undefined);setModelsTruncated(false);}
+  function select(p?:ConnectionProfile){setSelected(p?.id||'');setForm(p?.draft||p?.revisions.find(r=>r.revision===p.head)||blank());setName(p?.name||'新连接');setKey('');setRemember(p?null:false);setKeySelection(value=>value+1);setResult(p?.test?.result||null);setModels(p?.models||[]);setModelsLoaded(p?.models!==undefined);setModelsTruncated(false);}
   useEffect(()=>{mounted.current=true;void load().then(list=>{if(mounted.current)select(list[0]);}).catch(e=>setError(e.message));void capabilities().then(c=>{if(mounted.current)setPresets(c.providers);}).catch(e=>setError(e.message));
     const update=()=>{setResult(null);void load().catch(e=>setError(e.message));};window.addEventListener('braipen:connections-changed',update);window.addEventListener('braipen:key-changed',update);
     return()=>{mounted.current=false;abort.current?.abort();window.removeEventListener('braipen:connections-changed',update);window.removeEventListener('braipen:key-changed',update);};},[]);
-  useEffect(()=>{let disposed=false;void(async()=>{const saved=selected?Boolean(await getSetting('vault:'+selected))||(selected==='legacy-deepseek'&&await hasRememberedKey()):false;if(!disposed)setVault(saved);})();return()=>{disposed=true;};},[selected,profiles]);
   useEffect(()=>{setResult(null);},[form]);
   async function action(label:string,task:()=>Promise<void>){setBusy(label);setError('');try{await task();await load();}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'操作未完成。');}finally{if(mounted.current)setBusy('');}}
-  function copy(){setForm({...form,profile_id:crypto.randomUUID(),revision:1,preset:'custom',policy:{...form.policy,source:'user_override'},destination_fingerprint:'',execution_fingerprint:''});setSelected('');setName(name+' 副本');setKey('');setPassword('');setResult(null);setModels([]);setModelsLoaded(false);setModelsTruncated(false);}
+  function copy(){setForm({...form,profile_id:crypto.randomUUID(),revision:1,preset:'custom',policy:{...form.policy,source:'user_override'},destination_fingerprint:'',execution_fingerprint:''});setSelected('');setName(name+' 副本');setKey('');setRemember(false);setResult(null);setModels([]);setModelsLoaded(false);setModelsTruncated(false);}
   async function save(draft=false){
     const old=selectedProfile?.revisions.find(r=>r.revision===selectedProfile.head);
     const p=old&&JSON.stringify(old)===JSON.stringify(form)?await renameConnection(selected,name):await saveConnection(name,form,draft);
-    if(key&&!draft)await storeConnectionKey(p.id,key,remember?password:undefined);
+    const snapshot=p.revisions.find(r=>r.revision===p.head),value=key||snapshot&&profileKey(p,snapshot);
+    if(value&&!draft)await storeConnectionKey(p.id,value,remember??(snapshot?await keyStorageMode(p,snapshot)==='remembered':false));
     const saved=await getConnection(p.id);select(saved);setModelsTruncated(modelsTruncated);void message.success(draft?'草稿保存在本浏览器；验证前不能联网。':'连接配置已保存在本浏览器。');
   }
   async function probe(kind:'connection_test'|'list_models'){
@@ -45,7 +47,7 @@ export default function ProviderConnectionsPanel(){
       else{setResult(response.result);await recordConnectionResult(lease,'test',response.result,!key);}
     }finally{lease.close();abort.current=null;}
   }
-  const unlocked=selectedProfile&&selectedProfile.revisions.length?Boolean(profileKey(selectedProfile,selectedProfile.revisions[0])):false;
+  const keyAvailable=selectedProfile&&selectedProfile.revisions.length?Boolean(profileKey(selectedProfile,selectedProfile.revisions[0])):false;
   const endpoint=form.base_url.replace(/\/+$/,'')+(form.protocol==='messages'?'/messages':'/chat/completions');
   const fullEndpoint=/\/(chat\/completions|messages|models)\/?$/.test(form.base_url);
   const preset=presets.find(p=>p.id===form.preset);
@@ -67,7 +69,8 @@ export default function ProviderConnectionsPanel(){
         <label className="provider-field" htmlFor={fieldId+'url'}>API 服务地址（Base URL）<Help label="API 服务地址">填写服务商提供的基础地址，例如 https://gateway.example/v1。程序会拼接请求路径，不要填写完整的 /chat/completions、/messages 或 /models 地址。</Help><Input id={fieldId+'url'} aria-label="API Base URL" value={form.base_url} disabled={form.preset!=='custom'||Boolean(selected)||Boolean(busy)} placeholder="https://gateway.example/v1" onChange={e=>setForm(f=>({...f,base_url:e.target.value}))}/><small>最终文字请求：{endpoint}。修改已有连接地址请复制为新连接。</small></label>
         {fullEndpoint&&<Alert type="warning" title="这看起来是完整接口地址" action={<Button onClick={()=>setForm(f=>({...f,base_url:f.base_url.replace(/\/(chat\/completions|messages|models)\/?$/,'')}))}>转换为Base URL</Button>}/>}
         {form.preset==='custom'&&<p className="muted-note">由Braipen服务器访问公网HTTPS API；localhost和局域网地址不支持。API Key仅发送到你确认的目的地。</p>}
-        <label className="provider-field" htmlFor={fieldId+'key'}>API Key（服务密钥）<Help label="API Key">用于服务商验证你的调用权限，填写其控制台提供的完整密钥，不要求以 sk- 开头。保存后默认只在当前浏览器标签页可用。</Help><Input.Password id={fieldId+'key'} aria-label="连接 API Key" value={key} disabled={Boolean(busy)||form.auth_mode==='none'} autoComplete="off" maxLength={4096} placeholder={unlocked?'本标签页已解锁；留空保留':'填写服务商API Key，不要求sk-前缀'} onChange={e=>setKey(e.target.value)}/></label>
+        <label className="provider-field" htmlFor={fieldId+'key'}>API Key（服务密钥）<Help label="API Key">填写服务商提供的完整密钥，不要求以 sk- 开头。默认仅本次使用；勾选下方“在此浏览器记住 API Key”并保存后，重新打开网页自动使用。</Help><Input.Password id={fieldId+'key'} aria-label="连接 API Key" value={key} disabled={Boolean(busy)||form.auth_mode==='none'} autoComplete="off" maxLength={4096} placeholder={keyAvailable?'已有可用 Key；留空保留':'填写服务商API Key，不要求sk-前缀'} onChange={e=>setKey(e.target.value)}/></label>
+        {form.auth_mode==='key'&&<ConnectionKeyStorage key={keySelection} profile={selectedProfile} remember={remember} onRememberChange={setRemember} busy={Boolean(busy)} onAction={action} onClear={()=>setKey('')} />}
         <label className="provider-field" htmlFor={fieldId+'model'}>默认模型<Help label="默认模型">模型 ID 是请求中实际使用的名称，与服务商网页上的展示名可能不同。可点击下方目录中的模型，或手动填写完整 ID；更换后需要保存连接。</Help><AutoComplete id={fieldId+'model'} aria-label="默认模型ID" value={form.model} options={models.map(m=>({value:m.id,label:m.name===m.id?m.id:`${m.name} · ${m.id}`}))} filterOption={(input,option)=>String(option?.value||'').toLowerCase().includes(input.toLowerCase())} onChange={model=>setForm(f=>({...f,model}))} style={{width:'100%'}} disabled={Boolean(busy)} placeholder="搜索目录或手动填写模型 ID"/><small>目录读取失败仍可手填。可先留空、保存后获取模型列表；保存不会调用模型。</small></label>
         {modelsLoaded&&<div role="region" aria-label="可选模型列表" style={{width:'100%'}}>
           <p role="status" style={{margin:'0 0 8px'}}><strong>已获取 {models.length} 个模型</strong>。点击选择后，再保存连接。</p>
@@ -89,15 +92,6 @@ export default function ProviderConnectionsPanel(){
         <Space wrap><Button type="primary" loading={busy==='save'} disabled={Boolean(busy)} onClick={()=>void action('save',()=>save())}>保存连接</Button><Button disabled={Boolean(busy)||Boolean(selectedProfile?.revisions.length)} onClick={()=>void action('draft',()=>save(true))}>仅存草稿</Button><Button disabled={Boolean(busy)||!selectedProfile?.enabled} onClick={()=>void action('default',()=>setDefaultConnection(selected))}>设为新作品默认</Button></Space>
         <Space wrap><Button disabled={Boolean(busy)||!selectedProfile?.enabled} loading={busy==='models'} onClick={()=>void action('models',()=>probe('list_models'))}>获取模型列表</Button><Popconfirm title="检测最多调用两次模型，可能计费" description="仅发送固定短样本，不上传小说；检测成功不代表服务强制JSON。" onConfirm={()=>action('test',()=>probe('connection_test'))}><Button disabled={Boolean(busy)||!selectedProfile?.enabled} loading={busy==='test'}>检测文字与设定格式</Button></Popconfirm>{busy&&<Button onClick={()=>abort.current?.abort()}>取消检测</Button>}</Space>
         {result&&<Alert type={result.ok?'success':'warning'} title={`文字生成：${checkStatus(result.text)} · 设定格式：${checkStatus(result.structured)}`} description={<>{String(result.message||'')}{Array.isArray(result.errors)&&result.errors.map((e,i)=><div key={i}>{String(e)}</div>)}</>}/>}
-        <div style={{borderTop:'1px solid var(--border)',paddingTop:16,width:'100%'}}><Space><LockOutlined/><strong>本地密钥保险箱</strong><Help label="本地密钥保险箱">用独立口令将 API Key 加密保存在当前浏览器。刷新后需输入该口令解锁；口令不是服务商密码，也不会发送给服务商。</Help><Tag>{unlocked?'已解锁':'未解锁'}</Tag><Tag>{vault?'有加密副本':'无加密副本'}</Tag></Space>
-          <p className="muted-note">独立口令只用于本浏览器加密，不可找回。模型请求时API Key经Braipen内存转发，服务器不保存或记录。项目备份不包含密钥。</p>
-          <Input.Password aria-label="连接解锁口令" value={password} onChange={e=>setPassword(e.target.value)} autoComplete="off" maxLength={1024} placeholder="本地口令，至少8字符"/>
-          <Checkbox checked={remember} onChange={e=>setRemember(e.target.checked)} style={{margin:'10px 0'}}>保存新Key时加密记住</Checkbox>
-          <Space wrap><Button disabled={!selected||!vault||!password||Boolean(busy)} onClick={()=>void action('unlock',async()=>{await unlockConnection(selected,password);setPassword('');})}>解锁</Button>
-            <Button disabled={!selected||!unlocked||password.length<8||Boolean(busy)} onClick={()=>void action('remember',async()=>{const p=await getConnection(selected),s=p.revisions.find(r=>r.revision===p.head)!;await storeConnectionKey(selected,profileKey(p,s),password);setPassword('');})}>加密记住当前Key</Button>
-            <Button disabled={!selected||Boolean(busy)} onClick={()=>void action('lock',async()=>{await manageConnection(selected,'lock');setPassword('');})}>锁定并中断任务</Button>
-            <Popconfirm title="忘记此连接Key并中断相关任务？" onConfirm={()=>action('forget',async()=>{await manageConnection(selected,'forget');setKey('');setPassword('');})}><Button danger disabled={!selected||Boolean(busy)}>忘记Key</Button></Popconfirm></Space>
-        </div>
         {selectedProfile&&<Space wrap><Button disabled={Boolean(busy)} onClick={()=>void action('enable',async()=>{await manageConnection(selected,selectedProfile.enabled?'disable':'enable');})}>{selectedProfile.enabled?'禁用连接并中断任务':'启用连接'}</Button><Popconfirm title="删除连接并中断相关任务？" description="作品和已保存结果保留。" onConfirm={()=>action('delete',async()=>{await manageConnection(selected,'delete');select();})}><Button danger disabled={Boolean(busy)}>删除连接</Button></Popconfirm></Space>}
       </Space>
     </Card>

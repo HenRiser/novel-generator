@@ -23,7 +23,8 @@ function fixture() {
     profileKey: profile => keys.get(profile.id) || '',
     loadProfileKey: (profile, _snapshot, key) => { keys.set(profile.id, key); },
     validateKey: key => { if (!key || /[\r\n]/.test(key)) throw new Error('Key 无效。'); },
-    hasRememberedKey: async () => false,
+    restoreProfileKey: async () => {},
+    keyStorageMode: async () => 'session',
     notifyConnection: (id, revoke) => { if (revoke) { keys.delete(id); for (const listener of revoked) listener(id); } },
     onConnectionRevoked: listener => { revoked.add(listener); return () => revoked.delete(listener); },
   };

@@ -163,7 +163,7 @@ export default function CoverPanel({ projectRef }: { projectRef: string }) {
   return <div className="cover-workspace">
     <div className="cover-intro"><h2><PictureOutlined /> 作品封面</h2><p>从人物卡的明确外观与所选风格准备画面，也可本地上传裁剪。生成候选后由你决定采用哪一张，书名与作者名在本地排版。</p></div>
     {(error || readError) && <Alert type="error" showIcon message={error || readError} />}
-    {!busy && fallbackRequest && <Alert type="warning" showIcon title="可确认后使用 Seedream 兜底" description={<Space direction="vertical"><span>这是一次新的生成，会重新整理人物外观，并可能产生文字及图片模型费用。默认 Gemini 连接保持不变。</span><Popconfirm title={`使用 Seedream 新生成 ${count} 张候选？`} description="前一次调用的费用需以供应商记录为准；本次请求也可能计费。" okText="确认调用" cancelText="取消" onConfirm={() => generate(fallbackRequest.edit, true)}><Button disabled={!fallbackProfile || apiStatus !== 'online'}>使用 Seedream 兜底 · 可能计费</Button></Popconfirm>{!fallbackProfile && <span>请先选择并解锁下方的 Seedream 兜底连接。</span>}</Space>} />}
+    {!busy && fallbackRequest && <Alert type="warning" showIcon title="可确认后使用 Seedream 兜底" description={<Space direction="vertical"><span>这是一次新的生成，会重新整理人物外观，并可能产生文字及图片模型费用。默认 Gemini 连接保持不变。</span><Popconfirm title={`使用 Seedream 新生成 ${count} 张候选？`} description="前一次调用的费用需以供应商记录为准；本次请求也可能计费。" okText="确认调用" cancelText="取消" onConfirm={() => generate(fallbackRequest.edit, true)}><Button disabled={!fallbackProfile || apiStatus !== 'online'}>使用 Seedream 兜底 · 可能计费</Button></Popconfirm>{!fallbackProfile && <span>请先选择已配置 API Key 的 Seedream 兜底连接。</span>}</Space>} />}
     {notice && <Alert type="success" showIcon message={notice} closable onClose={() => setNotice('')} />}
     {!busy && cover?.attempt && <Alert type="warning" showIcon message="上次封面任务未完成" description={cover.attempt.error || `已保存 ${cover.attempt.completed || 0}/${cover.attempt.requested || 1} 张。页面关闭或中断后无法确认供应商是否已经生成，不会自动重试。再次生成可能计费。`} />}
     {unsavedImage && <Button onClick={() => downloadCoverBlob(unsavedImage, '未保存底图.' + unsavedImage.type.split('/')[1])}>下载未保存的底图</Button>}
@@ -178,7 +178,7 @@ export default function CoverPanel({ projectRef }: { projectRef: string }) {
         {!profiles.length && <Alert type="info" showIcon message="先保存图片连接与 Key，再回到这里生成。" />}
         <label className="cover-field">整理描述的文字连接<Select aria-label="封面文字连接" value={textId || undefined} disabled={busy} options={textProfiles.map(p => ({ value: p.id, label: p.name }))} onChange={id => void choosePreferences({ text_connection_id: id })} /></label>
         <p className="field-caption">文字模型：{selectedTextModel || '尚未选择'}。仅用于封面，不会改动章节的模型设置。</p>
-        {!chosenText && <Alert type="info" showIcon message="请在模型连接中保存并解锁文字连接，再选择它整理封面描述。" />}
+        {!chosenText && <Alert type="info" showIcon message="请在模型连接中保存文字连接与 API Key，再选择它整理封面描述。" />}
         <fieldset className="cover-style"><legend>封面风格</legend><div className="cover-style-grid">{styles.map(style => <button type="button" key={style.id} aria-label={`封面风格：${style.label}`} aria-pressed={styleId === style.id} className={styleId === style.id ? 'is-active' : ''} disabled={busy} onClick={() => void choosePreferences({ style_id: style.id })}>{style.label}</button>)}</div></fieldset>
         <label className="cover-field">候选张数<Select aria-label="封面候选张数" value={count} disabled={busy} options={[1, 2, 4].map(value => ({ value, label: `${value} 张` }))} onChange={value => void choosePreferences({ count: value as 1 | 2 | 4 })} /></label>
         <p className="field-caption">先从已保存人物卡（{source?.characters.length || 0} 字）筛选姓名与明确外观字段，再由文字模型与所选 GitHub 风格框架改编预设融合，生成 {count} 张 2K 底图。不使用白话设定、大纲、人物经历；书名与作者名在本地排版。</p>

@@ -1,6 +1,6 @@
 import { API_BASE_URL, safePublicMessage } from './api';
 import { getSetting, listSettings, setSetting } from './localStore';
-import { notifyConnection } from './keyVault';
+import { notifyConnection, restoreProfileKey } from './keyVault';
 import { acquireConnection, capabilities, connectionLock, defaultPolicy, getConnection, hash, stable, type ConnectionLease } from './providerConnections';
 import type { ConnectionProfile, ConnectionSnapshot, ProviderPreset } from './providerTypes';
 
@@ -23,7 +23,7 @@ export function imageSnapshot(profile: ConnectionProfile): ImageConnectionSnapsh
   const snapshot = profile.draft || profile.revisions.find(r => r.revision === profile.head);
   return snapshot && isImageProtocol(snapshot.protocol) ? snapshot as ImageConnectionSnapshot : undefined;
 }
-export async function imageConnections(): Promise<ConnectionProfile[]> { return (await listSettings<ConnectionProfile>('connection:')).filter(p => !p.deleted && imageSnapshot(p)); }
+export async function imageConnections(): Promise<ConnectionProfile[]> { const profiles=(await listSettings<ConnectionProfile>('connection:')).filter(p => !p.deleted && imageSnapshot(p));await Promise.all(profiles.map(async p=>{const s=p.revisions.find(r=>r.revision===p.head);if(s)await restoreProfileKey(p,s);}));return profiles; }
 export async function imageProviderPresets(signal?: AbortSignal): Promise<ImageProviderPreset[]> {
   const catalog = await capabilities(false, signal);
   const presets = (catalog.image_providers || []).filter(p => isImageProtocol(p.protocol)) as ImageProviderPreset[];
