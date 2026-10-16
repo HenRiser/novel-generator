@@ -2,6 +2,7 @@ import type { ConnectionGuard, ConnectionProfile } from './providerTypes';
 import type { LocalProject } from './localTypes';
 import type { CoverAttempt, CoverLayout, CoverState, CoverStyleId, CoverVersion, CoverVersionInput } from './coverTypes';
 import { readPlanningTrace } from './planningTrace';
+import { validateWritingStyle, validateStyleContext, remapWritingStyleIds, type WritingStyleCard } from './writingStyle';
 
 const DATABASE = 'braipen.local.v1';
 export const MAX_COVER_BYTES = 8 * 1024 * 1024;
@@ -224,10 +225,12 @@ export function validateProject(value: unknown): asserts value is LocalProject {
   const assets = value.assets as Record<string, unknown>;
   if (['outline', 'characters', 'setting_expansion'].some(name => typeof assets[name] !== 'string')) return invalid();
   if (value.cover !== undefined) validateCover(value.cover);
+  if (value.writing_style !== undefined) validateWritingStyle(value.writing_style);
   const graph = value.graph as Record<string, unknown>;
   if (!object(graph.graph) || !Array.isArray(graph.graph.nodes) || !Array.isArray(graph.graph.edges) ||
       !Array.isArray((value.views as Record<string, unknown>).views)) return invalid();
   const batch = value.batch as Record<string, unknown>;
+  if (batch.writing_style !== undefined && batch.writing_style !== null) validateWritingStyle(batch.writing_style);
   if (typeof batch.status !== 'string' || !Array.isArray(batch.completed_chapters)) return invalid();
   for (const [number, chapter] of Object.entries(value.chapters as Record<string, unknown>)) {
     if (!object(chapter) || !/^[1-9]\d*$/.test(number) || chapter.chapter_number !== Number(number) ||
@@ -236,10 +239,12 @@ export function validateProject(value: unknown): asserts value is LocalProject {
     for (const version of chapter.versions) {
       if (!object(version) || ['title', 'filename', 'content', 'revision'].some(name => typeof version[name] !== 'string')) return invalid();
     }
+    if (object(chapter.frozen_context) && chapter.frozen_context.writing_style_context != null) validateStyleContext(chapter.frozen_context.writing_style_context);
   }
   for (const run of value.runs as unknown[]) {
     if (!object(run) || typeof run.run_id !== 'string' || typeof run.status !== 'string' || !object(run.input)) return invalid();
     if ('planning_trace_invalid' in run && typeof run.planning_trace_invalid !== 'boolean') run.planning_trace_invalid = true;
+    if (run.input.writing_style_context != null) validateStyleContext(run.input.writing_style_context);
     if ('planning_trace' in run) {
       const trace = readPlanningTrace(run.planning_trace);
       if (trace.invalid || run.operation !== 'plan_chapter') {
@@ -493,6 +498,47 @@ export function deleteSetting(key: string): Promise<void> {
   return transact(['settings'], 'readwrite', tx => { tx.objectStore('settings').delete(key); });
 }
 
+const STYLE_PREFIX = 'writing-style:';
+let styleChannel: BroadcastChannel | undefined;
+function notifyWritingStyles(broadcast = true): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('braipen:styles-changed'));
+  if (broadcast) styleChannel?.postMessage('changed');
+}
+if (typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
+  styleChannel = new BroadcastChannel('braipen:writing-styles');
+  styleChannel.onmessage = () => notifyWritingStyles(false);
+}
+export async function listWritingStyles(): Promise<WritingStyleCard[]> {
+  const cards = await listSettings<WritingStyleCard>(STYLE_PREFIX);
+  cards.forEach(validateWritingStyle);
+  return cards.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+}
+export async function saveWritingStyle(card: WritingStyleCard, expectedRevision = 0): Promise<WritingStyleCard> {
+  validateWritingStyle(card);
+  const saved = await transact<WritingStyleCard>(['settings'], 'readwrite', (tx, done, fail) => {
+    const store = tx.objectStore('settings'), read = store.get(STYLE_PREFIX + card.id);
+    read.onsuccess = () => { try {
+      const old = read.result?.value as WritingStyleCard | undefined;
+      if ((old?.revision || 0) !== expectedRevision) throw new Error('文风卡已在另一处修改或删除，请重新载入后保存；当前草稿保留。');
+      const next = { ...structuredClone(card), revision: expectedRevision + 1, updated_at: new Date().toISOString() };
+      store.put({ key: STYLE_PREFIX + next.id, value: next }); done(next);
+    } catch (error) { fail(error); } };
+  });
+  notifyWritingStyles(); return saved;
+}
+export async function deleteWritingStyle(id: string, expectedRevision: number): Promise<void> {
+  await transact<void>(['settings'], 'readwrite', (tx, _done, fail) => {
+    const store = tx.objectStore('settings'), read = store.get(STYLE_PREFIX + id);
+    read.onsuccess = () => { if (read.result?.value?.revision !== expectedRevision) { fail(new Error('文风卡已改变，请刷新后重试。')); return; } store.delete(STYLE_PREFIX + id); };
+  });
+  notifyWritingStyles();
+}
+export async function selectProjectWritingStyle(ref: string, card?: WritingStyleCard, expectedRevision?: number): Promise<LocalProject> {
+  if (card) validateWritingStyle(card);
+  const project = await updateProject(ref, p => { if (card) p.writing_style = structuredClone(card); else delete p.writing_style; }, expectedRevision);
+  coverChanged(ref); return project;
+}
+
 function safeCopy(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (key, item) => isSecret(key) || ['__proto__', 'constructor', 'prototype'].includes(key) ? undefined : item));
 }
@@ -521,7 +567,9 @@ export function downloadRescue(): void {
     projects.forEach(validateProject);
     const cover_media = object(rescue) && Array.isArray(rescue.cover_media) ? rescue.cover_media : [];
     validateBackupMedia(projects as LocalProject[], cover_media);
-    download({ format: 'braipen-backup', version: 3, created_at: new Date().toISOString(), projects, cover_media,
+    const writing_styles = object(rescue) && Array.isArray(rescue.writing_styles) ? rescue.writing_styles : [];
+    writing_styles.forEach(validateWritingStyle);
+    download({ format: 'braipen-backup', version: 4, created_at: new Date().toISOString(), projects, cover_media, writing_styles,
       ...(object(rescue) && Array.isArray(rescue.connections) ? { connections: rescue.connections } : {}) }, 'braipen-rescue.json');
     return;
   } catch { /* 导入草稿等尚未成为完整项目的数据也可以单独抢救。 */ }
@@ -569,15 +617,20 @@ function validateBackupMedia(projects: LocalProject[], value: unknown): CoverMed
   });
 }
 
-export async function createBackup(): Promise<{ format: string; version: number; created_at: string; connections: unknown; projects: unknown; cover_media: BackupCoverMedia[] }> {
-  const snapshot = await transact<{ projects: LocalProject[]; connections: ConnectionProfile[]; media: CoverMedia[] }>(['projects', 'settings', 'cover_media'], 'readonly', (tx, done) => {
-    const value = { projects: [] as LocalProject[], connections: [] as ConnectionProfile[], media: [] as CoverMedia[] };
+export async function createBackup(): Promise<{ format: string; version: number; created_at: string; connections: unknown; projects: unknown; cover_media: BackupCoverMedia[]; writing_styles: WritingStyleCard[] }> {
+  const snapshot = await transact<{ projects: LocalProject[]; connections: ConnectionProfile[]; media: CoverMedia[]; styles: WritingStyleCard[] }>(['projects', 'settings', 'cover_media'], 'readonly', (tx, done) => {
+    const value = { projects: [] as LocalProject[], connections: [] as ConnectionProfile[], media: [] as CoverMedia[], styles: [] as WritingStyleCard[] };
     tx.objectStore('projects').getAll().onsuccess = event => { value.projects = (event.target as IDBRequest).result; };
-    tx.objectStore('settings').getAll().onsuccess = event => { value.connections = (event.target as IDBRequest).result.filter((item: { key: string }) => item.key.startsWith('connection:')).map((item: { value: ConnectionProfile }) => item.value); };
+    tx.objectStore('settings').getAll().onsuccess = event => {
+      const rows = (event.target as IDBRequest).result as Array<{ key: string; value: unknown }>;
+      value.connections = rows.filter(item => item.key.startsWith('connection:')).map(item => item.value as ConnectionProfile);
+      value.styles = rows.filter(item => item.key.startsWith(STYLE_PREFIX)).map(item => item.value as WritingStyleCard);
+    };
     tx.objectStore('cover_media').getAll().onsuccess = event => { value.media = (event.target as IDBRequest).result; };
     done(value);
   });
   snapshot.projects.forEach(validateProject);
+  snapshot.styles.forEach(validateWritingStyle);
   if (snapshot.media.reduce((total, row) => total + row.blob.size, 0) > MAX_BACKUP_COVER_BYTES) throw new Error('封面备份图片总量超过 120 MiB。');
   const cover_media: BackupCoverMedia[] = [];
   for (const row of snapshot.media) {
@@ -585,17 +638,17 @@ export async function createBackup(): Promise<{ format: string; version: number;
     cover_media.push({ id: row.id, project_ref: row.project_ref, mime_type: row.blob.type, bytes: row.blob.size, base64: encodeCoverBytes(new Uint8Array(await row.blob.arrayBuffer())) });
   }
   validateBackupMedia(snapshot.projects, cover_media);
-  return { format: 'braipen-backup', version: 3, created_at: new Date().toISOString(), connections: safeCopy(snapshot.connections), projects: safeCopy(snapshot.projects), cover_media };
+  return { format: 'braipen-backup', version: 4, created_at: new Date().toISOString(), connections: safeCopy(snapshot.connections), projects: safeCopy(snapshot.projects), cover_media, writing_styles: structuredClone(snapshot.styles) };
 }
 
 export async function exportBackup(): Promise<void> {
   download(await createBackup(), `braipen-backup-${new Date().toISOString().slice(0, 10)}.json`);
 }
 
-function readBackup(text: string): { projects: LocalProject[]; media: CoverMedia[]; raw: Record<string, unknown> } {
+function readBackup(text: string): { projects: LocalProject[]; media: CoverMedia[]; styles: WritingStyleCard[]; raw: Record<string, unknown> } {
   if (new Blob([text]).size > MAX_BACKUP_FILE_BYTES) throw new Error('完整备份超过 200 MiB，请使用较小的备份文件。');
   const backup: unknown = JSON.parse(text);
-  if (!object(backup) || backup.format !== 'braipen-backup' || ![1, 2, 3].includes(Number(backup.version)) || !Array.isArray(backup.projects)) {
+  if (!object(backup) || backup.format !== 'braipen-backup' || ![1, 2, 3, 4].includes(Number(backup.version)) || !Array.isArray(backup.projects)) {
     throw new Error('请选择 Braipen 导出的完整项目备份。');
   }
   checkFields(backup);
@@ -607,9 +660,13 @@ function readBackup(text: string): { projects: LocalProject[]; media: CoverMedia
     refs.add(project.project_ref);
   }
   const projects = backup.projects as LocalProject[];
-  if (Number(backup.version) !== 3 && backup.cover_media !== undefined) throw new Error('图片备份必须使用版本 3。');
-  const media = validateBackupMedia(projects, Number(backup.version) === 3 ? backup.cover_media : []);
-  return { projects, media, raw: backup };
+  if (Number(backup.version) < 3 && backup.cover_media !== undefined) throw new Error('图片备份必须使用版本 3 或 4。');
+  const media = validateBackupMedia(projects, Number(backup.version) >= 3 ? backup.cover_media : []);
+  if (backup.version === 4 && !Array.isArray(backup.writing_styles)) throw new Error('版本 4 备份缺少文风库。');
+  if (backup.version !== 4 && backup.writing_styles !== undefined) throw new Error('文风库备份必须使用版本 4。');
+  const styles = (backup.writing_styles || []) as WritingStyleCard[], styleIds = new Set<string>();
+  for (const style of styles) { validateWritingStyle(style); if (styleIds.has(style.id)) throw new Error('备份包含重复的文风卡标识。'); styleIds.add(style.id); }
+  return { projects, media, styles, raw: backup };
 }
 
 export function parseBackup(text: string): LocalProject[] {
@@ -647,13 +704,27 @@ export function restoreCopies(projects: LocalProject[]): LocalProject[] {
 }
 
 export async function restoreBackup(text: string): Promise<string[]> {
-  const { projects, media, raw } = readBackup(text);
+  const { projects, media, styles, raw } = readBackup(text);
   const versions = new Map(projects.flatMap(project => (project.cover?.versions ?? []).map(version => [version.media_id, version] as const)));
   for (const row of media) {
     const image = await inspectCoverBlob(row.blob), version = versions.get(row.id)!;
     if (image.width !== version.width || image.height !== version.height) throw new Error('封面备份的尺寸与实际图片不一致。');
   }
   const copies = restoreCopies(projects);
+  const styleIds = new Map<string, string>();
+  const collectStyles = (value: unknown): void => {
+    if (Array.isArray(value)) { value.forEach(collectStyles); return; }
+    if (!object(value)) return;
+    for (const [key, item] of Object.entries(value)) {
+      const card = key === 'writing_style' && object(item) ? item : key === 'writing_style_context' && object(item) && object(item.card) ? item.card : undefined;
+      if (card && typeof card.id === 'string' && !styleIds.has(card.id)) styleIds.set(card.id, `style_${crypto.randomUUID()}`);
+      collectStyles(item);
+    }
+  };
+  copies.forEach(collectStyles);
+  for (const card of styles) if (!styleIds.has(card.id)) styleIds.set(card.id, `style_${crypto.randomUUID()}`);
+  copies.forEach(copy => remapWritingStyleIds(copy, styleIds));
+  const restoredStyles = styles.map(card => ({ ...structuredClone(card), id: styleIds.get(card.id)! }));
   const mediaIds = new Map<string, { id: string; project_ref: string }>();
   projects.forEach((project, i) => (project.cover?.versions ?? []).forEach((version, j) => {
     mediaIds.set(version.media_id, { id: copies[i].cover!.versions[j].media_id, project_ref: copies[i].project_ref });
@@ -681,11 +752,13 @@ export async function restoreBackup(text: string): Promise<string[]> {
       copies.forEach(project => tx.objectStore('projects').add(project));
       restoredMedia.forEach(row => tx.objectStore('cover_media').add(row));
       for (const profile of restoredProfiles) tx.objectStore('settings').add({ key: 'connection:' + profile.id, value: profile });
+      for (const card of restoredStyles) tx.objectStore('settings').add({ key: STYLE_PREFIX + card.id, value: card });
     });
   } catch (error) {
     const rawMedia = raw.cover_media as BackupCoverMedia[] | undefined;
-    rememberRescue({ projects: copies, connections: restoredProfiles, cover_media: (rawMedia ?? []).map(row => ({ ...row, ...mediaIds.get(row.id)! })) });
+    rememberRescue({ projects: copies, connections: restoredProfiles, writing_styles: restoredStyles, cover_media: (rawMedia ?? []).map(row => ({ ...row, ...mediaIds.get(row.id)! })) });
     throw storageError(error);
   }
+  notifyWritingStyles();
   return copies.map(project => project.project_ref);
 }

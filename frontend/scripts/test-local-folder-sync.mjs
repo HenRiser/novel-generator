@@ -11,11 +11,11 @@ const { outputText, diagnostics } = ts.transpileModule(source, { reportDiagnosti
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
 assert.equal(diagnostics.length, 0);
 const bindingKey = 'local-folder-sync.v1';
-const snapshot = (count = 1) => ({ format: 'braipen-backup', version: 3, created_at: '2026-10-08T00:00:00Z',
+const snapshot = (count = 1) => ({ format: 'braipen-backup', version: 4, writing_styles: [], created_at: '2026-10-08T00:00:00Z',
   projects: Array.from({ length: count }, (_, i) => ({ project_ref: `book:bk_${i}`, runs: [], batch: { status: 'idle' } })),
   connections: [{ id: 'text', name: '文字连接', revisions: [{ base_url: 'https://example.invalid/v1', model: 'test-model' }] }],
   cover_media: [{ id: 'mock-media', base64: 'bW9jay1pbWFnZS1ieXRlcw==' }] });
-const previous = (workspace = 'workspace-1', count = 1) => JSON.stringify({ ...snapshot(count), folder_sync: { version: 1, workspace_id: workspace } });
+const previous = (workspace = 'workspace-1', count = 1) => JSON.stringify({ ...snapshot(count), version: 3, folder_sync: { version: 1, workspace_id: workspace } });
 const deferred = () => { let resolve; const promise = new Promise(value => { resolve = value; }); return { promise, resolve }; };
 const settle = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
 function lockManager() {
@@ -108,7 +108,7 @@ function load({ backup = snapshot(), saved, browser = false, maxBytes = 200 * 10
   return { sync: exports, settings, reads, backup, counters, window, advance, timers };
 }
 
-test('v3 快照保留项目、原图与连接，环境设置只读白名单，密钥保险库与handle不进入文件', async () => {
+test('v4 快照保留项目、原图与连接，环境设置只读白名单，密钥保险库与handle不进入文件', async () => {
   const app = load(), folder = directory();
   app.settings.set('default_connection', 'text'); app.settings.set('default_image_connection', 'image'); app.settings.set('default_model', 'custom-model');
   app.settings.set('fallback_image_connection', 'seedream');

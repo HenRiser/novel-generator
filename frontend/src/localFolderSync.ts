@@ -116,13 +116,13 @@ async function folderSnapshot(workspaceId: string) {
   const snapshot = { ...backup, folder_sync: { version: 1, workspace_id: workspaceId }, environment };
   const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
   if (blob.size > MAX_BACKUP_FILE_BYTES) throw new Error('完整备份超过 200 MiB，本次未同步。请减少单次备份内容。');
-  return { blob, projectCount: Array.isArray(backup.projects) ? backup.projects.length : 0 };
+  return { blob, projectCount: Array.isArray(backup.projects) ? backup.projects.length : 0, styleCount: backup.writing_styles.length };
 }
 
 // Call only while holding the workspace lock; lock covers snapshot capture as well as close.
 async function writeSnapshotLocked(handle: SyncDirectoryHandle, workspaceId: string): Promise<string> {
   if (await handle.queryPermission({ mode: 'readwrite' }) !== 'granted') throw new DOMException('文件夹需要重新授权。', 'NotAllowedError');
-  const { blob, projectCount } = await folderSnapshot(workspaceId);
+  const { blob, projectCount, styleCount } = await folderSnapshot(workspaceId);
   let file: Awaited<ReturnType<SyncDirectoryHandle['getFileHandle']>> | undefined;
   try { file = await handle.getFileHandle(LOCAL_FOLDER_FILE); }
   catch (error) { if (errorName(error) !== 'NotFoundError') throw error; }
@@ -131,11 +131,12 @@ async function writeSnapshotLocked(handle: SyncDirectoryHandle, workspaceId: str
     if (existingFile.size > MAX_BACKUP_FILE_BYTES) throw new Error('文件夹中已有同名大文件，已拒绝覆盖。请选择其他文件夹。');
     let existing: unknown;
     try { existing = JSON.parse(await existingFile.text()); } catch { throw new Error('文件夹中已有同名文件，无法确认其归属，已拒绝覆盖。'); }
-    if (!object(existing) || existing.format !== 'braipen-backup' || existing.version !== 3 || !Array.isArray(existing.projects) ||
+    if (!object(existing) || existing.format !== 'braipen-backup' || ![3, 4].includes(Number(existing.version)) || !Array.isArray(existing.projects) ||
       !object(existing.folder_sync) || existing.folder_sync.version !== 1 || existing.folder_sync.workspace_id !== workspaceId) {
       throw new Error('文件夹中已有其他工作空间的同名文件，已拒绝覆盖。请选择其他文件夹或先恢复该备份。');
     }
     if (!projectCount && existing.projects.length) throw new Error('当前工作空间没有项目，已阻止覆盖文件夹中的非空备份。请先恢复备份或选择新文件夹。');
+    if (!projectCount && !styleCount && Array.isArray(existing.writing_styles) && existing.writing_styles.length) throw new Error('当前工作空间为空，已阻止覆盖文件夹中的文风库备份。请先恢复备份或选择新文件夹。');
   }
   const created = !file;
   file ??= await handle.getFileHandle(LOCAL_FOLDER_FILE, { create: true });
@@ -161,7 +162,7 @@ export function startLocalFolderSync(): Promise<void> {
   if (initialization) return initialization;
   initialization = (async () => {
     if (!supported()) { publish({ status: 'unsupported', message: hasPicker() ? '此浏览器未提供跨标签页安全锁，已停用文件夹同步，请使用下方下载备份与文件恢复。' : '此浏览器未提供文件夹同步，请使用下方下载备份与文件恢复。' }); return; }
-    for (const event of ['braipen:projects-changed', 'braipen:workflow-changed', 'braipen:connections-changed', 'braipen:batch-changed']) window.addEventListener(event, changed);
+    for (const event of ['braipen:projects-changed', 'braipen:workflow-changed', 'braipen:connections-changed', 'braipen:batch-changed', 'braipen:styles-changed']) window.addEventListener(event, changed);
     if (typeof BroadcastChannel !== 'undefined') {
       bindingChannel = new BroadcastChannel('braipen:local-folder-binding');
       bindingChannel.addEventListener('message', event => {

@@ -61,7 +61,7 @@ export default function LocalDataPanel({ onProjectsChanged }: Props) {
       <Card title={<Space><DownloadOutlined />项目备份与恢复</Space>}>
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-            项目、正文、知识与任务进度保存在此浏览器。更换设备、浏览器或清除站点数据前，请下载备份。
+            项目、正文、文风卡、范例、知识与任务进度保存在此浏览器。更换设备、浏览器或清除站点数据前，请下载备份。
             恢复会创建项目副本；未完成的任务需手动继续。正在分析的导入草稿请先完成导入。
           </Typography.Paragraph>
           <Space wrap>

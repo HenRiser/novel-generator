@@ -3,6 +3,7 @@ import { Alert, Empty, Spin, Tabs, Typography, Button, Checkbox, Input, Space } 
 import { getProjectCharacters, getProjectOutline, expandProjectSetting, updateProjectConfig, getProject } from "../api";
 import { useAppStore } from "../store/useAppStore";
 import { SETTING_RESULT_FIELDS, type SettingField } from '../settingGeneration';
+import ProjectWritingStyle from './ProjectWritingStyle';
 
 const fieldLabels: Record<string, string> = { raw_story_idea: '白话故事设想', protagonist: '主角', supporting_characters: '配角', worldview: '世界观', core_conflict: '核心冲突', genre: '类型', style: '风格', word_count_range: '单章字数' };
 const generationFields = Object.keys(SETTING_RESULT_FIELDS) as SettingField[];
@@ -164,6 +165,7 @@ export default function AssetsPanel() {
               ),
               children: renderMarkdownish(characters),
             },
+            { key: 'writing-style', label: '文风卡', children: <ProjectWritingStyle key={selectedProjectRef} projectRef={selectedProjectRef} /> },
           ]}
         />
       )}

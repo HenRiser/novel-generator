@@ -53,7 +53,7 @@ try {
       calls: window.__pickerCalls, gesture: window.__gestureAtPicker };
   });
   assert.equal(first.nativeHandle, true); assert.equal(first.calls, 1); assert.equal(first.gesture, true);
-  const parsed = JSON.parse(first.text); assert.equal(parsed.version, 3); assert.equal(parsed.projects[0].project_ref, seeded);
+  const parsed = JSON.parse(first.text); assert.equal(parsed.version, 4); assert.equal(parsed.projects[0].project_ref, seeded);
   assert.equal(parsed.environment.default_model, 'offline-model'); assert.equal(parsed.environment.default_image_connection, 'offline-image');
   assert.equal(first.text.includes('OFFLINE_PRIVATE_SENTINEL'), false); assert.equal(first.text.includes('ciphertext'), false); assert.equal(first.text.includes('handle'), false);
   await page.screenshot({ path: join(output, 'desktop.png'), fullPage: true });

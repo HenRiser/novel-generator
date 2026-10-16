@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { loadStyleModule } from './writing-style-test-helpers.mjs';
 
 // Exercise the real backup serializer and download Blob with a read-only IDB
 // adapter. The adapter only delivers getAll events; it cannot filter secrets.
@@ -31,7 +32,7 @@ function fixture() {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
   runInNewContext(outputText, { exports, indexedDB, structuredClone, queueMicrotask, Blob,
-    require: name => { assert.equal(name, './planningTrace'); return {}; },
+    require: name => { if (name === './writingStyle') return loadStyleModule(); assert.equal(name, './planningTrace'); return {}; },
     URL: { createObjectURL: blob => { blobs.push(blob); return 'blob:synthetic-backup'; }, revokeObjectURL() {} },
     document: { body: { appendChild() {} }, createElement: () => { const link = { click() { links.push({ name: link.download, href: link.href }); }, remove() {} }; return link; } },
     setTimeout: callback => { callback(); },
@@ -39,9 +40,9 @@ function fixture() {
   return { store: exports, blobs, links };
 }
 
-test('真实完整备份序列化保持 v3，排除明文记住与两类旧密文记录', async () => {
+test('真实完整备份序列化使用 v4，排除明文记住与两类旧密文记录', async () => {
   const f = fixture(), backup = await f.store.createBackup(), json = JSON.stringify(backup);
-  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 3);
+  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 4);
   assert.equal(backup.connections.length, 1); assert.equal(backup.connections[0].id, 'text');
   for (const secret of ['SYNTHETIC_PERSISTED_KEY', 'api_key', 'ciphertext', 'vault:', 'deepseek-key-vault']) assert.equal(json.includes(secret), false, secret);
 });
@@ -51,6 +52,6 @@ test('真实导出函数生成的 JSON Blob 同样不含凭据，并保留统一
   assert.equal(f.blobs.length, 1); assert.equal(f.blobs[0].type, 'application/json');
   assert.match(f.links[0].name, /^braipen-backup-\d{4}-\d{2}-\d{2}\.json$/);
   const text = await f.blobs[0].text(), backup = JSON.parse(text);
-  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 3);
+  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 4);
   assert.equal(text.includes('SYNTHETIC_PERSISTED_KEY'), false); assert.equal(text.includes('ciphertext'), false);
 });

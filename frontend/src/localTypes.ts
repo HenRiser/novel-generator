@@ -1,6 +1,7 @@
 import type { ConnectionSnapshot, ConnectionGuard } from './providerTypes';
 import type { PlanningTraceEntry } from './planningTrace';
 import type { CoverState } from './coverTypes';
+import type { WritingStyleCard } from './writingStyle';
 import type { BatchGenerationRequest, BatchGenerationStatus, ChapterTaskResponse, ChapterWorkflow, KnowledgeDraft, NarrativeGraphDocument, NarrativeGraphViewsDocument, NoRevealReview, ScenePlanResponse } from './types';
 
 export type LocalRun = {
@@ -25,6 +26,7 @@ export type LocalChapter = {
 };
 export type LocalProject = {
   schema_version: 2; project_ref: string; revision: number; title: string; updated_at: string;
+  writing_style?: WritingStyleCard;
   cover?: CoverState;
   config: Record<string, unknown>;
   assets: { outline: string; characters: string; setting_expansion: string };
@@ -35,7 +37,7 @@ export type LocalProject = {
   reviews: Record<string, NoRevealReview[]>;
   events: Array<Record<string, unknown>>; snapshots: Array<Record<string, unknown>>;
   ai_runs: Array<Record<string, unknown>>; runs: LocalRun[];
-  batch: BatchGenerationStatus & { request?: BatchGenerationRequest; input_revision?: number; connection?: ConnectionSnapshot; connection_guard?: ConnectionGuard };
+  batch: BatchGenerationStatus & { request?: BatchGenerationRequest; input_revision?: number; connection?: ConnectionSnapshot; connection_guard?: ConnectionGuard; writing_style?: WritingStyleCard | null };
   source?: Record<string, unknown>;
 };
 

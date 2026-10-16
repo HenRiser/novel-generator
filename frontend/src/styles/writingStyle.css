@@ -1,0 +1,10 @@
+.writing-style-library { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.writing-style-library .ant-space-item, .writing-style-library .ant-card { min-width: 0; max-width: 100%; }
+.writing-style-library .field-label { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.writing-style-library details, .writing-style-summary { overflow-wrap: anywhere; }
+.style-file-input { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.style-file-input input { max-width: 100%; min-width: 0; }
+@media (max-width: 600px) {
+  .writing-style-library .ant-btn { min-height: 44px; height: auto; white-space: normal; }
+  .writing-style-library .ant-select { max-width: 100%; }
+}

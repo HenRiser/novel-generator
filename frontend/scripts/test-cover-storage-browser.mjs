@@ -121,7 +121,7 @@ try {
     await cover.saveCoverAttempt(ref, undefined, 'attempt_stale');
     check((await store.getProject(ref)).cover.attempt.id === 'attempt_pending', 'A stale cleanup must not clear a newer image attempt');
     const backup = await store.createBackup();
-    check(backup.version === 3 && backup.cover_media.length === 2, 'Quota/revocation failures must leave no orphan media');
+    check(backup.version === 4 && backup.cover_media.length === 2, 'Quota/revocation failures must leave no orphan media');
     const [copyRef] = await store.restoreBackup(JSON.stringify(backup));
     const copy = await store.getProject(copyRef);
     check(copy.cover.selected_id === copy.cover.versions[0].id && copy.cover.versions[1].parent_id === copy.cover.versions[0].id, 'Restore remaps selected and parent IDs');

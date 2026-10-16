@@ -31,6 +31,7 @@ import ImageConnectionsPanel from "../components/ImageConnectionsPanel";
 import ConnectionPicker from "../components/ConnectionPicker";
 import LocalDataPanel from "../components/LocalDataPanel";
 import { AppearanceSettings } from "../components/AppearanceProvider";
+import WritingStyleLibrary from '../components/WritingStyleLibrary';
 
 const apiStatusConfig = {
   loading: { status: "processing" as const, text: "检测中" },
@@ -61,7 +62,7 @@ export default function SettingsPage() {
   const [form] = Form.useForm<GenerationSettingsForm>();
   const [saving, setSaving] = useState(false);
   const requestedTab = searchParams.get("tab");
-  const activeTab = requestedTab && ["api", "images", "project", "system"].includes(requestedTab) ? requestedTab : "api";
+  const activeTab = requestedTab && ["api", "images", "project", "system", "styles"].includes(requestedTab) ? requestedTab : "api";
   const [hideIntro, setHideIntro] = useState(isIntroHidden);
   const { refreshProject, detailError } = useProjectData(selectedProjectRef);
   const { refresh: refreshProjects } = useProjects();
@@ -251,6 +252,7 @@ export default function SettingsPage() {
             { key: "api", label: "模型连接", children: apiKeyTab },
             { key: "images", label: "图片模型连接", children: <ImageConnectionsPanel /> },
             { key: "project", label: "故事偏好", children: projectTab },
+            { key: "styles", label: "文风库", children: <WritingStyleLibrary projectRef={selectedProjectRef} /> },
             { key: "system", label: "本地数据与体验", children: systemTab },
           ]}
         />
