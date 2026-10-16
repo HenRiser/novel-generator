@@ -76,3 +76,10 @@ export function remapWritingStyleIds(value: unknown, ids: Map<string, string>): 
     remapWritingStyleIds(item, ids);
   }
 }
+
+export function remapWritingStyleSources(value: WritingStyleCard | WritingStyleContext, refs: Map<string, string>): void {
+  const card = 'card' in value ? value.card : value;
+  for (const source of [card.source, ...value.examples.map(example => example.source)]) {
+    if (source.project_ref && refs.has(source.project_ref)) source.project_ref = refs.get(source.project_ref)!;
+  }
+}

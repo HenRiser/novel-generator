@@ -40,6 +40,7 @@ from services.chapter_planning_contract import validate_candidate
 from services.chapter_planning_service import plan_chapter, stream_plan_chapter
 from services.work_limits import MAX_GRAPH_NODES, WorkloadLimitError, check_graph_counts
 from structured_schemas import obj, S
+from services.writing_style_service import validate_style_context, append_style_reference, extraction_messages, validate_extraction, validate_source
 
 
 async def request_text(provider, messages, **kwargs):
@@ -64,7 +65,7 @@ def provider_config(credentials, operation):
 MODEL_OPERATIONS = frozenset({
     "connection_test", "list_models", "expand_setting", "generate_outline", "generate_characters",
     "generate_chapter", "continue_chapter", "summarize_chapter", "story_delta",
-    "import_chapter", "import_synthesis", "plan_chapter",
+    "import_chapter", "import_synthesis", "plan_chapter", "extract_style_card",
 })
 OPERATIONS = MODEL_OPERATIONS | {
     "context_pack", "graph_change", "chapter_task", "scene_plan", "review_change",
@@ -162,6 +163,10 @@ def _context_pack(data: dict[str, Any]) -> dict[str, Any]:
 
 def _body_messages(data: dict[str, Any], continuation: bool = False) -> list[dict[str, str]]:
     request = _object(data.get("request"))
+    try:
+        style = validate_style_context(data.get("writing_style_context"))
+    except ValueError as exc:
+        raise ComputeError(str(exc), "invalid_writing_style") from exc
     if continuation:
         from api.schemas import ContinueWritingRequest
         from api.routers.continue_writing import _build_prompt
@@ -169,10 +174,12 @@ def _body_messages(data: dict[str, Any], continuation: bool = False) -> list[dic
         validated = ContinueWritingRequest(**request)
         if not (validated.context_text.strip() or validated.instruction.strip() or (validated.anchor_text or "").strip()):
             raise ComputeError("续写需要正文、锚点或指令。")
-        return _build_prompt(validated)
+        data["frozen_context"] = {"writing_style_context": style}
+        return append_style_reference(_build_prompt(validated), style)
     number = _number(data.get("chapter_number"))
     config, assets = _object(data.get("config")), _object(data.get("assets"))
-    valid = validate_project_config_ready(config)
+    effective_config = {**config, "style": style["card"]["rules"]} if style else config
+    valid = validate_project_config_ready(effective_config)
     if not valid.ok:
         raise ComputeError(valid.message)
     if not _text(assets.get("outline")).strip() or not _text(assets.get("characters")).strip():
@@ -185,7 +192,7 @@ def _body_messages(data: dict[str, Any], continuation: bool = False) -> list[dic
                                   for item in summaries if _number(item.get("chapter_number")) < number)
     previous = data.get("previous_chapter")
     previous_text = _text(previous.get("content")) if isinstance(previous, dict) else _text(previous)
-    messages = build_chapter_prompt(config, number, _text(assets.get("outline")), _text(assets.get("characters")), previous_text, _text(summaries))
+    messages = build_chapter_prompt({**config, "style": ""} if style else config, number, _text(assets.get("outline")), _text(assets.get("characters")), previous_text, _text(summaries))
     task, plan, contract = _approved_inputs(data)
     context = _text(data.get("narrative_context_text") or request.get("narrative_context_text"))
     if not context and "narrative_context_text" not in request and data.get("graph"):
@@ -199,8 +206,8 @@ def _body_messages(data: dict[str, Any], continuation: bool = False) -> list[dic
         if text.strip():
             messages.append({"role": "user", "content": text})
     data["frozen_context"] = {"narrative_context_text": context, "chapter_task": task, "scene_plan": plan,
-                              "allowed_scene_contract": contract, "config": copy.deepcopy(config)}
-    return messages
+                              "allowed_scene_contract": contract, "config": copy.deepcopy(config), "writing_style_context": style}
+    return append_style_reference(messages, style)
 
 
 def _function_review(data: dict[str, Any], content: str | None = None) -> dict[str, Any]:
@@ -607,6 +614,15 @@ async def compute(operation: str, data: dict[str, Any], credentials: dict[str, A
     if operation == "connection_test":
         await request_text(provider, [{"role": "user", "content": "Reply OK."}], temperature=0, max_tokens=128, usage_metrics=metrics)
         return {"ok": True, "message": "DeepSeek 连接正常，凭据未在服务器保存。"}
+    if operation == "extract_style_card":
+        source_text = data.get("source_text")
+        try:
+            messages = extraction_messages(source_text)
+            source = validate_source(data.get("source"))
+            raw = await request_text(provider, messages, temperature=.2, max_tokens=4000, json_mode=True, usage_metrics=metrics)
+            return validate_extraction(parse_model_json_response(raw), source_text, source)
+        except ValueError as exc:
+            raise ComputeError(str(exc), "invalid_style_extraction") from exc
     if operation == "expand_setting":
         request = _object(data.get("request"))
         config = _object(data.get("config"))

@@ -4,7 +4,7 @@ import { PlanningEventContract, type PlanningEvent, type PlanningProgress } from
 
 export type ComputeIdentity = { run_id: string; step_id: string; attempt_id: string; input_revision: number; request_fingerprint?: string };
 export type ComputeResult = { result: Record<string, unknown>; metrics: Record<string, unknown> };
-export const MODEL_OPERATIONS = new Set(['connection_test', 'list_models', 'expand_setting', 'generate_outline', 'generate_characters', 'generate_chapter', 'continue_chapter', 'summarize_chapter', 'story_delta', 'import_chapter', 'import_synthesis', 'plan_chapter']);
+export const MODEL_OPERATIONS = new Set(['connection_test', 'list_models', 'expand_setting', 'generate_outline', 'generate_characters', 'generate_chapter', 'continue_chapter', 'summarize_chapter', 'story_delta', 'import_chapter', 'import_synthesis', 'plan_chapter', 'extract_style_card']);
 const TIMEOUT_MS = 190_000; // Server: 120 s per model call, 180 s per step, plus transport allowance.
 const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 
@@ -18,7 +18,7 @@ export function prepareCompute(operation: string, input: Record<string, unknown>
   if (modelCall && !lease) throw new Error('模型请求缺少已绑定连接。');
   if (lease) {
     if(operation!=='list_models'&&!lease.snapshot.model)throw new Error('请选择或输入模型ID。');
-    const structured = ['expand_setting','story_delta','import_chapter','import_synthesis','plan_chapter'].includes(operation) || (operation === 'summarize_chapter' && input.review_scope === 'semantic_and_rules');
+    const structured = ['expand_setting','story_delta','import_chapter','import_synthesis','plan_chapter','extract_style_card'].includes(operation) || (operation === 'summarize_chapter' && input.review_scope === 'semantic_and_rules');
     if (structured && lease.snapshot.policy.structured === 'unsupported') throw new Error('此模型尚未启用结构化输出，请在连接能力设置中选择模式。');
     lease.signal.throwIfAborted();
   }

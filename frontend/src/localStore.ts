@@ -2,7 +2,7 @@ import type { ConnectionGuard, ConnectionProfile } from './providerTypes';
 import type { LocalProject } from './localTypes';
 import type { CoverAttempt, CoverLayout, CoverState, CoverStyleId, CoverVersion, CoverVersionInput } from './coverTypes';
 import { readPlanningTrace } from './planningTrace';
-import { validateWritingStyle, validateStyleContext, remapWritingStyleIds, type WritingStyleCard } from './writingStyle';
+import { validateWritingStyle, validateStyleContext, remapWritingStyleIds, remapWritingStyleSources, type WritingStyleCard, type WritingStyleContext } from './writingStyle';
 
 const DATABASE = 'braipen.local.v1';
 export const MAX_COVER_BYTES = 8 * 1024 * 1024;
@@ -679,7 +679,14 @@ export function restoreCopies(projects: LocalProject[]): LocalProject[] {
   const remap = (value: unknown, ids: Map<string, string>): unknown => {
     if (typeof value === 'string') return ids.get(value) ?? value;
     if (Array.isArray(value)) return value.map(item => remap(item, ids));
-    if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [ids.get(key) ?? key, remap(item, ids)]));
+    if (object(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => {
+      if ((key === 'writing_style' || key === 'writing_style_context') && object(item)) {
+        const style = structuredClone(item) as WritingStyleCard | WritingStyleContext;
+        if (key === 'writing_style') validateWritingStyle(style); else validateStyleContext(style);
+        remapWritingStyleSources(style, ids); return [key, style];
+      }
+      return [ids.get(key) ?? key, remap(item, ids)];
+    }));
     return value;
   };
   return projects.map(project => {
@@ -725,6 +732,8 @@ export async function restoreBackup(text: string): Promise<string[]> {
   for (const card of styles) if (!styleIds.has(card.id)) styleIds.set(card.id, `style_${crypto.randomUUID()}`);
   copies.forEach(copy => remapWritingStyleIds(copy, styleIds));
   const restoredStyles = styles.map(card => ({ ...structuredClone(card), id: styleIds.get(card.id)! }));
+  const projectRefs = new Map(projects.map((project, index) => [project.project_ref, copies[index].project_ref]));
+  restoredStyles.forEach(card => remapWritingStyleSources(card, projectRefs));
   const mediaIds = new Map<string, { id: string; project_ref: string }>();
   projects.forEach((project, i) => (project.cover?.versions ?? []).forEach((version, j) => {
     mediaIds.set(version.media_id, { id: copies[i].cover!.versions[j].media_id, project_ref: copies[i].project_ref });

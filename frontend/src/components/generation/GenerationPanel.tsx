@@ -1,4 +1,6 @@
 import ConnectionPicker from '../ConnectionPicker';
+import GenerationWritingStyle from '../GenerationWritingStyle';
+import type { WritingStyleChoice } from '../../writingStyle';
 import { getProject } from '../../api';
 import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Collapse, Input, InputNumber, Progress, Segmented, Select, Space, Tag } from "antd";
@@ -30,6 +32,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
   const [plansLoading, setPlansLoading] = useState(false);
   const [plansError, setPlansError] = useState("");
   const [usePlan, setUsePlan] = useState(true);
+  const [writingStyle, setWritingStyle] = useState<WritingStyleChoice>('project');
   const [goal, setGoal] = useState("");
   const [context, setContext] = useState<ContextPackPreviewResponse | null>(null);
   const [contextLoading, setContextLoading] = useState(false);
@@ -49,6 +52,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
 
   useEffect(() => { if (batchActive) setMode("batch"); }, [batchActive]);
   useEffect(() => { setEndChapter(chapterNumber + 2); }, [chapterNumber]);
+  useEffect(() => { setWritingStyle('project'); }, [selectedProjectRef, chapterNumber]);
 
   useEffect(() => {
     setSettings(DEFAULT_SETTINGS); setNotice(""); setError(""); setStatus("idle"); setResult(null);
@@ -108,6 +112,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
         ...settings, chapter_task_id: task?.id,
         scene_plan_id: usePlan && planMatchesTask ? plan?.id : undefined,
         narrative_context_text: useContext && context ? context.prompt_text : "",
+        writing_style: writingStyle,
       }, {
         onDelta: (text) => { if (current()) setStreamingContent((value) => value + text); },
         onReasoning: (text) => { if (current()) setStreamingReasoning((value) => value + text); },
@@ -130,7 +135,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
     const projectRef = selectedProjectRef;
     setBatchSubmitting(true); setBusy({ chapterGenerating: true }); setError(""); setNotice("");
     try {
-      const response = await startBatchGeneration(projectRef, { ...settings, start_chapter: chapterNumber, end_chapter: endChapter });
+      const response = await startBatchGeneration(projectRef, { ...settings, writing_style: writingStyle, start_chapter: chapterNumber, end_chapter: endChapter });
       if (useAppStore.getState().selectedProjectRef !== projectRef) return;
       setBatchStatus(response);
       window.dispatchEvent(new Event("braipen:batch-changed"));
@@ -205,6 +210,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
       {plan && planMatchesTask ? <Checkbox checked={usePlan} onChange={(e) => setUsePlan(e.target.checked)} disabled={busy}>场景计划 v{plan.revision}</Checkbox> : <span className="muted-note">{plan ? "场景计划需按最新任务单重新批准" : "未设置场景计划"}</span>}
       <Link to={`/review?chapter=${chapterNumber}`}>编辑章节规划 <ArrowRightOutlined /></Link>
     </div>}
+    <GenerationWritingStyle projectRef={selectedProjectRef} chapterNumber={chapterNumber} value={writingStyle} onChange={setWritingStyle} disabled={busy} />
     {mode === "single" && plansError && <Alert type="warning" showIcon message="暂时无法读取章节规划" description={plansError} />}
     {apiStatus === "offline" && <Alert type="warning" showIcon message="连接后端后可开始生成，已有内容仍可浏览。" />}
     {notice && <Alert type="info" message={notice} showIcon closable onClose={() => setNotice("")} />}

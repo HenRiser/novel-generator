@@ -20,7 +20,7 @@ export type LocalChapter = {
   summary_connection?: ConnectionSnapshot;
   connection?: ConnectionSnapshot;
   chapter_number: number; title: string; filename: string; content: string;
-  revision: string; versions: Array<{ revision: string; content: string; title: string; filename: string }>;
+  revision: string; versions: Array<{ revision: string; content: string; title: string; filename: string; frozen_context?: Record<string, unknown> }>;
   workflow: ChapterWorkflow; source_locked?: boolean;
   frozen_context?: Record<string, unknown>; confirmation_base_revision?: string;
 };

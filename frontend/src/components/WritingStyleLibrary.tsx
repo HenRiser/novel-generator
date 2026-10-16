@@ -1,21 +1,26 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Empty, Input, Modal, Select, Space } from 'antd';
+import { Alert, Button, Card, Checkbox, Empty, Input, Modal, Select, Space } from 'antd';
 import { useWritingStyles } from '../hooks/useWritingStyles';
 import { deleteWritingStyle, saveWritingStyle } from '../localStore';
-import { createWritingStyle, exportWritingStyle, importWritingStyle, styleCharacters, type WritingStyleCard } from '../writingStyle';
+import { createWritingStyle, exportWritingStyle, importWritingStyle, styleCharacters, type WritingStyleCard, type StyleExample } from '../writingStyle';
 import { decodeNovel, IMPORT_LIMITS } from '../novelImport';
 import ProjectWritingStyle from './ProjectWritingStyle';
+import WritingStyleExtraction from './WritingStyleExtraction';
 import '../styles/writingStyle.css';
 
 // Keep an unfinished editor while visiting the story or model connection pages.
-let editorDraft: { card: WritingStyleCard; revision: number } | undefined;
+let editorDraft: { card: WritingStyleCard; revision: number; candidates?: StyleExample[] } | undefined;
 export default function WritingStyleLibrary({ projectRef }: { projectRef: string | null }) {
   const { cards, error: libraryError } = useWritingStyles();
   const [draft, setDraft] = useState(() => structuredClone(editorDraft?.card || createWritingStyle('新的文风卡')));
   const [revision, setRevision] = useState(editorDraft?.revision || 0), [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false);
-  useEffect(() => { editorDraft = { card: structuredClone(draft), revision }; }, [draft, revision]);
+  const [candidates, setCandidates] = useState<StyleExample[]>(editorDraft?.candidates || []), [chosen, setChosen] = useState<string[]>([]);
+  const options = cards.map(card => ({ value: `${card.id}@${card.revision}`, label: `${card.name} · v${card.revision}` }));
+  const selected = `${draft.id}@${revision}`;
+  if (revision && !options.some(option => option.value === selected)) options.push({ value: selected, label: `${draft.name} · 当前编辑的 v${revision}` });
+  useEffect(() => { editorDraft = { card: structuredClone(draft), revision, candidates: structuredClone(candidates) }; }, [draft, revision, candidates]);
   const edit = (patch: Partial<WritingStyleCard>) => { setDraft(value => ({ ...value, ...patch })); setNotice(''); };
-  const open = (card: WritingStyleCard, saved = 0) => { setDraft(structuredClone(card)); setRevision(saved); setError(''); setNotice(''); };
+  const open = (card: WritingStyleCard, saved = 0) => { setDraft(structuredClone(card)); setRevision(saved); setCandidates([]); setChosen([]); setError(''); setNotice(''); };
   const report = (reason: unknown) => setError(reason instanceof Error ? reason.message : '文风操作未完成，草稿保留。');
   async function save() {
     setBusy(true); setError('');
@@ -47,10 +52,15 @@ export default function WritingStyleLibrary({ projectRef }: { projectRef: string
         <p className="muted-note">文风卡和范例只保存在本地，随完整备份和文件夹同步保存。这里的编辑不会自动改变作品正在使用的版本。</p>
         {(error || libraryError) && <Alert type="error" showIcon title={error || libraryError} />}
         {notice && <Alert type="success" showIcon title={notice} />}
-        <Space wrap><Select aria-label="选择编辑文风卡" placeholder="选择已保存的文风卡" value={revision ? draft.id : undefined} style={{ width: 300, maxWidth: '100%' }} options={cards.map(card => ({ value: card.id, label: `${card.name} · v${card.revision}` }))} onChange={value => { const card = cards.find(item => item.id === value); if (card) open(card, card.revision); }} disabled={busy} /><Button disabled={busy} onClick={() => open(createWritingStyle('新的文风卡'))}>新建文风卡</Button><label className="style-file-input">导入文风卡或规则<input aria-label="导入文风卡或规则" type="file" accept=".json,.txt,.md" disabled={busy} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importFile(file); }} /></label></Space>
+        <Space wrap><Select aria-label="选择编辑文风卡" placeholder="选择已保存的文风卡" value={revision ? selected : undefined} style={{ width: 300, maxWidth: '100%' }} options={options} onChange={value => { const card = cards.find(item => `${item.id}@${item.revision}` === value); if (card) open(card, card.revision); }} disabled={busy} /><Button disabled={busy} onClick={() => open(createWritingStyle('新的文风卡'))}>新建文风卡</Button><label className="style-file-input">导入文风卡或规则<input aria-label="导入文风卡或规则" type="file" accept=".json,.txt,.md" disabled={busy} onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importFile(file); }} /></label></Space>
         <label className="field-label">文风卡名称<Input aria-label="文风卡名称" maxLength={120} value={draft.name} disabled={busy} onChange={e => edit({ name: e.target.value })} /></label>
         <label className="field-label">文风规则<Input.TextArea aria-label="文风规则" value={draft.rules} disabled={busy} onChange={e => edit({ rules: e.target.value })} autoSize={{ minRows: 7, maxRows: 20 }} placeholder="描述叙述视角、语言、对白、节奏、描写和避免事项。参考作品的人物与剧情不会作为本书设定。" /></label>
         <span className="muted-note">规则 {styleCharacters(draft.rules).toLocaleString()} / 6,000 字符</span>
+        {candidates.length > 0 && <Card size="small" title="模型推荐范例 · 尚未收录">
+          <Space orientation="vertical" style={{ width: '100%' }}>{candidates.map((example, index) => <div key={example.id}>
+            <Checkbox checked={chosen.includes(example.id)} onChange={e => setChosen(value => e.target.checked ? [...value, example.id] : value.filter(id => id !== example.id))}>收录候选范例 {index + 1}</Checkbox><p style={{ whiteSpace: 'pre-wrap' }}>{example.text}</p>
+          </div>)}<Button disabled={!chosen.length} onClick={() => { edit({ examples: [...draft.examples, ...candidates.filter(e => chosen.includes(e.id))] }); setCandidates(value => value.filter(e => !chosen.includes(e.id))); setChosen([]); }}>将勾选范例加入草稿</Button></Space>
+        </Card>}
         <label className="field-label">文风来源<Input aria-label="文风来源" value={draft.source.label} disabled={busy} maxLength={300} onChange={e => edit({ source: { ...draft.source, label: e.target.value } })} /></label>
         <div><strong>已确认范例 · {draft.examples.length} 段</strong><p className="muted-note">收录你认可的完整片段。生成时按场景选取最多三段，不自动收录每个生成章节。</p></div>
         {!draft.examples.length && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="尚未收录范例，文风卡仍可独立使用。" />}
@@ -66,5 +76,6 @@ export default function WritingStyleLibrary({ projectRef }: { projectRef: string
         <Space wrap><Button type="primary" loading={busy} onClick={() => void save()}>保存文风卡{revision ? '新版' : ''}</Button><Button disabled={busy} onClick={download}>导出此文风卡</Button>{revision > 0 && <Button danger disabled={busy} onClick={() => Modal.confirm({ title: '删除文风库中的这张卡？', content: '作品已选用的快照与生成历史会保留。', okText: '删除库内卡', cancelText: '保留', onOk: async () => { try { await deleteWritingStyle(draft.id, revision); open(createWritingStyle('新的文风卡')); setNotice('已从文风库删除，项目快照保留。'); } catch (reason) { report(reason); throw reason; } } })}>删除库内卡</Button>}</Space>
       </Space>
     </Card>
+    <WritingStyleExtraction key={projectRef || 'global'} projectRef={projectRef} onBusyChange={setBusy} onDraft={(card, examples, warnings) => { open(card); setCandidates(examples); setNotice(['分析结果已放入上方草稿，尚未保存或应用到项目。', ...warnings].join(' ')); }} />
   </div>;
 }

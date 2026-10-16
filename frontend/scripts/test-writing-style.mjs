@@ -67,3 +67,16 @@ test('非法v4文风库拒绝整次恢复，不写入项目', async () => {
   await assert.rejects(f.store.restoreBackup(JSON.stringify({ format: 'braipen-backup', version: 4, projects: [p], cover_media: [], writing_styles: [{ name: '缺字段' }] })));
   assert.equal((await f.store.listProjects()).length, 0);
 });
+test('恢复时库卡与项目快照来源一致，只改结构化引用，不替换规则正文', async () => {
+  const f = memoryStyleStore(), p = f.types.emptyProject('来源作品');
+  await f.store.putProject(p);
+  const value = card(); value.rules = p.project_ref; value.source = { kind: 'project', label: '选定章节', project_ref: p.project_ref };
+  value.examples = [{ ...example('origin', p.project_ref), source: { ...value.source } }, { ...example('external'), source: { kind: 'project', label: '备份之外', project_ref: 'book:bk_external' } }];
+  const a = await f.store.saveWritingStyle(value); await f.store.selectProjectWritingStyle(p.project_ref, a);
+  const refs = await f.store.restoreBackup(JSON.stringify(await f.store.createBackup())), restored = await f.store.getProject(refs[0]);
+  const library = (await f.store.listWritingStyles()).find(c => c.id === restored.writing_style.id);
+  assert.equal(library.source.project_ref, refs[0]); assert.equal(library.examples[0].source.project_ref, refs[0]);
+  assert.equal(library.examples[1].source.project_ref, 'book:bk_external');
+  assert.equal(restored.writing_style.rules, p.project_ref); assert.equal(restored.writing_style.examples[0].text, p.project_ref);
+  assert.equal(JSON.stringify(library), JSON.stringify(restored.writing_style));
+});

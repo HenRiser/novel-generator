@@ -180,6 +180,7 @@ export async function localRequest(path: string, init: RequestInit = {}): Promis
         ensureEditable(d.chapters[n]);
         if (!['append', 'replace'].includes(String(body.mode))) throw new Error('保存模式无效。');
         setChapter(d, n, body.mode === 'replace' ? content : `${d.chapters[n].content}\n\n${content}`, String(body.chapter_title || d.chapters[n].title));
+        if (Object.prototype.hasOwnProperty.call(run.input, 'writing_style_context')) d.chapters[n].frozen_context = { ...d.chapters[n].frozen_context, writing_style_context: structuredClone(run.input.writing_style_context) };
         d.chapters[n].workflow.review_scope = 'semantic_and_rules'; run.status = 'discarded';
       }, p.revision)); changed(ref); return { ...success(p), chapter_number: n, chapter_file: p.chapters[n].filename };
     }
@@ -198,5 +199,6 @@ export async function downloadLocalBook(ref: string, chapterNumber?: number) {
 
 export async function localContinue(ref: string, number: number, request: Record<string, unknown>, handlers: { onDelta?: (text: string) => void; onReasoning?: (text: string) => void }, signal?: AbortSignal) {
   const p = await getProject(ref); if (!p.chapters[number]) throw new Error('章节不存在。'); ensureEditable(p.chapters[number]);
-  return runOperation(p, 'continue_chapter', { ...contextInput(p,number,request), ...request }, { stream: true, handlers, signal });
+  const { writing_style: _choice, ...wireRequest } = request;
+  return runOperation(p, 'continue_chapter', { ...contextInput(p,number,request,'continue'), ...wireRequest }, { stream: true, handlers, signal });
 }

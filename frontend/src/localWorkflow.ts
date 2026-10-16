@@ -1,4 +1,4 @@
-import { acquireConnection, resolveConnection, legacySnapshot, capabilities } from './providerConnections';
+import { acquireConnection, resolveConnection, legacySnapshot, capabilities, stable } from './providerConnections';
 import type { ConnectionSnapshot } from './providerTypes';
 import { compute, computeStream, computePlanningStream, newIdentity, prepareCompute, MODEL_OPERATIONS } from './computeClient';
 import { getProject, listProjects, rememberRescue, updateProject } from './localStore';
@@ -7,6 +7,8 @@ import { validatePlanningResult } from './planningInput';
 import { selectPlanningTransport } from './planningStreamContract';
 import { planningTraceEntry, readPlanningTrace } from './planningTrace';
 import { applySettingGeneration } from './settingGeneration';
+import { writingStyleContext, validateWritingStyle, validateStyleContext, type WritingStyleChoice, type WritingStyleCard } from './writingStyle';
+import { requireWritingStyleSupport } from './writingStyleClient';
 import type { BatchGenerationRequest, ChapterStreamDoneEvent, ChapterStreamHandlers, ChapterWorkflow, GenerationRequest, NoRevealReview, KnowledgeDraft, NarrativeGraphDocument, NarrativeGraphViewsDocument, ChapterTaskResponse, ScenePlanResponse } from './types';
 
 const active = new Map<string, AbortController>();
@@ -55,21 +57,42 @@ export function setChapter(p: LocalProject, number: number, content: string, tit
   const filename = `chapter_${String(number).padStart(3, '0')}_${revision.slice(0, 8)}.md`;
   const name = title || previous?.title || `第 ${number} 章`;
   const versions = [...(previous?.versions || [])];
-  if (previous) versions.push({ revision: previous.revision, content: previous.content, title: previous.title, filename: previous.filename });
+  if (previous) versions.push({ revision: previous.revision, content: previous.content, title: previous.title, filename: previous.filename, ...(previous.frozen_context ? { frozen_context: structuredClone(previous.frozen_context) } : {}) });
   p.chapters[number] = { chapter_number: number, content, title: name, revision, filename, versions,
     workflow: chapterWorkflow(p.project_ref, number, content, revision, filename), connection: previous?.connection, summary_connection: previous?.summary_connection, frozen_context: previous?.frozen_context };
 }
 
 /** Deliberately select context fields; source archives, other chapters and keys never enter a compute input. */
-export function contextInput(p: LocalProject, number = 1, request: Record<string, unknown> = {}): Record<string, unknown> {
+export function contextInput(p: LocalProject, number = 1, request: Record<string, unknown> = {}, styleMode?: 'generate' | 'continue'): Record<string, unknown> {
   const chapter = p.chapters[number];
+  const { writing_style: selection, ...wireRequest } = request;
+  const task = p.chapter_tasks[number]?.approved || null, plan = request.scene_plan_id ? p.scene_plans[number]?.approved || null : null;
+  let styleContext: unknown = null;
+  if (styleMode === 'continue' && chapter?.frozen_context && Object.prototype.hasOwnProperty.call(chapter.frozen_context, 'writing_style_context')) {
+    styleContext = structuredClone(chapter.frozen_context.writing_style_context);
+    if (styleContext !== null) validateStyleContext(styleContext);
+  } else if (styleMode) {
+    const card = ['running', 'stopping'].includes(p.batch.status) && Object.prototype.hasOwnProperty.call(p.batch, 'writing_style') ? p.batch.writing_style : selectWritingStyle(p, selection as WritingStyleChoice | undefined);
+    if (card) styleContext = writingStyleContext(card, task, plan);
+  }
   const before = Object.values(p.chapters).filter(c => c.chapter_number < number).sort((a,b) => a.chapter_number-b.chapter_number);
   return { project_ref: p.project_ref, config: p.config, assets: p.assets, graph: p.graph, views: p.views,
     chapter_number: number, chapter: chapter ? { content: chapter.content, title: chapter.title, revision: chapter.revision, summary: chapter.workflow.summary_status === 'ready' ? chapter.workflow.summary : '' } : null,
     previous_chapter: before[before.length - 1]?.content || '',
     summaries: before.filter(c => c.workflow.status === 'confirmed' && c.workflow.summary_status === 'ready')
       .map(c => ({ chapter_number: c.chapter_number, summary: c.workflow.summary })),
-    chapter_task: p.chapter_tasks[number]?.approved || null, scene_plan: request.scene_plan_id ? p.scene_plans[number]?.approved || null : null, request };
+    chapter_task: task, scene_plan: plan, request: wireRequest, ...(styleMode ? { writing_style_context: styleContext } : {}) };
+}
+
+function selectWritingStyle(p: LocalProject, choice?: WritingStyleChoice): WritingStyleCard | null {
+  if (choice === 'none') return null;
+  const card = choice === undefined || choice === 'project' ? p.writing_style : choice;
+  if (card) validateWritingStyle(card);
+  return card ? structuredClone(card) : null;
+}
+function frozenWritingStyle(input: Record<string, unknown>, frozen?: Record<string, unknown>): Record<string, unknown> {
+  if ((input.writing_style_context != null || frozen?.writing_style_context != null) && JSON.stringify(stable(frozen?.writing_style_context)) !== JSON.stringify(stable(input.writing_style_context))) throw new Error('服务未确认本次文风卡上下文，正文未应用，请更新服务后重试。');
+  return { ...(Object.prototype.hasOwnProperty.call(input, 'writing_style_context') ? { writing_style_context: structuredClone(input.writing_style_context) } : {}), ...frozen };
 }
 
 export function applyResult(p: LocalProject, operation: string, result: Record<string, unknown>, input: Record<string, unknown>) {
@@ -84,7 +107,7 @@ export function applyResult(p: LocalProject, operation: string, result: Record<s
     if (!String(result.content || '').trim()) throw new Error('正文为空，未保存。');
     lockPreviousChapters(p, n);
     setChapter(p, n, String(result.content), String(result.title || `第 ${n} 章`));
-    p.chapters[n].frozen_context = (result.frozen_context || { chapter_task: input.chapter_task, scene_plan: input.scene_plan, narrative_context_text: (input.request as Record<string, unknown>)?.narrative_context_text || '' }) as Record<string, unknown>;
+    p.chapters[n].frozen_context = frozenWritingStyle(input, (result.frozen_context || { chapter_task: input.chapter_task, scene_plan: input.scene_plan, narrative_context_text: (input.request as Record<string, unknown>)?.narrative_context_text || '' }) as Record<string, unknown>);
     if (result.function_review) (p.reviews[n] ||= []).push(result.function_review as NoRevealReview);
   } else if (operation === 'summarize_chapter') {
     const c = p.chapters[n];
@@ -139,6 +162,7 @@ function commitResult(draft: LocalProject, run: LocalRun, result: Record<string,
 /** Caller owns the project lock; batches keep it across all their steps. */
 async function runLocked(p: LocalProject, operation: string, input: Record<string, unknown>, options: RunOptions = {}): Promise<Record<string, unknown>> {
   options.signal?.throwIfAborted();
+  if (input.writing_style_context != null) await requireWritingStyleSupport(options.signal);
   if ((await getProject(p.project_ref)).revision !== p.revision) throw new Error('作品已更新，请刷新后重试。');
   const identity = { ...newIdentity(p.revision), ...(options.retry ? { run_id: options.retry.run_id, step_id: options.retry.step_id } : {}) };
   const frozen = options.connection || options.retry?.connection || (MODEL_OPERATIONS.has(operation) ? await resolveConnection(String(p.config.connection_id || 'legacy-deepseek'), String((input.request as Record<string,unknown>)?.model || p.config.model || '')) : undefined);
@@ -180,7 +204,7 @@ async function runLocked(p: LocalProject, operation: string, input: Record<strin
       }, signal, lease) : await compute(operation, input, identity, signal, undefined, lease);
     } else response = options.stream ? await computeStream(operation, input, identity, {
       onStarted: async frozen => {
-        run.frozen_context = frozen;
+        frozen = frozenWritingStyle(input, frozen); run.frozen_context = frozen;
         await updateProject(p.project_ref, draft => {
           currentRun(draft, run.attempt_id).frozen_context = frozen;
           if (operation !== 'generate_chapter') return;
@@ -266,7 +290,7 @@ function validateChapterStart(p: LocalProject, number: number) {
 async function generateLocked(ref: string, number: number, request: GenerationRequest, handlers: ChapterStreamHandlers = {}, signal?: AbortSignal): Promise<ChapterStreamDoneEvent> {
   const p = await getProject(ref);
   validateChapterStart(p, number);
-  const result = await runLocked(p, 'generate_chapter', contextInput(p, number, request as unknown as Record<string, unknown>), { stream: true, handlers, signal, connection: ['running','stopping'].includes(p.batch.status) ? p.batch.connection : undefined });
+  const result = await runLocked(p, 'generate_chapter', contextInput(p, number, request as unknown as Record<string, unknown>, 'generate'), { stream: true, handlers, signal, connection: ['running','stopping'].includes(p.batch.status) ? p.batch.connection : undefined });
   const chapter = (await getProject(ref)).chapters[number];
   const event: ChapterStreamDoneEvent = { type: 'done', ok: true, chapter_number: number, title: chapter.title,
     chapter_file: chapter.filename, workflow: chapter.workflow, message: '正文已保存在本浏览器，确认后生成摘要。',
@@ -362,6 +386,7 @@ export async function resolveLocalRun(ref: string, id: string, saveDraft = false
         setChapter(draft, n, content);
         if (run.operation === 'generate_chapter') draft.chapters[n].frozen_context = (run.result?.frozen_context || run.frozen_context || { chapter_task: run.input.chapter_task, scene_plan: run.input.scene_plan,
           narrative_context_text: (run.input.request as Record<string, unknown>)?.narrative_context_text || '' }) as Record<string, unknown>;
+        if (run.operation === 'generate_chapter') draft.chapters[n].frozen_context = frozenWritingStyle(run.input, draft.chapters[n].frozen_context);
         draft.chapters[n].connection = run.connection;
         draft.chapters[n].workflow.review_scope = 'semantic_and_rules';
       }
@@ -407,13 +432,15 @@ export async function startLocalBatch(ref: string, request: BatchGenerationReque
       if (!resume && Object.values(p.chapters).some(c => c.chapter_number >= request.start_chapter)) throw new Error('连续生成只能追加新章，不能覆盖已有正文。');
       const first = resume ? p.batch.current_chapter || request.start_chapter : request.start_chapter;
       const connection = resume ? p.batch.connection || await legacySnapshot(request.model) : await resolveConnection(String(p.config.connection_id || 'legacy-deepseek'), request.model);
+      const batchStyle = resume && Object.prototype.hasOwnProperty.call(p.batch, 'writing_style') ? p.batch.writing_style : selectWritingStyle(p, (request as GenerationRequest).writing_style);
+      if (batchStyle) await requireWritingStyleSupport();
       const batchLease = await acquireConnection(connection);
-      try { prepareCompute('generate_chapter', contextInput(p, first, request as unknown as Record<string, unknown>), newIdentity(p.revision), batchLease); } finally { batchLease.close(); }
+      try { prepareCompute('generate_chapter', contextInput(p, first, { ...request, writing_style: batchStyle || 'none' }, 'generate'), newIdentity(p.revision), batchLease); } finally { batchLease.close(); }
       if (!resume) validateChapterStart(p, first);
       p = await updateProject(ref, draft => {
         draft.batch = { id: resume ? draft.batch.id : crypto.randomUUID(), status: 'running', stage: 'starting',
           start_chapter: request.start_chapter, end_chapter: request.end_chapter, current_chapter: first,
-          completed_chapters: resume ? draft.batch.completed_chapters : [], message: '保持页面打开时逐章执行，关闭后需手动恢复。', error: '', request, connection, connection_guard: batchLease.guard, input_revision: draft.revision };
+          completed_chapters: resume ? draft.batch.completed_chapters : [], message: '保持页面打开时逐章执行，关闭后需手动恢复。', error: '', request, connection, connection_guard: batchLease.guard, input_revision: draft.revision, writing_style: batchStyle || null };
       }, p.revision, false);
       const controller = new AbortController(); batchControllers.set(ref, controller); changed(ref); resolve(p.batch);
       try {

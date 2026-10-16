@@ -96,7 +96,7 @@ export type BatchGenerationStatus = {
   stage: string;
 };
 
-export type BatchGenerationRequest = Pick<GenerationRequest, "model" | "temperature" | "max_tokens"> & {
+export type BatchGenerationRequest = Pick<GenerationRequest, "model" | "temperature" | "max_tokens" | "writing_style"> & {
   start_chapter: number;
   end_chapter: number;
 };
@@ -235,6 +235,7 @@ export type GenerationRequest = {
   narrative_context_text?: string;
   chapter_task_id?: string;
   scene_plan_id?: string;
+  writing_style?: import('./writingStyle').WritingStyleChoice;
 };
 
 export type GenerationSettingsRequest = {

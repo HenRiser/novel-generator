@@ -22,6 +22,7 @@ PLANNING_SCENE = obj(scene_no=I, title=S, location=S, participants=arr(S), scene
 SCHEMAS = {
     "plan_chapter": obj(task_payload=PLANNING_TASK, scene_proposal=obj(scenes=arr(PLANNING_SCENE))),
     "connection_test": obj(ok=B),
+    "extract_style_card": obj(name=S, rules=S, examples=arr(obj(text=S, scene_tags=arr(S), pov=S, pace=S))),
     "expand_setting": obj(title_candidates=arr(S), recommended_title=S, protagonist_setting=S, supporting_characters_setting=S, world_setting=S, core_conflict=S),
     "summarize_chapter": obj(summary=S, warnings=arr(WARNING)),
     "import_chapter": obj(summary=S, characters=arr(ENTITY), facts=arr(ENTITY), relationships=arr(ENTITY), foreshadows=arr(ENTITY), warnings=arr(S)),
