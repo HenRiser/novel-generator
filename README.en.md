@@ -1,331 +1,137 @@
-# novel-generator
+# Braipen · novel-generator
 
-[中文](README.md) | [English](README.en.md)
+[中文](README.md) | [English](README.en.md) | [Try Braipen](https://braipen.world)
 
-A lightweight local-first AI novel writing tool built around the official Braipen frontend: React + FastAPI with the OpenAI-compatible DeepSeek API. The project is designed for personal writing workflows and long-term local iteration: no database, no user system, and no SaaS assumptions. The old Streamlit UI is retired and no longer maintained.
+A local-first novel writing workspace with author-controlled settings, planning, generation and review. The official frontend uses React and TypeScript; FastAPI handles request-scoped computations, including LangGraph chapter planning.
+
+**Projects and writing-style materials live in the user's browser.** There is no cloud account or hosted project-sync service. Legacy filesystem APIs remain for local compatibility; Streamlit is retired.
 
 ## Features
 
-- Enter a novel title, genre, writing style, characters, worldview, core conflict, and extra requirements.
-- Generate or update the novel outline as a setting asset.
-- Generate or update character cards as setting assets.
-- Write a specified chapter with streaming output by default, with synchronous generation kept as a fallback path.
-- Avoid silent overwrites by saving duplicate chapter numbers as versioned files such as `chapter_001_v2.md`.
-- Generate short chapter summaries and maintain `chapter_index.md`.
-- Read previous chapters, summaries, outline, and character cards as context.
-- Expand raw story ideas into structured settings.
-- Preview prompts before calling the API.
-- Save and load `project_config.json`.
-- Configure per-project generation settings from React, with system-level API Key management kept as a future React + FastAPI task.
+- Edit settings manually or ask a text model to fill selected protagonist, supporting-character, world or conflict fields while preserving other author edits.
+- Generate outlines and character cards, stream prose, edit and confirm chapters, continue writing, and retain versions.
+- Generate batches of 1–10 chapters while the page stays open, with explicit recovery after interruption. Confirmed prose proceeds to summary and checks.
+- Request chapter-task and scene proposals through LangGraph; author approval determines what becomes generation input. No server-side persistent checkpoints.
+- Use narrative graphs, context previews, Story Delta and reviewed knowledge candidates to maintain story memory.
+- Create writing-style cards manually, from project prose, or from imported prose; choose defaults per project and override them for a single generation.
+- Upload and crop covers to 2:3, generate 1/2/4 candidates with five presets, use controlled edits, and retain cover versions.
+- Configure text and image connections, display model lists or enter model IDs, test connections and freeze per-request configuration.
+- Export complete backups and restore copies. Compatible desktop browsers can synchronize to an authorized local folder; phones and other browsers use file download/restore.
+- Read chapters with typography preferences and choose the default Editorial theme, Silver or Midnight colors across responsive layouts.
 
-## Quick Start
+## Writing-style cards and examples
 
-Recommended Python version: 3.10 or newer.
+Open **Settings → Writing-style library**. The story-settings panel also provides the selected project's default-card picker.
 
-```bat
-cd /d D:\vibecoding\novel-generator
+1. **Edit or import:** write rules directly, import a complete JSON card, or load TXT/Markdown as rule text. Imports create a new card rather than overwriting a matching name.
+2. **Analyze this project:** choose chapters; confirmed prose is listed by default, with an explicit option to include unconfirmed drafts.
+3. **Analyze imported prose:** paste or import TXT/Markdown, inspect the actual submission, then explicitly start analysis. UTF-8 and GB18030 decoding are supported.
+
+Analysis accepts at most **20,000 characters** per request, without silent truncation or automatic batching. The result remains an editable draft. Suggested examples must be verbatim excerpts from the submitted prose and require author confirmation before inclusion.
+
+- Each project keeps its selected card and example-set snapshot. Editing a shared card does not update projects automatically; apply a newer version explicitly.
+- Single-chapter choices are project default, no card, or another card. They do not change the project default. Without a card, the original short style description applies.
+- Retrieval stays inside the selected card, using local scene, viewpoint and pacing tags. At most **three complete excerpts totaling 2,000 characters** are submitted. No vector database or extra embedding calls.
+- Batches freeze their style pool at startup. Continuations, retries and saved interrupted drafts preserve the actual style context, including an explicit disabled choice. Chapters expose the card revision and selected examples.
+- Style references control expression; their characters and events do not become story facts. Actual model fidelity still needs author evaluation.
+
+## Connections and covers
+
+Text presets include DeepSeek, Qwen, Kimi, GLM, OpenAI, Gemini, Claude and OpenRouter, plus Custom. Supported protocols are OpenAI Chat Completions and Anthropic Messages; model capabilities depend on the selected connection.
+
+Image connections are configured separately. Cover generation combines a backend-maintained preset with explicit character appearance details, asks a text model to prepare the description, then calls an image model. The client exposes preset, count and controlled edit choices, without an internal image-prompt editor. Presets are cinematic realism, Chinese ink, light-novel illustration, fantasy realism and minimal symbolism.
+
+The official Gemini image preset uses Interactions. A configured Seedream connection can be offered as an explicitly confirmed fallback. Text access or a free tier does not prove image quota is available; refusals, unknown outcomes and partial success do not trigger silent fallback or automatic regeneration.
+
+## Local data and API keys
+
+```mermaid
+flowchart LR
+    UI[React workspace] <--> Local[Browser IndexedDB / local backups]
+    UI -->|Selected context and request credentials| API[Request-scoped FastAPI]
+    API --> Provider[Selected model provider]
+    Provider --> API
+    API -->|Result and run identity| UI
+```
+
+- Projects, prose, style cards, examples, graphs and run records stay in IndexedDB. Browser, device, domain and port changes create distinct local data spaces.
+- Keys default to the current tab session. Explicitly opting into remembering a key stores it **in plaintext in the local browser**, independently of project data. Someone with access to that browser profile may read it.
+- Old encrypted records support a one-time migration using the old passphrase; new encrypted records and routine unlock prompts are no longer created.
+- Keys are excluded from project data, card exports, complete backups and folder-sync files. Restored connections need credentials configured again.
+- The backend temporarily processes selected context and credentials for a request without persisting user projects or keys. The chosen cloud model provider still receives the submitted material.
+- Download an independent backup before changing devices or clearing site data. Browser persistence and folder writing do not replace backups.
+
+Complete backups use **`braipen-backup` v4 JSON**, including projects, the style library, cover media and credential-free connection descriptors. Readers accept v1–v3. Restore creates copies and remaps identifiers without overwriting existing projects.
+
+Single cards use **`braipen-style-card` v1 JSON**. Desktop folder sync retains `braipen-workspace.json` and accepts existing v3/v4 files. Unfinished novel-import drafts are not part of complete project backups. Older clients cannot restore v4 backups; retain suitable backups and current data copies before rolling back.
+
+## Run locally
+
+Use Python **3.10+** and Node.js satisfying the pinned Vite engine requirement (`^20.19.0 || >=22.12.0`). Keep `requirements*.txt` and `frontend/package-lock.json`; use npm for this frontend.
+
+```powershell
+# Repository root
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+cd frontend
+npm ci
 ```
 
-Edit `.env`:
+Start two terminals:
 
-```env
-DEEPSEEK_API_KEY=your_api_key_here
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEFAULT_MODEL=deepseek-v4-flash
+```powershell
+# Terminal 1: repository root
+.\.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-Start the official Braipen frontend:
-
-```bat
-cd /d D:\vibecoding\novel-generator
-start-react.bat
-```
-
-Then open:
-
-```text
-http://127.0.0.1:5173
-```
-
-Windows users can still run `setup.bat` for environment setup. `start-react.bat` is the recommended startup command. `start.bat` is now a deprecated compatibility shim that prints a retirement notice and redirects to `start-react.bat`.
-
-## Official React Frontend
-
-React + FastAPI is the only official frontend architecture. The React UI uses `Braipen` as the display brand, while the internal project name, folders, API contracts, and documentation identity remain `novel-generator`. Its current visual direction is a reading-first writing workspace: warm paper surfaces, low-saturation status colors, comfortable long-form text width, and a manuscript-like streaming preview rather than an AI demo or dashboard-heavy interface.
-
-One-command startup on Windows:
-
-```bat
-cd /d D:\vibecoding\novel-generator
-start-react.bat
-```
-
-The script starts:
-
-```text
-FastAPI: http://127.0.0.1:8000
-React:   http://127.0.0.1:5173
-```
-
-If `frontend\node_modules` is missing, the React terminal window runs `npm install` before starting Vite. `start-react.bat` starts FastAPI + React only and does not start Streamlit.
-
-Manual startup uses two terminals.
-
-Terminal 1, start FastAPI:
-
-```bat
-cd /d D:\vibecoding\novel-generator
-.venv\Scripts\python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000
-```
-
-The API is available at:
-
-```text
-http://127.0.0.1:8000
-```
-
-The API exposes health, workspace project creation, project listing/detail, project generation settings updates, Narrative Graph CRUD endpoints, Context Pack preview, Story Delta analysis, Knowledge Draft listing/detail plus single-change review accept/reject, Chapter Status and Workflow Guard checks, read-only event, snapshot, and AI run listing, chapter reading, TXT export, generation status, outline/character generation, synchronous single-chapter generation, and streaming single-chapter generation. It does not implement WebSocket, task queues, user accounts, database-backed jobs, cancellation, batch draft merge, Prompt Editor, rollback/restore UI, diff view, or full project-management APIs.
-
-Terminal 2, start React:
-
-```bat
-cd /d D:\vibecoding\novel-generator\frontend
-npm install
+```powershell
+# Terminal 2: frontend/
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
-The React frontend is available at:
+Open [the local workspace](http://127.0.0.1:5173) and configure connections and keys in the UI. Browser-local mode does not require user credentials in a server `.env`. On Windows with an existing environment, `start-react.bat` starts both services; `start.bat` is only a compatibility entry. Use the virtual environment's `bin/python` on Linux/macOS.
+
+## Development and verification
+
+Key modules:
 
 ```text
-http://127.0.0.1:5173
+frontend/src/localStore.ts          Local transactions, style library, backups
+frontend/src/localWorkflow.ts       Chapters, continuation, batches, recovery
+frontend/src/writingStyle.ts        Style validation, import/export, retrieval
+services/compute_service.py         Stateless computations
+services/writing_style_service.py   Style extraction and context boundaries
+services/chapter_planning_service.py Request-scoped chapter planning
+api/routers/compute.py              JSON/NDJSON and capabilities
 ```
 
-The frontend reads `VITE_API_BASE_URL` when provided and otherwise uses `http://127.0.0.1:8000`. React uses single-chapter streaming generation by default and keeps synchronous chapter generation as a fallback / debug path. Streaming text is a live preview until the API sends the final `done` event; failed or interrupted previews are not written to the official chapter file. The creation page can preview a Narrative Context Pack selected from the current Narrative Graph and can optionally attach that previewed context to chapter generation; the option is disabled by default. After a chapter exists, the creation page can manually run a second Story Delta analysis pass and save pending-review Knowledge Draft candidates. The library page can review those candidates one at a time; accepting supported `create_node` / `create_edge` changes writes to `narrative_graph.json`, while rejecting a change does not write the graph.
+```powershell
+# Repository root; providers are mocked
+.\.venv\Scripts\python.exe -m unittest tests.test_writing_style tests.test_compute_api tests.test_compute_reliability -q
 
-Story Delta candidate changes are aligned with the Review & Merge schema. New `create_node` payloads use `type`, not `node_type`; legacy `node_type` draft payloads are accepted as a compatibility fallback. First-order world fact, foreshadowing, plot direction, and character-card candidates are normalized into `create_node` where possible. `create_edge` candidates can reference existing graph node ids or same-draft node candidates through `source_change_id` and `target_change_id`. Story Delta now uses a conservative importance rubric for future candidates: most changes should be 4-7, 8-10 are rare high-priority continuity constraints, and confirmed does not automatically mean high importance. It also applies conservative fact-compression and uncertainty-status guards: candidates should distinguish explicit facts from hints, speculation, partial records, and possible links; summaries with markers such as possible, suspected, hinted, unclear, or possible link should usually avoid `confirmed` and prefer `unresolved`, `partially_revealed`, `introduced`, `active`, or `planned` when appropriate. Candidates should not rewrite disease names, dates, years, death timing, voting timing, investigation targets, organization actions, or causality. Every future `candidate_change` is explicitly required to include narrative `status` and integer `importance` in its payload. This does not migrate historical Graph data, automatically fix candidates or drafts, or change Context Pack selection / Hard Constraints extraction. Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, and Advanced Review & Merge remain unimplemented.
-
-The library page also includes a creator-focused Narrative View for the graph. It groups story assets into characters, events/scenes, foreshadowing, world rules, plot directions, relationship notes, relationships, and other records. Narrative View supports local keyword search plus filters for story asset type, importance, status, and layer; relationship cards remain label-first and creator-readable during filtering. Raw node/edge details remain available in Debug sections and the Raw / Technical View. Knowledge Draft review cards now summarize `create_node` and `create_edge` candidates in story terms first, while operation names and payload JSON stay available in collapsed Debug details. The Review panel defaults to the latest pending Knowledge Draft, falls back to the latest draft when none are pending, and does not change accept/reject semantics.
-
-The creation page includes a creator-focused Context Pack preview. It groups selected next-chapter context into characters, events/scenes, foreshadowing, world rules, plot directions, narrative relationships, and high-priority reminders. Raw Prompt / Debug remains available for inspection. Context Pack selection is unchanged, but prompt text now separates selected records into Hard Continuity Constraints, Confirmed Facts, and Background Context. Only selected `status=confirmed` records with `importance >= 8` become hard constraints; Graph writes, Story Delta, and Review & Merge behavior are unchanged. When the injected Context Pack `Chapter goal` explicitly asks for low-intensity pacing, emotional digestion, or no new settings / archives / file numbers / paper notes, chapter generation appends a Low-Intensity Chapter Constraints block. In that mode, existing files, records, photos, notes, textbooks, and evidence may be mentioned only as already-known context and must not be opened, inspected, decoded, quoted, or used to reveal new canon. This is prompt guidance only and does not change Context Pack selection, Story Delta, Review & Merge, or Graph writes. The chapter generation panel also shows whether the current generation will inject the previewed Context Pack, with selected node, relationship, and hard-constraint counts. After generation is saved, a lightweight consistency warning pass compares the prose with the injected Hard Continuity Constraints for explicit date, life/death, identity, and organization-affiliation conflicts. Warnings are non-blocking, do not rewrite prose, and are not a full Consistency Policy / Conflict Detection system.
-
-React opens to the Braipen home page by default. Clicking the logo mark or `Braipen` returns to the home page. The header workspace structure is:
-
-```text
-Braipen        创作 | 阅读 | 资料库 | 项目配置 | 系统设置        API Online
+# frontend/
+node --test scripts/test-writing-style.mjs scripts/test-writing-style-workflow.mjs
+npm run build
 ```
 
-The creation page is for project creation, onboarding, outline/character generation, Context Pack preview, optional context-assisted streaming chapter generation, manual Story Delta / Next Chapter Proposal analysis, Chapter Status review, non-blocking Workflow Guard warnings before generation, synchronous fallback generation, and generation status. The reading page is for chapter navigation, long-form reading, and TXT export. The library page now provides a Narrative Graph usability foundation plus Knowledge Draft review: manual nodes, edges, controlled tag registry, safe edit/delete flows, properties templates, local rule-based approximate browsing, an enhanced Entity Inspector, and single-change accept/reject for supported draft candidates. The project settings page separates read-only Genesis settings from editable Generation Settings for `model`, `max_tokens`, and `temperature`. The system settings page shows API status, the API base URL, generation status, and startup command references.
+For browser integration without external model calls, run `node scripts/writing-style-browser-server.mjs` from `frontend/`, open `http://127.0.0.1:5177/__writing-style-test`, and run the checks. It binds locally and handles every compute request in a mock; stop the process afterward.
 
-Current React support:
+Full backend discovery uses `python -m unittest discover -s tests -q`. Legacy filesystem API tests require `BRAIPEN_PUBLIC_MODE=0` only in the test process. Production stays in public mode. Current Windows validation covers all 478 backend tests in passing partitions, 196 frontend checks and 17 browser integration checks. Short deadline tests have shown timing instability in a single-process full run; report that separately from partition results.
 
-- Braipen home page as the default React entry
-- workspace navigation across creation, reading, library, project settings, and system settings
-- basic workspace project creation
-- project reading and chapter navigation
-- outline and character generation after creation
-- single-chapter streaming generation
-- live manuscript preview
-- generation status display
-- Narrative Graph usability foundation in the library page
-- manual create/edit/delete for nodes and edges
-- tag registry create/edit/delete with safe deletion checks
-- safe node deletion that refuses to silently drop connected edges
-- properties JSON templates for common node types
-- local rule-based approximate browsing across labels, aliases, tags, summaries, notes, properties, and neighbor context
-- enhanced Entity Inspector for selected nodes and edges
-- controlled `tags`, free-form `aliases`, and free-form `notes`
-- `importance` on a 1-10 scale and `layer` values of `core`, `major`, `detail`, or `background`
-- Context Pack Builder foundation in the creation page
-- Narrative Context Pack preview from the current Narrative Graph
-- local rule-based selection by chapter goal, importance, tags, unresolved foreshadowing, and one-hop graph neighbors
-- user controls for `min_importance`, `max_nodes`, `max_edges`, unresolved foreshadowing inclusion, and neighbor inclusion
-- optional context-assisted chapter generation, disabled by default
-- structured preview with selected nodes, selected edges, stats, warnings, and expandable prompt text
-- Story Delta + Next Chapter Proposal foundation in the creation page
-- manual post-generation second analysis pass after chapter prose is saved
-- pending-review Knowledge Draft candidate changes with `requires_review=true`
-- Knowledge Draft Review & Merge foundation in the library page
-- single candidate-change accept / reject
-- accepted `create_node` / `create_edge` changes write to the formal `narrative_graph.json`
-- rejected changes do not write the Narrative Graph
-- unsupported operations are displayed but cannot be accepted
-- Event Log foundation at `workspace/books/{book_id}/history/events.json`
-- Safety Snapshot foundation at `workspace/books/{book_id}/snapshots/`
-- read-only `GET /api/projects/{project_ref}/events` and `GET /api/projects/{project_ref}/snapshots`
-- safety snapshots before Knowledge Draft accept and Narrative Graph update/delete operations
-- AI Run Provenance foundation at `workspace/books/{book_id}/logs/ai_runs/`
-- read-only `GET /api/projects/{project_ref}/ai-runs` and `GET /api/projects/{project_ref}/ai-runs/{run_id}`
-- first-version AI run tracking for `chapter_generation` and `story_delta_analysis`
-- prompt profile records with `template_version`, `prompt_hash`, limited `prompt_preview`, model/config, context refs, and result refs
-- Chapter Status API and creation-page panel for per-chapter prose, Story Delta, Knowledge Draft, AI Run, and event status
-- non-blocking Workflow Guard foundation for `generate_chapter`
-- Context Pack freshness reports `unknown` when no reliable persisted freshness metadata exists
-- dry-run analysis mode for local testing without calling DeepSeek
-- read-only Genesis settings display in the project settings page
-- editable per-project Generation Settings for `model`, `max_tokens`, and `temperature`
-- current-chapter TXT export and full-book TXT export
+## Self-hosting boundaries
 
-The React "New novel project" button creates a `workspace/books/{book_id}/` project, saves the initial configuration and writing seed, refreshes the project list, and selects the new project. Creating a project does not call the model automatically. After creation, React guides the user to generate or update outline and character files, then generate the first chapter.
+Serve the built frontend with same-origin `/api/compute/*`. **`BRAIPEN_PUBLIC_MODE=1` is the default**: health, capabilities and compute routes are exposed; legacy shared project/settings routes and OpenAPI are blocked.
 
-## Streamlit Retirement
+- Keep one worker while admission and model concurrency limits remain process-local.
+- Custom execution requires administrator-configured `BRAIPEN_SELF_ADDRESSES`; retain DNS/IP pinning, destination checks and redirect restrictions.
+- Preserve streaming through the reverse proxy and disable request/response disk buffering and site request logs.
+- Update frontend and backend together for writing-style support. An older backend is explicitly rejected for style-dependent generation.
+- Validate a candidate release, retain rollback configuration, then switch versions. Real model calls need their own provider, budget and material scope.
 
-Streamlit is retired as a frontend and is no longer a regression target. `app.py` is kept only as a deprecated historical reference while the project is still consolidating code. New product work, UI work, and test plans should target React + FastAPI only.
+Legacy file mode is local-only: explicitly set `BRAIPEN_PUBLIC_MODE=0`, use `.env.example` and a private `.env`, and retain generated files under `workspace/books/{book_id}/`; older `outputs/` projects remain compatible. Do not expose that compatibility mode as a shared public service.
 
-`start.bat` no longer starts Streamlit; it prints a deprecation notice and redirects to `start-react.bat`.
+## Further validation
 
-Residual Streamlit-only capabilities have been triaged:
+Compare short style descriptions, style cards, fixed examples and retrieved examples using author-approved material, the same model and the same chapter task. Evaluate naturalness, character voices, imported plot facts and copying. Mock checks do not establish real writing-quality improvements or physical-phone usability.
 
-- covered by React + FastAPI: project creation, project list/detail, outline and character generation, specified chapter generation, streaming preview, synchronous fallback generation, generation status, chapter reading, TXT export, Narrative Graph, Context Pack, Story Delta, and per-project Generation Settings.
-- intentionally not migrated in this stage: Streamlit prompt preview, opening local output directories from the UI, full `.env` API Key write UI, setting expansion UI, edited-result save UI, and legacy Streamlit reader controls.
-- later React candidates: one-click next-chapter command as a dedicated button, batch chapter generation, system-level API Key/model connection testing, and broader draft merge tooling.
-
-Current React limits:
-
-- no React Router / URL deep links
-- no Three.js or React Three Fiber 3D hero animation
-- no GSAP timeline animation
-- no 2D/3D graph visualization
-- no React Flow graph editor
-- no vector search, embeddings, external search API, or AI semantic search
-- no default full-graph injection into chapter generation prompts
-- no vector or AI-based Context Pack selection
-- no automatic Narrative Graph updates from generated chapters
-- no foreshadowing conflict detection
-- no single-pass chapter prose plus metadata trailer output
-- no automatic character-card merge from Story Delta
-- no `update_node` / `update_edge`, character-card writes, batch accept/reject, duplicate resolution, conflict detection, or AI auto-review for Knowledge Drafts
-- no Prompt Editor or user-defined prompt UI
-- no saved complete prompt text in AI run records
-- no rollback / restore UI, snapshot diff view, automatic snapshot cleanup, or full Git-style branch system
-- no Timeline Review, Health Dashboard, Future Outline Revision, Consistency Policy, or hard workflow lock system
-- no precise Context Pack freshness calculation without persisted freshness metadata
-- no AI auto-extraction or AI auto-tagging for graph entities
-- no project deletion / rename / archive
-- no batch streaming generation
-- no cancellation API
-- no draft recovery for failed partial output
-- no full model or API Key settings migration beyond per-project `model`, `max_tokens`, and `temperature`
-- no maintained Streamlit frontend
-
-For frontend-specific notes, see `frontend/README.md`.
-
-## API / Model Configuration
-
-The default model is `deepseek-v4-flash`. The built-in model choices are:
-
-- `deepseek-v4-flash`
-- `deepseek-v4-pro`
-- `custom`
-
-React currently exposes safe per-project Generation Settings for `model`, `max_tokens`, and `temperature`. System-level API Key and model connection testing remain future React + FastAPI settings work.
-
-API Keys are stored only in the local `.env` file or environment variables. They are not written to `project_config.json`.
-
-## Project Structure
-
-```text
-novel-generator
-|-- api/
-|   |-- main.py
-|   |-- schemas.py
-|   `-- routers/
-|-- frontend/
-|   |-- package.json
-|   |-- index.html
-|   `-- src/
-|-- app.py  # deprecated Streamlit frontend, retained for historical reference
-|-- config.py
-|-- config_manager.py
-|-- deepseek_client.py
-|-- prompt_templates.py
-|-- file_manager.py
-|-- project_context.py
-|-- export_service.py
-|-- generation_config.py
-|-- ui_options.py
-|-- requirements.txt
-|-- README.md
-|-- README.en.md
-|-- .env.example
-|-- outputs/
-|   `-- .gitkeep
-|-- workspace/
-|   `-- books/
-`-- docs/
-    `-- prompt_design.md
-```
-
-## Storage Layout
-
-New projects are stored under stable book IDs:
-
-```text
-workspace/
-`-- books/
-    `-- bk_YYYYMMDD_HHMMSS_xxxxxxxx/
-        |-- book.json
-        |-- project_config.json
-        |-- novel_outline.md
-        |-- characters.md
-        |-- chapter_index.md
-        |-- setting_expansion_latest.json
-        |-- chapters/
-        |   `-- chapter_001.md
-        `-- summaries/
-            `-- chapter_001_summary.md
-```
-
-Legacy `outputs/{title}/` projects remain compatible. The app does not automatically migrate, delete, or rename old projects.
-
-## Chapter Creation Flow
-
-The official React creation page uses a focused single-chapter workflow:
-
-- **Specified chapter**: uses the chapter number entered by the user.
-- **Suggested next chapter**: React displays the recommended next chapter number; the user can generate that chapter through the same single-chapter controls.
-- **Streaming first**: streaming generation is the default path, with synchronous generation kept as a fallback/debug path.
-- **Context Pack optional**: Narrative Context Pack preview can be attached to generation only when the user enables it.
-- **Story Delta manual**: post-generation analysis is manually triggered after a chapter exists.
-
-Batch chapter generation is intentionally not migrated in this consolidation stage.
-
-## Writing Mode And Story Scale
-
-Writing mode describes narrative rhythm or style, such as cinematic long plot, slow-burn setup, or high-density plot progression.
-
-Story scale is inferred from expected chapter count:
-
-- 1-10 chapters: short novel
-- 11-40 chapters: medium novel
-- 41+ chapters: long novel
-
-Prompts use this inferred story scale instead of hard-coding every project as a long novel.
-
-## Current Development Status
-
-- New projects default to `workspace/books/{book_id}/`.
-- Legacy `outputs/{title}/` projects remain readable and writable.
-- `book:` and `legacy:` project refs are supported internally.
-- Reader view and TXT export continue to use the display title rather than exposing `book_id`.
-- The sidebar keeps common controls visible and moves environment/path/debug details into an advanced expander.
-- No database, multi-user system, or SaaS workflow is included.
-
-## Safety Notes
-
-- Do not commit `.env`.
-- Do not commit real `workspace/` data.
-- Do not commit real `outputs/` data.
-- Do not commit `reports/`.
-- `outputs/.gitkeep` is the only tracked placeholder under `outputs/`.
-- API Keys should stay local.
-
-## Roadmap
-
-- Volume planning.
-- More granular context budgeting.
-- More export formats.
-- Better consistency prompts for characters and world rules.
+[Frontend development](frontend/README.md) · [Prompt-design reference](docs/prompt_design.md) · [Project handover](HANDOVER.md)

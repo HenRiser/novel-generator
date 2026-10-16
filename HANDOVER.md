@@ -1,9 +1,11 @@
 # Braipen 项目交接文档
 
-> 更新时间：2026-10-16（Asia/Shanghai）。工作目录：`D:\vibecoding\novel-generator`。
+> 更新时间：2026-10-17（Asia/Shanghai）。工作目录：`D:\vibecoding\novel-generator`。
 > 面向接手的新对话：先核对 Git 状态和源码，再据此继续工作。本文记录现状与历史决策；与源码冲突时以源码为准，后续用户的新指令优先。
 
 ## 0. 接手前必须知道的现状
+
+- 2026-10-17 发布授权：用户已明确要求推送、部署文风功能，并更新 GitHub README。代码实现基线为 `09a198b`；本轮同步整理中文、英文和前端 README，纠正旧文件模式、Key加密和模型管理的过时描述。远端默认分支 `master` 是当前提交的祖先，将以快进方式更新并保留功能分支，不改写历史。发布前核实前端为 `77c4360`、后端为 `cd34cdf`，本轮需共同更新；实际结果以 `reports/style-release-2026-10-17/publication.json` 和报告核验，不从后续历史阶段的“未发布”描述推断线上状态。文风本地验收为196项前端、478项后端分组、17项浏览器集成通过，最终独立复审关闭三个P2；单进程短时限测试仍有时序波动，真实模型效果未验证。
 
 - 2026-10-16 文风功能本地实现：当前开发分支为 `codex/writing-style-memory`，基线 `77c4360`，按用户要求暂不推送或部署。文风卡支持手写/JSON与TXT/MD导入、项目正文提取及外部正文提取；模型分析最多20,000字符，仅生成待确认草稿。项目固定所选版本，单章可覆盖或禁用，连续生成冻结范例池，续写与中断草稿保存保留实际文风快照；标签检索最多3段、总计2,000字符。文风库复用现有IndexedDB，完整备份升级v4并读取v1–v3，文件夹同步兼容v3/v4，Key仍不进入备份。新计算操作 `extract_style_card` 与能力标识 `writing_style.version=1` 需要前后端共同发布；旧服务会明确阻止选卡生成，不静默忽略。此改动尚未影响生产网站。验证、独立审查和HTML报告放在被忽略的 `reports/writing-style-2026-10-16/`；效果测试仅用合成资料和模拟模型，不代表实际文风收益。
 
@@ -62,7 +64,7 @@ FastAPI /api/compute/*：临时计算，不持久化正式项目、Key或后台�
 - `frontend/src/localStore.ts`：数据库名 `braipen.local.v1`，**IndexedDB 版本为 4**；包含 `projects`、`imports`、`settings`、`cover_media` 四个 store。升级去除旧封面 prompt 字符串，不删除图片字节。
 - `frontend/src/localTypes.ts`：`LocalProject.schema_version = 2`。项目内有 config、assets、chapters、graph/views、任务与场景历史、知识草稿、事件、快照、运行记录和批次状态。
 - `updateProject` 在同一事务内检查项目 revision，并可同时检查连接 guard。回调必须同步；不可把 `await` 放进 IndexedDB mutation 回调。
-- 完整 JSON 备份版本为 3，兼容 v1/v2，包含独立编码的封面媒体字节。恢复副本会重映射项目、连接、图片版本、父版本和媒体标识；恢复的连接默认禁用，Key 不随备份恢复。**未完成的导入草稿位于 imports store，不包含在完整项目备份中**。
+- 完整 JSON 备份版本为 4，兼容 v1–v3，包含文风库及独立编码的封面媒体字节。恢复副本会重映射项目、连接、文风卡与来源、图片版本、父版本和媒体标识；恢复的连接默认禁用，Key 不随备份恢复。单卡格式为 `braipen-style-card` v1；项目保留所选卡与范例池快照，库更新需项目手动应用。**未完成的导入草稿位于 imports store，不包含在完整项目备份中**。
 - 浏览器存储属于 origin；更换域名、协议或端口会得到不同数据库。不能把“数据没了”直接归因于服务器。
 - `api.ts` 除健康检查外将原 API 样式业务调用转交 `localApi`；`computeClient`、`providerConnections` 另有实际 HTTP 请求，不要误以为所有请求都由 api.ts 单独发送。
 
