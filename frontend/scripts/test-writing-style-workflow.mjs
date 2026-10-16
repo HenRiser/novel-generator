@@ -35,7 +35,11 @@ function fixture() {
       return {};
     },
   });
-  return { ...f, workflow: exports, calls, support: value => { supported = value; }, setStream: handler => { streamHandler = handler; },
+  const api = {};
+  runInNewContext(ts.transpileModule(readFileSync(new URL('../src/localApi.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
+    exports: api, URL, require: name => name === './localStore' ? f.store : name === './localWorkflow' ? exports : name === './providerConnections' ? { ...provider, connectionConfigured: async () => true } : {},
+  });
+  return { ...f, workflow: exports, api, calls, support: value => { supported = value; }, setStream: handler => { streamHandler = handler; },
     async project() { const p = f.types.emptyProject('模拟作品'); p.assets = { outline: '大纲', characters: '人物卡', setting_expansion: '' }; await f.store.putProject(p); return p; },
     card: (name = '文风A') => f.style.createWritingStyle(name, `${name}规则`), request: { model: 'synthetic-model', temperature: .7, max_tokens: 4000 } };
 }
@@ -111,4 +115,31 @@ test('连续生成固定文风池，库内修订不影响后续章节', async ()
   assert.equal(saved.chapters[1].frozen_context.writing_style_context.card.rules, a.rules);
   assert.equal(saved.chapters[2].frozen_context.writing_style_context.card.rules, a.rules);
   assert.equal((await f.store.listWritingStyles())[0].revision, 2);
+});
+test('旧章首次续写中断后保存草稿，记录实际卡或显式禁用，再改项目默认也不漂移', async () => {
+  for (const choice of ['project', 'none']) {
+    const f = fixture(), p = await f.project(), a = f.card();
+    await f.store.selectProjectWritingStyle(p.project_ref, a);
+    await f.store.updateProject(p.project_ref, d => f.workflow.setChapter(d, 1, '旧章节正文'));
+    f.setStream(async (_op, input, _id, handlers) => { await handlers.onStarted({ writing_style_context: input.writing_style_context }); await handlers.onDelta('中断续写草稿'); throw new Error('断线'); });
+    const before = await f.store.getProject(p.project_ref), input = f.workflow.contextInput(before, 1, { ...f.request, writing_style: choice }, 'continue');
+    await assert.rejects(f.workflow.runOperation(before, 'continue_chapter', input, { stream: true }));
+    const interrupted = await f.store.getProject(p.project_ref); await f.workflow.resolveLocalRun(p.project_ref, interrupted.runs[0].run_id, true);
+    await f.store.selectProjectWritingStyle(p.project_ref, f.card('后来默认'));
+    const saved = await f.store.getProject(p.project_ref), next = f.workflow.contextInput(saved, 1, {}, 'continue').writing_style_context;
+    assert.match(saved.chapters[1].content, /中断续写草稿/);
+    if (choice === 'none') assert.equal(next, null); else assert.equal(next.card.id, a.id);
+  }
+});
+test('实际就绪判断支持项目卡和单章覆盖，none仍检查旧style，大纲要求独立', async () => {
+  const f = fixture(), p = await f.project();
+  for (const k of ['protagonist', 'supporting_characters', 'worldview', 'core_conflict', 'genre', 'word_count_range']) p.config[k] = '已填写';
+  p.config.style = ''; p.writing_style = f.card();
+  assert.equal((await f.api.readiness(p, 1)).ready, true);
+  assert.equal((await f.api.readiness(p, 1, 'none')).ready, false);
+  delete p.writing_style;
+  assert.equal((await f.api.readiness(p, 1, 'selected')).ready, true);
+  assert.equal((await f.api.readiness(p, 1)).ready, false);
+  p.assets.outline = ''; const assets = await f.api.readiness(p, 1, 'selected');
+  assert.equal(assets.ready, false); assert.equal(assets.can_generate_assets, false); assert.ok(assets.blockers.some(b => b.code === 'assets_style_missing'));
 });

@@ -19,7 +19,7 @@ export function prepareCompute(operation: string, input: Record<string, unknown>
   if (lease) {
     if(operation!=='list_models'&&!lease.snapshot.model)throw new Error('请选择或输入模型ID。');
     const structured = ['expand_setting','story_delta','import_chapter','import_synthesis','plan_chapter','extract_style_card'].includes(operation) || (operation === 'summarize_chapter' && input.review_scope === 'semantic_and_rules');
-    if (structured && lease.snapshot.policy.structured === 'unsupported') throw new Error('此模型尚未启用结构化输出，请在连接能力设置中选择模式。');
+    if (structured && lease.snapshot.policy.structured === 'unsupported') throw new Error(operation === 'extract_style_card' ? '当前文本模型连接无法完成文风提取，请选择其他可用连接，或直接手动编辑文风卡。' : '此模型尚未启用结构化输出，请在连接能力设置中选择模式。');
     lease.signal.throwIfAborted();
   }
   const body = JSON.stringify({ ...identity, ...(lease ? {protocol_version:2,connection:lease.snapshot} : {}), credentials: lease ? {api_key:lease.apiKey} : {}, input });

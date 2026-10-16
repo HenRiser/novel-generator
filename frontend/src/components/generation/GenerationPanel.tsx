@@ -41,7 +41,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
   const [mode, setMode] = useState<"single" | "batch">("single");
   const [endChapter, setEndChapter] = useState(chapterNumber + 2);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
-  const readiness = useGenerationReadiness(selectedProjectRef, chapterNumber, apiStatus);
+  const readiness = useGenerationReadiness(selectedProjectRef, chapterNumber, apiStatus, typeof writingStyle === 'string' ? writingStyle : 'selected');
   const controllerRef = useRef<AbortController | null>(null);
   const contextSequence = useRef(0);
   const batchActive = batchStatus?.status === "running" || batchStatus?.status === "stopping";

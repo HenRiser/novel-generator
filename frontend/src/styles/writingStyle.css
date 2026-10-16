@@ -7,4 +7,6 @@
 @media (max-width: 600px) {
   .writing-style-library .ant-btn { min-height: 44px; height: auto; white-space: normal; }
   .writing-style-library .ant-select { max-width: 100%; }
+  .writing-style-library .style-file-input input { min-height: 44px; }
+  .writing-style-library .ant-segmented-item-label { min-height: 44px; display: flex; align-items: center; }
 }

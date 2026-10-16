@@ -25,7 +25,7 @@ export default function WritingStyleExtraction({ projectRef, onDraft, onBusyChan
       if (active) { setProject(p); setProfiles(list); setConnection(String(p?.config.connection_id || defaultId)); }
     }, reason => { if (active) setError(reason instanceof Error ? reason.message : '无法读取正文或模型连接。'); });
     return () => { active = false; epoch.current++; controller.current?.abort(); onBusyChange(false); };
-  }, [projectRef]);
+  }, [projectRef, onBusyChange]);
   const chapters = Object.values(project?.chapters || {}).filter(c => includeDrafts || c.workflow.status === 'confirmed').sort((a, b) => a.chapter_number - b.chapter_number);
   function chooseChapters(numbers: number[]) {
     setSelected(numbers); setText(numbers.map(n => project?.chapters[n]?.content || '').join('\n\n'));

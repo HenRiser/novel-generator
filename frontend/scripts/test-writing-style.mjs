@@ -29,6 +29,17 @@ test('无范例可用，生成上下文为深拷贝且不能跨卡取例', () =>
   assert.equal(ctx.examples.length, 0); assert.equal(ctx.card.rules.includes('已修改'), false);
 });
 test('中文补充平面字符按真实字符计数', () => { assert.equal(s.styleCharacters('𠮷好'), 2); });
+test('来源类型和线上的卡字段严格匹配，数组不能伪装来源类型', () => {
+  assert.throws(() => s.validateWritingStyle({ ...card(), source: { kind: ['manual'], label: '无效来源' } }));
+  const ctx = s.writingStyleContext(card()); ctx.card.examples = [];
+  assert.throws(() => s.validateStyleContext(ctx));
+});
+test('真实规划的英文场景标识与强度可匹配中文范例标签，再按人称与节奏排序', () => {
+  const a = card(); a.rules = '第三人称叙述。';
+  a.examples = [{ ...example('a', '错误人称', ['对话']), pov: '第一人称', pace: '低' }, { ...example('b', '错误节奏', ['对话']), pov: '第三人称', pace: '高' }, { ...example('c', '合适例子', ['对话']), pov: '第三人称', pace: '低' }, example('d', '无关动作', ['动作'])];
+  const result = s.writingStyleContext(a, { primary_function: 'relationship_progress', intensity: 'low' }, { scenes: [{ scene_function: 'relationship dialogue' }] });
+  assert.deepEqual(Array.from(result.examples, e => e.id), ['c', 'b', 'a']);
+});
 
 test('本地卡修订和项目快照独立，删除库卡不删除项目', async () => {
   const f = memoryStyleStore(), p = f.types.emptyProject('作品A'), q = f.types.emptyProject('作品B');

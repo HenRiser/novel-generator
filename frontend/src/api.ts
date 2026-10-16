@@ -513,8 +513,9 @@ export function getChapterWorkflow(projectRef: string, chapterNumber: number, si
   return apiFetch<ChapterWorkflow>(`/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/workflow`, { signal });
 }
 
-export function getGenerationReadiness(projectRef: string, chapterNumber: number, signal?: AbortSignal): Promise<GenerationReadiness> {
-  return apiFetch<GenerationReadiness>(`/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generation-readiness`, { signal });
+export function getGenerationReadiness(projectRef: string, chapterNumber: number, signal?: AbortSignal, writingStyle: 'project' | 'none' | 'selected' = 'project'): Promise<GenerationReadiness> {
+  const query = writingStyle === 'project' ? '' : `?writing_style=${writingStyle}`;
+  return apiFetch<GenerationReadiness>(`/api/projects/${projectPath(projectRef)}/chapters/${chapterNumber}/generation-readiness${query}`, { signal });
 }
 
 export function confirmChapter(projectRef: string, chapterNumber: number, content: string, expectedRevision: string, signal?: AbortSignal): Promise<ChapterWorkflow> {

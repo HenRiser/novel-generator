@@ -12,7 +12,7 @@ const fields = (v: Record<string, unknown>, allowed: string[]) => Object.keys(v)
 const id = (v: unknown): v is string => typeof v === 'string' && /^[\w:-]{1,200}$/.test(v);
 
 export function validateStyleSource(v: unknown): asserts v is StyleSource {
-  if (!object(v) || !fields(v, ['kind', 'label', 'project_ref', 'chapter_numbers']) || !['manual', 'project', 'import'].includes(String(v.kind)) || !text(v.label, 300, true)
+  if (!object(v) || !fields(v, ['kind', 'label', 'project_ref', 'chapter_numbers']) || typeof v.kind !== 'string' || !['manual', 'project', 'import'].includes(v.kind) || !text(v.label, 300, true)
     || (v.project_ref !== undefined && !text(v.project_ref, 200, true)) || (v.chapter_numbers !== undefined && (!Array.isArray(v.chapter_numbers) || v.chapter_numbers.length > 2000 || v.chapter_numbers.some(n => !Number.isSafeInteger(n) || Number(n) < 1)))) throw new Error('文风来源无效，请填写来源名称并检查所选章节。');
 }
 export function validateStyleExample(v: unknown): asserts v is StyleExample {
@@ -29,7 +29,7 @@ export function validateWritingStyle(v: unknown): asserts v is WritingStyleCard 
   for (const example of v.examples) { validateStyleExample(example); if (ids.has(example.id)) throw new Error('文风卡包含重复的范例标识。'); ids.add(example.id); }
 }
 export function validateStyleContext(v: unknown): asserts v is WritingStyleContext {
-  if (!object(v) || !fields(v, ['version', 'card', 'examples']) || v.version !== 1 || !object(v.card) || !Array.isArray(v.examples) || v.examples.length > STYLE_LIMITS.selectedExamples) throw new Error('生成使用的文风上下文无效。');
+  if (!object(v) || !fields(v, ['version', 'card', 'examples']) || v.version !== 1 || !object(v.card) || !fields(v.card, ['id', 'revision', 'name', 'rules', 'source']) || !Array.isArray(v.examples) || v.examples.length > STYLE_LIMITS.selectedExamples) throw new Error('生成使用的文风上下文无效。');
   validateWritingStyle({ ...v.card, version: 1, examples: v.examples, updated_at: new Date(0).toISOString() });
   if (v.examples.reduce((n, e) => n + styleCharacters((e as StyleExample).text), 0) > STYLE_LIMITS.selectedCharacters) throw new Error('生成范例总量不得超过 2,000 字符。');
 }
@@ -53,8 +53,13 @@ export function writingStyleContext(card: WritingStyleCard, task?: unknown, plan
   validateWritingStyle(card);
   const t = object(task) ? task : {}, p = object(plan) ? plan : {};
   const sceneTags = [t.primary_function, ...(Array.isArray(t.allowed_scene_types) ? t.allowed_scene_types : []), ...(Array.isArray(p.scenes) ? p.scenes.flatMap(s => object(s) ? [s.scene_function] : []) : [])].filter(v => typeof v === 'string').map(v => (v as string).trim().toLocaleLowerCase());
+  // The approved planning vocabulary contains English function IDs; examples use author-facing labels.
+  const aliases: Array<[string, RegExp]> = [['对话', /dialogue|conversation|对话|交谈/], ['谈判', /negotiat|谈判/], ['动作', /action|combat|fight|动作|战斗|打斗/], ['日常', /daily|everyday|日常|生活/], ['心理', /emotional|internal|心理|内心|情绪/], ['关系', /relationship|关系/], ['悬疑', /suspense|悬疑|悬念/], ['过渡', /transition|过渡/], ['伏笔', /foreshadow|伏笔/], ['环境', /environment|scenery|环境|景物/], ['反转', /reversal|反转/]];
+  for (const [label, pattern] of aliases) if (sceneTags.some(tag => pattern.test(tag))) sceneTags.push(label);
   const matches = (tag: string, values: string[]) => Boolean(tag.trim()) && values.some(value => value === tag.trim().toLocaleLowerCase() || value.includes(tag.trim().toLocaleLowerCase()));
-  const pov = String(t.pov || t.narrative_pov || ''), pace = String(t.intensity || t.pace || '');
+  const first = /第一人称|first.person/i.test(card.rules), third = /第三人称|third.person/i.test(card.rules);
+  const pov = String(t.pov || t.narrative_pov || (first !== third ? first ? '第一人称' : '第三人称' : ''));
+  const pace = String(t.intensity || t.pace || '').replace(/^(low|slow|舒缓)$/i, '低').replace(/^(medium|适中)$/i, '中').replace(/^(high|fast|紧凑)$/i, '高');
   const ranked = card.examples.map(example => ({ example, score: [Number(example.scene_tags.some(tag => matches(tag, sceneTags))), Number(matches(example.pov, [pov.toLowerCase()])), Number(matches(example.pace, [pace.toLowerCase()]))] }));
   ranked.sort((a, b) => b.score[0] - a.score[0] || b.score[1] - a.score[1] || b.score[2] - a.score[2] || (a.example.id < b.example.id ? -1 : a.example.id > b.example.id ? 1 : 0));
   const examples: StyleExample[] = []; let characters = 0;

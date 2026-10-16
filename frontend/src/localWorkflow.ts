@@ -387,6 +387,7 @@ export async function resolveLocalRun(ref: string, id: string, saveDraft = false
         if (run.operation === 'generate_chapter') draft.chapters[n].frozen_context = (run.result?.frozen_context || run.frozen_context || { chapter_task: run.input.chapter_task, scene_plan: run.input.scene_plan,
           narrative_context_text: (run.input.request as Record<string, unknown>)?.narrative_context_text || '' }) as Record<string, unknown>;
         if (run.operation === 'generate_chapter') draft.chapters[n].frozen_context = frozenWritingStyle(run.input, draft.chapters[n].frozen_context);
+        if (run.operation === 'continue_chapter' && Object.prototype.hasOwnProperty.call(run.input, 'writing_style_context')) draft.chapters[n].frozen_context = { ...draft.chapters[n].frozen_context, writing_style_context: structuredClone(run.input.writing_style_context) };
         draft.chapters[n].connection = run.connection;
         draft.chapters[n].workflow.review_scope = 'semantic_and_rules';
       }

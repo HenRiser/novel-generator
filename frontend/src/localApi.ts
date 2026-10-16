@@ -13,12 +13,15 @@ const success = (p: LocalProject) => ({ ok: true, project_ref: p.project_ref, me
 const planResponse = (p: LocalProject, n: number) => p.chapter_tasks[n] || { ...success(p), chapter_number: n, task: null, approved: null, latest_draft: null, history: [] };
 const sceneResponse = (p: LocalProject, n: number) => p.scene_plans[n] || { ...success(p), chapter_number: n, plan: null, approved: null, latest_draft: null, history: [], current_approved_chapter_task: p.chapter_tasks[n]?.approved || null };
 
-export async function readiness(p: LocalProject, n: number): Promise<GenerationReadiness> {
+export async function readiness(p: LocalProject, n: number, writingStyle: 'project' | 'none' | 'selected' = 'project'): Promise<GenerationReadiness> {
   const blockers: GenerationReadiness['blockers'] = [];
   const fields = ['title', 'protagonist', 'supporting_characters', 'worldview', 'core_conflict', 'genre', 'style', 'word_count_range'];
-  if (fields.some(k => !String(p.config[k] || '').trim())) blockers.push({ code: 'project_settings_missing', message: '请补全小说设定。', action: 'project_settings' });
+  const selectedStyle = writingStyle === 'selected' || (writingStyle === 'project' && Boolean(p.writing_style));
+  const missing = (k: string) => !String(p.config[k] || '').trim();
+  if (fields.some(k => !(k === 'style' && selectedStyle) && missing(k))) blockers.push({ code: 'project_settings_missing', message: '请补全小说设定。', action: 'project_settings' });
   if (!await connectionConfigured(String(p.config.connection_id || 'legacy-deepseek')).catch(() => false)) blockers.push({ code: 'model_key_missing', message: '请在模型连接中保存 API Key；旧版加密 Key 需先迁移。', action: 'model_settings' });
-  const can_generate_assets = blockers.length === 0;
+  const can_generate_assets = blockers.length === 0 && !fields.some(missing);
+  if ((!p.assets.outline || !p.assets.characters) && selectedStyle && missing('style')) blockers.push({ code: 'assets_style_missing', message: '生成大纲和人物卡前，请填写创作设定中的“风格”短描述；文风卡用于正文表达。', action: 'project_settings' });
   if (!p.assets.outline || !p.assets.characters) blockers.push({ code: 'assets_missing', message: '请先生成大纲与人物卡。', action: 'generate_assets' });
   for (const c of Object.values(p.chapters)) if (c.chapter_number < n && (c.workflow.status !== 'confirmed' || c.workflow.summary_status !== 'ready')) {
     blockers.push({ code: 'previous_chapter_not_ready', message: `第 ${c.chapter_number} 章需要确认正文并完成摘要。`, chapter_number: c.chapter_number, action: c.workflow.status !== 'confirmed' ? 'confirm_chapter' : 'retry_summary' });
@@ -163,7 +166,7 @@ export async function localRequest(path: string, init: RequestInit = {}): Promis
     if (parts.length === 4) return Object.values(p.chapters).sort((a,b) => a.chapter_number-b.chapter_number)
       .map(c => ({ chapter_number: c.chapter_number, title: c.title, filename: c.filename, is_version: false, version: c.versions.length+1, display_label: c.title }));
     const n = Number(parts[4]); const action = parts[5]; const c = p.chapters[n];
-    if (action === 'generation-readiness') return readiness(p,n);
+    if (action === 'generation-readiness') { const selection = url.searchParams.get('writing_style'); return readiness(p,n,selection === 'none' || selection === 'selected' ? selection : 'project'); }
     if (action === 'generate') return generateLocalChapter(ref,n,body as unknown as GenerationRequest,{},init.signal || undefined);
     if (action === 'status') return { ...success(p), chapter_status: chapterStatus(p,n) };
     if (action === 'function-review') return { ...success(p), chapter_number: n, latest: (p.reviews[n] || []).slice(-1)[0] || null, history: p.reviews[n] || [] };

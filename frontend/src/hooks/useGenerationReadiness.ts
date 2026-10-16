@@ -3,7 +3,7 @@ import { getGenerationReadiness } from "../api";
 import type { ApiStatus, GenerationReadiness } from "../types";
 
 /** A read-only preflight; submission remains guarded by the server. */
-export function useGenerationReadiness(projectRef: string | null, chapterNumber: number, apiStatus: ApiStatus) {
+export function useGenerationReadiness(projectRef: string | null, chapterNumber: number, apiStatus: ApiStatus, writingStyle: 'project' | 'none' | 'selected' = 'project') {
   const [value, setValue] = useState<GenerationReadiness | null>(null);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -18,7 +18,7 @@ export function useGenerationReadiness(projectRef: string | null, chapterNumber:
     const check = async () => {
       let delay = 5000;
       try {
-        const response = await getGenerationReadiness(projectRef, chapterNumber, controller.signal);
+        const response = await getGenerationReadiness(projectRef, chapterNumber, controller.signal, writingStyle);
         if (cancelled) return;
         setValue(response); setError("");
         if (!response.ready) delay = 1800;
@@ -32,7 +32,7 @@ export function useGenerationReadiness(projectRef: string | null, chapterNumber:
     };
     void check();
     return () => { cancelled = true; controller.abort(); window.clearTimeout(timer); };
-  }, [projectRef, chapterNumber, apiStatus, revision]);
+  }, [projectRef, chapterNumber, apiStatus, revision, writingStyle]);
 
   useEffect(() => {
     window.addEventListener("braipen:workflow-changed", refresh);

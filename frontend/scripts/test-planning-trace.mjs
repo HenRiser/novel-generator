@@ -3,12 +3,14 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { loadStyleModule } from './writing-style-test-helpers.mjs';
 
 function load(name, dependencies = {}) {
   const source = readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
   runInNewContext(outputText, { exports, structuredClone, require: key => {
+    if (key === './writingStyle') return loadStyleModule();
     assert.ok(key in dependencies, `Unexpected import ${key}`); return dependencies[key];
   } });
   return exports;
