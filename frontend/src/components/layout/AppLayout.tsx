@@ -7,6 +7,7 @@ import LocalTasksPanel from "../LocalTasksPanel";
 import PageBoundary from "./PageBoundary";
 import { useBatchGeneration } from "../../hooks/useBatchGeneration";
 import { AppearancePicker } from "../AppearanceProvider";
+import WorkspaceNotice from "../WorkspaceNotice";
 
 const NAV_ITEMS = [
   { path: "/dashboard", icon: <AppstoreOutlined />, label: "创作概览", number: "01" },
@@ -59,6 +60,7 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
     <aside className="app-sidebar">{navigation}</aside>
     <Drawer className="mobile-nav" placement="left" open={menuOpen} onClose={() => setMenuOpen(false)} styles={{ body: { padding: 20 }, wrapper: { width: 260 } }} title="工作空间">{navigation}</Drawer>
     <div className="app-main">
+      <WorkspaceNotice />
       <header className={`app-header${location.pathname === "/writing" && selectedProjectRef ? " app-header-studio" : ""}`}>
         <div className="header-location"><Button className="mobile-menu-button" type="text" icon={<MenuOutlined />} aria-label="打开导航" onClick={() => setMenuOpen(true)} /><span className="header-section">工作空间</span><span className="header-slash">/</span>{location.pathname === "/writing" && selectedProjectRef ? <h1>{title}</h1> : <strong>{title}</strong>}</div>
         <div className="header-tools">
@@ -76,7 +78,7 @@ export default function AppLayout({ onReplayIntro }: { onReplayIntro: () => void
         <div className="about-principle"><b>01 / 先表达意图</b><p>用创作种子建立大纲与角色，再用章节任务和场景计划明确这一章要推进什么。</p></div>
         <div className="about-principle"><b>02 / 让上下文可见</b><p>把角色、场景、伏笔与关系组织进叙事图谱，为章节生成提供可选择的叙事素材。</p></div>
         <div className="about-principle"><b>03 / 把判断留给人</b><p>模型提出故事变化与知识候选，由作者审核后沉淀到图谱。章节规则检查提供线索，最终判断仍由作者完成。</p></div>
-        <p className="about-caption">当前实现采用浏览器本地数据与无状态计算，支持流式生成、章节版本、任务审批与知识审核。它是一份可继续演进的工程作品。</p>
+        <p className="about-caption">当前实现采用本机工作区文件与请求内计算，支持流式生成、章节版本、任务审批与知识审核。它是一份可继续演进的工程作品。</p>
         <Space><Button onClick={() => { setAboutOpen(false); onReplayIntro(); }} icon={<PlayCircleOutlined />}>观看开场</Button><Button type="primary" onClick={() => setAboutOpen(false)}>回到创作</Button></Space>
       </div>
     </Drawer>

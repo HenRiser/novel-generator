@@ -1,7 +1,6 @@
 import { lazy, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useApiHealth, useProjects } from "./hooks/useProjectData";
-import WorkspaceNotice from './components/WorkspaceNotice';
 import IntroAnimation from "./components/intro/IntroAnimation";
 import AppLayout from "./components/layout/AppLayout";
 import DashboardPage from "./pages/DashboardPage";
@@ -31,7 +30,6 @@ export default function App() {
     <>
       {!introDone && <IntroAnimation onFinish={finishIntro} />}
       <div key={workspaceEpoch} inert={!introDone}>
-      <WorkspaceNotice />
       <Routes>
         <Route element={<AppLayout onReplayIntro={() => setIntroDone(false)} />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
