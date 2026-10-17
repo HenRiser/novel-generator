@@ -19,7 +19,7 @@ const editingDrafts = {
  * 设定资产面板：展示项目大纲（novel_outline.md）与人物卡（characters.md）。
  * 生成后即可在此查看，无需打开文件。
  */
-export default function AssetsPanel() {
+export default function AssetsPanel({ onPrepareAssets }: { onPrepareAssets: () => void }) {
   const { selectedProjectRef, selectedProject, apiStatus } = useAppStore();
   const [outline, setOutline] = useState<string>("");
   const [characters, setCharacters] = useState<string>("");
@@ -106,7 +106,7 @@ export default function AssetsPanel() {
   }
   if (!currentProject) return <Spin aria-label="正在读取故事设定" />;
 
-  const renderMarkdownish = (content: string) => (
+  const renderMarkdownish = (content: string, name: string) => (
     <div
       style={{
         whiteSpace: "pre-wrap",
@@ -117,7 +117,9 @@ export default function AssetsPanel() {
         overflowY: "auto",
       }}
     >
-      {content || <Empty description="尚未生成，请在生成面板中先生成大纲与人物卡。" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+      {content || <Empty description={`还没有${name}。下一步，根据已保存的创作设定生成大纲与人物卡。`} image={Empty.PRESENTED_IMAGE_SIMPLE}>
+        <Button type="primary" onClick={onPrepareAssets}>前往生成大纲与人物卡</Button>
+      </Empty>}
     </div>
   );
 
@@ -131,6 +133,7 @@ export default function AssetsPanel() {
       ) : (
         <Tabs
           size="small"
+          defaultActiveKey={outline ? "outline" : characters ? "characters" : "setting"}
           items={[
             { key: 'setting', label: '创作设定', children: <Space orientation="vertical" style={{ width: '100%' }}>
               <Typography.Text type="secondary">用白话设想生成空缺，或勾选要重新生成的项目。只替换所选内容，其他手写内容保留；生成会使用当前模型连接，可能计费。</Typography.Text>
@@ -144,31 +147,17 @@ export default function AssetsPanel() {
                 </Space>
                 <Input.TextArea id={`story-setting-${key}`} aria-label={label} value={setting[key] || ''} disabled={saving} onChange={event => { const values = { ...setting, [key]: event.target.value }; setSetting(values); rememberDraft(values); }} autoSize={{ minRows: 2, maxRows: 8 }} />
               </div>)}
-              <Space wrap><Button disabled={saving} onClick={() => void saveSetting(false)}>保存设定</Button><Button type="primary" loading={saving} disabled={saving || !selectedFields.length || apiStatus !== 'online' || !(setting.raw_story_idea || '').trim()} onClick={() => void saveSetting(true)}>生成所选设定 · 调用模型</Button>{saving && <Button onClick={() => controller.current?.abort()}>中断</Button>}</Space>
+              <Space wrap><Button disabled={saving} onClick={() => void saveSetting(false)}>保存设定</Button><Button type="primary" loading={saving} disabled={saving || !selectedFields.length || apiStatus !== 'online' || !(setting.raw_story_idea || '').trim()} onClick={() => void saveSetting(true)}>生成所选设定 · 调用模型</Button>{saving && <Button onClick={() => controller.current?.abort()}>中断</Button>}<Button disabled={saving} onClick={onPrepareAssets}>下一步：准备大纲与人物卡</Button></Space>
             </Space> },
             {
               key: "outline",
-              label: (
-                <span>
-                  小说大纲
-                  <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-                    novel_outline.md
-                  </Typography.Text>
-                </span>
-              ),
-              children: renderMarkdownish(outline),
+              label: "小说大纲",
+              children: renderMarkdownish(outline, "小说大纲"),
             },
             {
               key: "characters",
-              label: (
-                <span>
-                  人物卡
-                  <Typography.Text type="secondary" style={{ fontSize: 11, marginLeft: 6 }}>
-                    characters.md
-                  </Typography.Text>
-                </span>
-              ),
-              children: renderMarkdownish(characters),
+              label: "人物卡",
+              children: renderMarkdownish(characters, "人物卡"),
             },
             { key: 'writing-style', label: '文风卡', children: <ProjectWritingStyle key={selectedProjectRef} projectRef={selectedProjectRef} /> },
           ]}

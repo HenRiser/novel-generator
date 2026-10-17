@@ -26,6 +26,10 @@
 .generation-intro { padding:10px 0 5px; }
 .generation-intro h2 { margin:18px 0 14px; color:var(--ink); font:500 clamp(24px,2.4vw,34px)/1.5 var(--serif); }
 .generation-intro p { color:var(--muted); font-size:13px; line-height:1.9; max-width:490px; }
+.generation-preparation { padding:18px; border:1px solid var(--border); background:var(--surface-soft); border-radius:3px; scroll-margin-top:24px; }
+.generation-preparation h3 { margin:0 0 10px; font-size:17px; font-weight:500; }
+.generation-preparation p { margin:10px 0; font-size:13px; line-height:1.9; }
+.generation-preparation:focus-visible { outline:2px solid var(--accent); outline-offset:4px; }
 .generation-action-row { display:flex; flex-wrap:wrap; align-items:flex-end; gap:12px; padding-bottom:5px; }
 .field-label { display:flex; flex-direction:column; gap:9px; color:var(--muted); font-size:12px; }
 .generation-action-row > .field-label { width:100px; }

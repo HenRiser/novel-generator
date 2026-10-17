@@ -91,9 +91,9 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
     const controller = new AbortController(); controllerRef.current = controller;
     setOutlineGenerating(true); setBusy({ outlineGenerating: true }); setError(""); setNotice("");
     try {
-      const response = await generateOutlineCharacters(selectedProjectRef, settings, controller.signal);
+      await generateOutlineCharacters(selectedProjectRef, settings, controller.signal);
       if (controllerRef.current !== controller || controller.signal.aborted) return;
-      setNotice(response.message || "大纲与人物卡已保存，可在「故事设定」查看。"); readiness.refresh(); onAssetsGenerated();
+      setNotice("大纲与人物卡已生成，可在「故事设定」查看。"); readiness.refresh(); onAssetsGenerated();
     } catch (e) {
       if (controllerRef.current === controller && !controller.signal.aborted) setError(e instanceof Error ? e.message : "设定生成失败。");
     } finally {
@@ -183,6 +183,12 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
 
   return <div className="generation-workspace"><ConnectionPicker projectRef={selectedProjectRef} onChanged={async()=>{if(selectedProjectRef)useAppStore.getState().setSelectedProject(await getProject(selectedProjectRef));}}/>
     <div className="generation-intro"><span className="eyebrow">CO-WRITE WITH AI</span><h2>你定方向，模型落笔。</h2><p>先准备故事设定，再让已确认的章节规划与叙事知识参与创作。</p></div>
+    <section id="generation-assets" className="generation-preparation" aria-labelledby="generation-assets-title" tabIndex={-1}>
+      <h3 id="generation-assets-title">第一步：准备大纲与人物卡</h3>
+      <p>根据已保存的创作设定，先生成小说大纲与人物卡，再开始章节正文。已有资料会保留，只补齐缺少的内容。</p>
+      <Button type={readiness.value?.ready ? "default" : "primary"} size="large" onClick={() => void handleGenerateOutline()} loading={outlineGenerating} disabled={!canGenerate || !readiness.value?.can_generate_assets}>生成大纲与人物卡 <ArrowRightOutlined /></Button>
+      <p className="muted-note">点击生成会调用当前模型连接；完成后自动返回“故事设定”查看结果。</p>
+    </section>
     <Segmented aria-label="生成模式" value={mode} onChange={(value) => setMode(value as "single" | "batch")} options={[{ label: "单章确认", value: "single" }, { label: "连续生成", value: "batch" }]} disabled={busy} />
     <p className="generation-mode-hint">{mode === "single" ? "正文生成后先由你确认；修改后的正文将在后台生成摘要并接受检查。" : "自动逐章生成并完成摘要，每次最多 10 章。开始下一章后，此前正文持续锁定，不再允许修改。"}</p>
     <div className="generation-action-row">
@@ -191,7 +197,6 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
       {mode === "single" ? <Button type="primary" size="large" icon={<ThunderboltOutlined />} onClick={() => void handleGenerateChapter()} loading={status === "streaming"} disabled={!canGenerate || plansLoading || Boolean(plansError) || !readiness.value?.ready}>{status === "streaming" ? "正在写作" : "生成这一章"}</Button> : <Button type="primary" size="large" icon={<ThunderboltOutlined />} onClick={() => void runBatch()} loading={batchSubmitting && !batchActive} disabled={!canGenerate || !readiness.value?.ready || chapterNumber !== nextChapter || endChapter < chapterNumber || endChapter > chapterNumber + 9}>开始连续生成</Button>}
       {(outlineGenerating || status === "streaming") && <Button onClick={stop}>停止接收</Button>}
       {batchActive && <Button onClick={() => void stopBatch()} loading={batchSubmitting} disabled={batchStatus?.status === "stopping"}>{batchStatus?.status === "stopping" ? "完成当前章后停止" : "当前章完成后停止"}</Button>}
-      <Button type="text" onClick={() => void handleGenerateOutline()} loading={outlineGenerating} disabled={!canGenerate || !readiness.value?.can_generate_assets}>生成大纲与人物卡 <ArrowRightOutlined /></Button>
     </div>
     {mode === "batch" && !batchActive && chapterNumber !== nextChapter && <Alert type="info" showIcon message={`连续生成须从最新章节之后开始，当前应为第 ${nextChapter} 章。`} action={<Button size="small" onClick={() => onTargetChapterChange(nextChapter)}>使用第 {nextChapter} 章</Button>} />}
     {batchStatus && batchStatus.status !== "idle" && <div className="batch-progress" aria-live="polite"><div className="batch-progress-heading"><strong>第 {batchStatus.start_chapter} — {batchStatus.end_chapter} 章</strong><Tag color={batchStatus.status === "failed" ? "error" : batchActive ? "processing" : "success"}>{({ idle: "未开始", running: "连续生成中", stopping: "正在完成当前章", completed: "已全部完成", stopped: "已停止", failed: "已中断" })[batchStatus.status]}</Tag></div><Progress percent={Math.round(batchStatus.completed_chapters.length / Math.max(1, batchStatus.end_chapter - batchStatus.start_chapter + 1) * 100)} status={batchStatus.status === "failed" ? "exception" : batchActive ? "active" : "normal"} /><p>{batchStatus.message || (batchStatus.current_chapter ? `正在处理第 ${batchStatus.current_chapter} 章` : "后台任务已结束")}</p><small>已完成 {batchStatus.completed_chapters.length} 章。可随时到章节目录阅读已保存正文。</small>{batchStatus.error && <Alert type="error" showIcon message={batchStatus.error} />}</div>}
@@ -202,7 +207,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
       description={blocker.action === "project_settings" ? "在「故事设定 → 创作设定」手动填写，或点击某项旁的「用白话生成」；也可以勾选多项，一起生成。" : undefined}
       action={blocker.action === "confirm_chapter" || blocker.action === "retry_summary" || blocker.action === "read_chapter"
         ? <Link to={`/reader?chapter=${blocker.chapter_number}`}><Button size="small">{blocker.action === "confirm_chapter" ? "去确认正文" : blocker.action === "retry_summary" ? "查看并重试摘要" : "查看章节"}</Button></Link>
-        : blocker.action === "generate_assets" ? <Space wrap><Button size="small" onClick={() => void handleGenerateOutline()} disabled={!canGenerate || !readiness.value?.can_generate_assets} loading={outlineGenerating}>生成大纲与人物卡</Button><Button size="small" onClick={onAssetsGenerated}>查看故事设定</Button></Space>
+        : blocker.action === "generate_assets" ? <Button size="small" onClick={onAssetsGenerated}>查看故事设定</Button>
         : blocker.action === "model_settings" ? <Link to="/settings"><Button size="small">配置模型连接</Button></Link>
         : blocker.action === "project_settings" ? <Button size="small" onClick={onAssetsGenerated}>前往故事设定</Button> : undefined} />)}
     {mode === "single" && <div className="generation-inputs" aria-live="polite">

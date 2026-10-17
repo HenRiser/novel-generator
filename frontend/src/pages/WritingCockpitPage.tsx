@@ -76,6 +76,10 @@ function Studio({ refreshChapters }: { refreshChapters: () => Promise<void> }) {
       setParams(next, { replace: true });
     }
   };
+  const prepareAssets = () => {
+    selectTab("generate");
+    requestAnimationFrame(() => document.getElementById("generation-assets")?.focus());
+  };
   const handleDone = useCallback((result: ChapterStreamDoneEvent) => {
     setSaved(result); setSelectedChapterNumber(result.chapter_number); setRevision((value) => value + 1); setActiveTab("reader"); setParams({}, { replace: true });
     void refreshChapters();
@@ -96,7 +100,7 @@ function Studio({ refreshChapters }: { refreshChapters: () => Promise<void> }) {
         <Tabs activeKey={activeTab} onChange={selectTab} items={[
           { key: "generate", label: "AI 共创", children: <GenerationPanel onStreamDone={handleDone} onAssetsGenerated={handleAssets} targetChapterNumber={targetChapter ?? nextChapter} onTargetChapterChange={setTargetChapter} /> },
           { key: "reader", label: "章节手稿", children: selectedChapterNumber !== null ? <div className="studio-reader-layout"><div className="studio-reader"><ChapterReader key={`${selectedProjectRef}-${selectedChapterNumber}-${revision}`} chapterNumber={selectedChapterNumber} onWorkflowChange={setReaderWorkflow} /><div className="studio-document-actions"><Button size="small" type="text" disabled={busy || !readerWorkflow?.editable} onClick={() => { setTargetChapter(selectedChapterNumber); setActiveTab("generate"); }}>重新生成第 {selectedChapterNumber} 章</Button><Link to={`/review?chapter=${selectedChapterNumber}`}>本章规划 <ArrowRightOutlined /></Link></div></div><ChapterContextNote key={`${selectedProjectRef}-${selectedChapterNumber}`} projectRef={selectedProjectRef!} chapterNumber={selectedChapterNumber} /></div> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="生成第一章后，手稿会出现在这里。" /> },
-          { key: "assets", label: "故事设定", children: <AssetsPanel key={`${selectedProjectRef}-${assetsRevision}`} /> },
+          { key: "assets", label: "故事设定", children: <AssetsPanel key={`${selectedProjectRef}-${assetsRevision}`} onPrepareAssets={prepareAssets} /> },
           { key: "cover", label: "作品封面", children: <CoverPanel key={selectedProjectRef} projectRef={selectedProjectRef!} /> },
           { key: "status", label: "流程记录", children: <div className="studio-status"><div className="studio-status-heading"><div><span className="eyebrow">CHAPTER RECORD</span><h2>{selectedChapterNumber !== null ? `第 ${selectedChapterNumber} 章的创作记录` : "等待第一章"}</h2></div><Button icon={<ReloadOutlined />} loading={status.loading} onClick={() => void status.refresh()} disabled={selectedChapterNumber === null}>刷新记录</Button></div>{status.error && <Alert type="error" showIcon message={status.error} />}{status.loading ? <Skeleton active /> : chapterStatus ? <><div className="studio-status-grid"><div><strong>{chapterStatus.chapter_status.chapter.exists ? "已生成" : "未生成"}</strong><span>章节手稿</span></div><div><strong>{chapterStatus.chapter_status.review.pending_count}</strong><span>等待复核</span></div><div><strong>{chapterStatus.chapter_status.review.accepted_count}</strong><span>已接受变更</span></div><div><strong>{chapterStatus.chapter_status.knowledge_drafts.counts.total}</strong><span>知识草稿</span></div></div>{chapterStatus.chapter_status.warnings.map((warning) => <Alert key={warning.code} type="warning" showIcon message={warning.message} />)}<Space wrap><Link to={`/review?chapter=${selectedChapterNumber}`}><Button>查看章节审查</Button></Link><Link to="/library"><Button>审核知识变更 <ArrowRightOutlined /></Button></Link></Space></> : !status.error && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一个章节，查看它的生成与审核记录。" />}</div> },
         ]} />
