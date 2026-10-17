@@ -3,6 +3,7 @@ import { Alert, Button, Input, Space, Spin, Tag } from "antd";
 import { CheckOutlined, EditOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { ApiRequestError, confirmChapter, getChapterWorkflow } from "../../api";
 import { selectGenerationBusy, useAppStore } from "../../store/useAppStore";
+import { getWorkspaceDraft, setWorkspaceDraft } from '../../localStore';
 import type { ChapterWorkflow } from "../../types";
 
 type Props = {
@@ -18,33 +19,10 @@ type Props = {
 const basename = (value: string) => value.replace(/\\/g, "/").split("/").pop() || "";
 const pending = (value: string) => value === "pending" || value === "running";
 type SessionDraft = { content: string; baseContent: string; baseRevision: string };
-const sessionDrafts = new Map<string, SessionDraft>();
 const draftKey = (projectRef: string, chapterNumber: number) => `braipen:chapter-draft:${JSON.stringify([projectRef, chapterNumber])}`;
-
-function readSessionDraft(key: string): SessionDraft | null {
-  const cached = sessionDrafts.get(key);
-  if (cached) return cached;
-  try {
-    const stored: unknown = JSON.parse(window.sessionStorage.getItem(key) || "null");
-    if (stored && typeof stored === "object" && "content" in stored && typeof stored.content === "string" && "baseContent" in stored && typeof stored.baseContent === "string" && "baseRevision" in stored && typeof stored.baseRevision === "string") {
-      const value = { content: stored.content, baseContent: stored.baseContent, baseRevision: stored.baseRevision };
-      sessionDrafts.set(key, value);
-      return value;
-    }
-  } catch { /* In-memory drafts still survive navigation when browser storage is unavailable. */ }
-  return null;
-}
-
-function storeSessionDraft(key: string, value: SessionDraft): boolean {
-  sessionDrafts.set(key, value);
-  try { window.sessionStorage.setItem(key, JSON.stringify(value)); return true; }
-  catch { return false; }
-}
-
-function clearSessionDraft(key: string): void {
-  sessionDrafts.delete(key);
-  try { window.sessionStorage.removeItem(key); } catch { /* Storage can be disabled by the browser. */ }
-}
+function readSessionDraft(key: string): SessionDraft | null { return getWorkspaceDraft<SessionDraft>(key) || null; }
+function storeSessionDraft(key: string, value: SessionDraft): boolean { setWorkspaceDraft(key, value); return true; }
+function clearSessionDraft(key: string): void { setWorkspaceDraft(key, undefined); }
 
 export default function ChapterConfirmationPanel({ projectRef, chapterNumber, displayedFilename, readingLoading, refreshToken, onWorkflowChange, onConfirmed, onLocateEvidence }: Props) {
   const { apiStatus, batchStatusLoading, batchStatusError } = useAppStore();
@@ -168,7 +146,7 @@ export default function ChapterConfirmationPanel({ projectRef, chapterNumber, di
       {workflow.warnings.map((warning, index) => <Alert key={`${warning.code}-${index}`} type="warning" showIcon message={warning.message} description={<div className="chapter-warning-details">{warning.evidence && <><p><strong>正文依据：</strong>{warning.evidence}</p><Button size="small" disabled={!sameFile || readingLoading || loading} aria-label={`定位第 ${index + 1} 条提示的原文`} onClick={() => onLocateEvidence(warning.evidence, workflow.revision)}>定位原文</Button></>}{warning.constraint && <p><strong>相关约束：</strong>{warning.constraint}</p>}{warning.suggestion && <p><strong>修改建议：</strong>{warning.suggestion}</p>}</div>} />)}
       {editing ? <>
         {restoredDraft && <Alert type="info" showIcon message="已恢复本标签页暂存的未提交编辑稿。" description="编辑稿仍需确认；提交前会核对原正文版本，避免覆盖后续修改。" />}
-        {storageUnavailable && <Alert type="warning" showIcon message="浏览器会话存储不可用，编辑稿目前只在当前页面会话中保留。" description="切换章节和应用内页面仍可恢复；刷新或关闭标签页前请先保存，或复制修改内容。" />}
+        {storageUnavailable && <Alert type="warning" showIcon message="编辑稿尚未写入本机文件。" description="请保存工作区或下载副本后再关闭页面。" />}
         <Input.TextArea className="chapter-confirmation-editor" aria-label="编辑本章正文" value={draft} onChange={(event) => updateDraft(event.target.value)} autoSize={{ minRows: 8, maxRows: 12 }} autoFocus disabled={saving || !workflow.editable || busy} />
         {staleDraft && <Alert type="warning" showIcon message="最新正文已变化，当前编辑稿尚未保存。" description="可先复制你的修改，再取消编辑并重新打开最新正文。" />}
         <Space className="chapter-confirmation-actions" wrap><Button type="primary" icon={<SaveOutlined />} loading={saving} disabled={blocked || staleDraft || !draft.trim()} onClick={() => void confirm()}>保存并确认</Button><Button disabled={saving} onClick={cancelEdit}>取消编辑</Button><span className="muted-note">{draft.length} 字{dirty ? " · 有未保存修改" : ""}</span></Space>

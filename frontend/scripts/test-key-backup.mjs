@@ -18,7 +18,7 @@ function fixture() {
   };
   const blobs = [], links = [];
   const db = { transaction(names, mode) {
-    assert.equal(mode, 'readonly'); assert.deepEqual([...names].sort(), ['cover_media', 'projects', 'settings']);
+    assert.equal(mode, 'readonly'); assert.deepEqual([...names].sort(), ['settings']);
     let pending = 0;
     const tx = { abort() { tx.onabort?.(); }, objectStore(name) { return { getAll() {
       const request = {}; pending++;
@@ -40,9 +40,9 @@ function fixture() {
   return { store: exports, blobs, links };
 }
 
-test('真实完整备份序列化使用 v4，排除明文记住与两类旧密文记录', async () => {
+test('真实完整备份序列化使用 v5，排除明文记住与两类旧密文记录', async () => {
   const f = fixture(), backup = await f.store.createBackup(), json = JSON.stringify(backup);
-  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 4);
+  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 5);
   assert.equal(backup.connections.length, 1); assert.equal(backup.connections[0].id, 'text');
   for (const secret of ['SYNTHETIC_PERSISTED_KEY', 'api_key', 'ciphertext', 'vault:', 'deepseek-key-vault']) assert.equal(json.includes(secret), false, secret);
 });
@@ -52,6 +52,6 @@ test('真实导出函数生成的 JSON Blob 同样不含凭据，并保留统一
   assert.equal(f.blobs.length, 1); assert.equal(f.blobs[0].type, 'application/json');
   assert.match(f.links[0].name, /^braipen-backup-\d{4}-\d{2}-\d{2}\.json$/);
   const text = await f.blobs[0].text(), backup = JSON.parse(text);
-  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 4);
+  assert.equal(backup.format, 'braipen-backup'); assert.equal(backup.version, 5);
   assert.equal(text.includes('SYNTHETIC_PERSISTED_KEY'), false); assert.equal(text.includes('ciphertext'), false);
 });

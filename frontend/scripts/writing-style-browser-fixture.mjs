@@ -80,7 +80,7 @@ document.querySelector('#run').onclick = async () => {
     }
     await mode('ok');
     const backup = await store.createBackup(), refs = await store.restoreBackup(JSON.stringify(backup));
-    check(backup.version === 4 && backup.writing_styles.length > 0 && refs.length === backup.projects.length, '真实IndexedDB备份v4完整恢复项目与文风库');
+    check(backup.version === 5 && backup.writing_styles.length > 0 && refs.length === backup.projects.length, '真实会话工作区v5完整恢复项目与文风库');
     check(!JSON.stringify(backup).includes('sk-' + 's'.repeat(32)), '备份不包含本地记住的合成Key');
     const decoded = decodeNovel(new Uint8Array([0xce, 0xc4, 0xb7, 0xe7])); check(decoded.normalized_text === '文风' && decoded.encoding === 'gb18030', 'GB18030参考正文按现有解码器读取');
     await mode('ok'); status.textContent = `全部通过：${checks.length} 项真实浏览器集成检查；外部模型调用 0 次。`;

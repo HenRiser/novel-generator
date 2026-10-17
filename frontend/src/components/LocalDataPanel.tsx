@@ -1,102 +1,51 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, App as AntApp, Button, Card, Descriptions, Space, Typography } from 'antd';
-import { DownloadOutlined, SafetyCertificateOutlined, UploadOutlined } from '@ant-design/icons';
-import { downloadRescue, exportBackup, hasRescue, restoreBackup, MAX_BACKUP_FILE_BYTES } from '../localStore';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Alert, Button, Card, Modal, Space } from 'antd';
+import { createBackup, downloadRescue, exportBackup, hasRescue, MAX_BACKUP_FILE_BYTES, workspaceHasUnsavedChanges } from '../localStore';
+import { getLocalFolderSyncState, openWorkspaceFile, subscribeLocalFolderSync } from '../localFolderSync';
 import LocalFolderPanel from './LocalFolderPanel';
 
 type Props = { onProjectsChanged?: () => void | Promise<void> };
-type StorageInfo = { usage?: number; quota?: number; persisted?: boolean };
-const formatBytes = (bytes?: number) => bytes === undefined ? '浏览器未提供' : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-
 export default function LocalDataPanel({ onProjectsChanged }: Props) {
-  const { message } = AntApp.useApp();
-  const [busy, setBusy] = useState('');
-  const [storage, setStorage] = useState<StorageInfo>({});
-  const [rescueAvailable, setRescueAvailable] = useState(hasRescue());
-  const [error, setError] = useState('');
-  const fileInput = useRef<HTMLInputElement>(null);
-  const mounted = useRef(true);
-
-  const refresh = useCallback(async () => {
-    const [estimate, persisted] = await Promise.all([
-      navigator.storage?.estimate?.() ?? Promise.resolve({} as StorageEstimate),
-      navigator.storage?.persisted?.() ?? Promise.resolve(undefined),
-    ]);
-    if (!mounted.current) return;
-    setStorage({ usage: estimate.usage, quota: estimate.quota, persisted });
-  }, []);
-
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
+  const [dirty, setDirty] = useState(workspaceHasUnsavedChanges()), [rescue, setRescue] = useState(hasRescue());
+  const input = useRef<HTMLInputElement>(null);
+  const folder = useSyncExternalStore(subscribeLocalFolderSync, getLocalFolderSyncState);
   useEffect(() => {
-    mounted.current = true;
-    const rescued = () => setRescueAvailable(hasRescue());
-    void refresh().catch(reason => setError(reason instanceof Error ? reason.message : '无法读取本地存储。'));
-    window.addEventListener('braipen:rescue', rescued);
-    return () => {
-      mounted.current = false;
-      window.removeEventListener('braipen:rescue', rescued);
-    };
-  }, [refresh]);
-
-  async function action(name: string, operation: () => Promise<void>) {
-    setBusy(name); setError('');
-    try { await operation(); await refresh(); }
-    catch (reason) { if (mounted.current) setError(reason instanceof Error ? reason.message : '操作未完成，请重试。'); }
-    finally { if (mounted.current) { setBusy(''); } }
+    const changed = () => { setDirty(workspaceHasUnsavedChanges()); setRescue(hasRescue()); };
+    window.addEventListener('braipen:workspace-changed', changed); window.addEventListener('braipen:rescue', changed);
+    return () => { window.removeEventListener('braipen:workspace-changed', changed); window.removeEventListener('braipen:rescue', changed); };
+  }, []);
+  async function action(fn: () => Promise<void>) {
+    setBusy(true); setError(''); setNotice('');
+    try { await fn(); } catch (reason) { setError(reason instanceof Error ? reason.message : '文件操作未完成。'); }
+    finally { setBusy(false); }
   }
-
-  async function importFile(file: File) {
-    await action('restore', async () => {
-      if (file.size > MAX_BACKUP_FILE_BYTES) throw new Error('完整备份超过 200 MiB，请使用较小的备份文件。');
-      const refs = await restoreBackup(await file.text());
-      void message.success(`已恢复 ${refs.length} 个项目副本，原有项目保留。`);
-      window.dispatchEvent(new Event('braipen:projects-changed'));
-      await onProjectsChanged?.();
-    });
-  }
-
-  return (
-    <Space orientation="vertical" size={20} style={{ width: '100%' }}>
-      {error && <Alert type="error" showIcon title={error} />}
-      <LocalFolderPanel />
-      <Card title={<Space><DownloadOutlined />项目备份与恢复</Space>}>
-        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-          <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-            项目、正文、文风卡、范例、知识与任务进度保存在此浏览器。更换设备、浏览器或清除站点数据前，请下载备份。
-            恢复会创建项目副本；未完成的任务需手动继续。正在分析的导入草稿请先完成导入。
-          </Typography.Paragraph>
-          <Space wrap>
-            <Button icon={<DownloadOutlined />} loading={busy === 'backup'} disabled={Boolean(busy)}
-              onClick={() => void action('backup', exportBackup)}>下载全部项目备份</Button>
-            <Button icon={<UploadOutlined />} loading={busy === 'restore'} disabled={Boolean(busy)}
-              onClick={() => fileInput.current?.click()}>从备份恢复副本</Button>
-            <input ref={fileInput} type="file" accept="application/json,.json" hidden onChange={event => {
-              const file = event.target.files?.[0]; event.target.value = '';
-              if (file) void importFile(file);
-            }} />
-            {rescueAvailable && <Button danger icon={<DownloadOutlined />} disabled={Boolean(busy)}
-              onClick={() => { try { downloadRescue(); } catch (reason) { setError(String(reason)); } }}>下载未保存的应急副本</Button>}
-          </Space>
-          {rescueAvailable && <Alert type="warning" showIcon title="有尚未保存的内容，请先下载应急副本再刷新或关闭页面。" />}
+  return <Space orientation="vertical" size={20} style={{ width: '100%' }}>
+    {error && <Alert type="error" showIcon title={error} />}
+    {notice && <Alert type="info" showIcon title={notice} />}
+    <LocalFolderPanel />
+    <Card title="工作区文件">
+      <Space orientation="vertical" size={14} style={{ width: '100%' }}>
+        <p>工作区包含设定、文风卡、正文、封面和未完成的创作草稿。打开文件保留原项目标识；模型 Key 不进入文件。</p>
+        {(dirty || !folder.folderName) && <Alert type="warning" showIcon title={dirty ? '本次内容尚未保存到本机文件，请保存或下载工作区后再关闭页面。' : '尚未打开自动保存文件夹，创作后需手动下载工作区。'} />}
+        <Space wrap>
+          <Button disabled={busy} onClick={() => input.current?.click()}>打开工作区文件</Button>
+          <Button disabled={busy} loading={busy} onClick={() => void action(async () => { await createBackup(); await exportBackup(); setNotice('已发起文件下载，请确认文件已保存到电脑。'); })}>下载工作区</Button>
+          {rescue && <Button disabled={busy} onClick={downloadRescue}>下载未保存的应急副本</Button>}
         </Space>
-      </Card>
-
-      <Card title={<Space><SafetyCertificateOutlined />浏览器存储</Space>}>
-        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-          <Descriptions size="small" column={1} items={[
-            { key: 'usage', label: '本站已使用', children: formatBytes(storage.usage) },
-            { key: 'quota', label: '浏览器提供的配额', children: formatBytes(storage.quota) },
-            { key: 'persist', label: '持久存储', children: storage.persisted === undefined ? '此浏览器未提供状态' : storage.persisted ? '已获准' : '尚未获准' },
-          ]} />
-          <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
-            持久存储可降低浏览器自动回收数据的风险，仍不能替代备份；主动清理站点数据会删除项目和本地保存的 Key。
-          </Typography.Paragraph>
-          <Button disabled={Boolean(busy) || storage.persisted || !navigator.storage?.persist} loading={busy === 'persist'}
-            onClick={() => void action('persist', async () => {
-              const granted = await navigator.storage.persist();
-              void message.info(granted ? '浏览器已允许持久存储。' : '浏览器暂未允许持久存储，请继续定期下载备份。');
-            })}>申请持久存储</Button>
-        </Space>
-      </Card>
-    </Space>
-  );
+        <input ref={input} hidden type="file" accept=".json,application/json" onChange={event => {
+          const file = event.target.files?.[0]; event.target.value = '';
+          if (file) void action(async () => {
+            if (file.size > MAX_BACKUP_FILE_BYTES) throw new Error('工作区文件超过 200 MiB。');
+            const text = await file.text();
+            if (workspaceHasUnsavedChanges()) {
+              const confirmed = await new Promise<boolean>(resolve => Modal.confirm({ title: '替换当前页面中的未保存内容？', content: '请先确认已下载工作区副本。本次打开不会修改原文件。', okText: '打开所选文件', cancelText: '保留当前内容', onOk: () => { resolve(true); }, onCancel: () => { resolve(false); } }));
+              if (!confirmed) return;
+            }
+            await openWorkspaceFile(text, true); await onProjectsChanged?.(); setNotice('工作区已打开。后续修改请保存到文件夹或下载新文件。');
+          });
+        }} />
+      </Space>
+    </Card>
+  </Space>;
 }

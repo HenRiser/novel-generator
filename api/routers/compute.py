@@ -170,7 +170,7 @@ async def _connected(request: Request, coroutine, timeout=None):
 async def capabilities():
     return JSONResponse({"protocol_version": PROTOCOL_VERSION, "operations": sorted(OPERATIONS), "stream_operations": sorted(STREAM_OPERATIONS),
         "planning_stream_version": 1,
-        "writing_style": {"version": 1, "max_analysis_characters": 20000, "max_examples": 3, "max_example_characters": 2000},
+        "writing_style": {"version": 1, "max_analysis_characters": 20000, "max_examples": 3, "max_example_characters": 2000, "distillation": {"version": 1, "max_rounds": 5, "max_output_tokens": 20000}},
         "provider": {"name": "deepseek", "official_base_url": "https://api.deepseek.com"}, "providers": catalog(), "supported_protocols": PROTOCOLS,
         "image_providers": image_catalog(), "image_protocols": ["seedream_images", "openai_images", "gemini_images", "qwen_images"],
         "cover_generation": cover_capabilities(),

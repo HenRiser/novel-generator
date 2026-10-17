@@ -42,7 +42,7 @@ function ReaderWorkspace() {
 
   return <div className="page-container reader-page">
     <div className="page-heading"><div><span className="eyebrow">A MOMENT FOR THE STORY</span><h1 className="page-title">阅读室</h1><p className="page-subtitle">回到文字本身。阅读、推敲，把故事交还给自己的判断。</p></div><Space wrap><Button icon={<EditOutlined />} onClick={() => navigate("/writing")}>回到创作台</Button>{selectedProjectRef && chapters.length > 0 && <Button icon={<DownloadOutlined />} onClick={() => void downloadFullBook(selectedProjectRef)}>导出全书</Button>}</Space></div>
-    {apiStatus === "offline" && <Alert type="warning" showIcon message="计算服务暂未连接，已保存在本浏览器的章节仍可阅读与导出。" />}
+    {apiStatus === "offline" && <Alert type="warning" showIcon message="计算服务暂未连接，当前工作区的章节仍可阅读与导出。" />}
     {chaptersError && <Alert type="error" showIcon message={chaptersError} action={<Button size="small" onClick={() => void refreshChapters()}>重新加载</Button>} />}
     {!selectedProjectRef ? <Card><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="选择一本作品，开始阅读。"><Button type="primary" onClick={() => navigate("/dashboard")}>前往作品概览</Button></Empty></Card> : <div className="reader-workspace">
       <aside className="reader-directory"><div className="reader-directory-heading"><span className="eyebrow">CONTENTS</span><h2>{selectedProject?.title || "作品目录"}</h2><span>{chapters.length} 章 · 当前正文</span></div><ProjectCover projectRef={selectedProjectRef} className="reader-cover" /><ChapterListPanel selectedChapterNumber={selectedChapterNumber} onSelectChapter={selectChapter} /></aside>

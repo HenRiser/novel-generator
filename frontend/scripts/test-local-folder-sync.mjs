@@ -5,17 +5,13 @@ import { webcrypto } from 'node:crypto';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
+import { memoryStyleStore } from './writing-style-test-helpers.mjs';
 
 const source = readFileSync(new URL('../src/localFolderSync.ts', import.meta.url), 'utf8');
 const { outputText, diagnostics } = ts.transpileModule(source, { reportDiagnostics: true,
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } });
 assert.equal(diagnostics.length, 0);
 const bindingKey = 'local-folder-sync.v1';
-const snapshot = (count = 1) => ({ format: 'braipen-backup', version: 4, writing_styles: [], created_at: '2026-10-08T00:00:00Z',
-  projects: Array.from({ length: count }, (_, i) => ({ project_ref: `book:bk_${i}`, runs: [], batch: { status: 'idle' } })),
-  connections: [{ id: 'text', name: '文字连接', revisions: [{ base_url: 'https://example.invalid/v1', model: 'test-model' }] }],
-  cover_media: [{ id: 'mock-media', base64: 'bW9jay1pbWFnZS1ieXRlcw==' }] });
-const previous = (workspace = 'workspace-1', count = 1) => JSON.stringify({ ...snapshot(count), version: 3, folder_sync: { version: 1, workspace_id: workspace } });
 const deferred = () => { let resolve; const promise = new Promise(value => { resolve = value; }); return { promise, resolve }; };
 const settle = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
 function lockManager() {
@@ -25,18 +21,6 @@ function lockManager() {
     tails.set(name, operation.catch(() => undefined)); return operation;
   } };
 }
-function broadcastHub() {
-  const members = [], messages = [];
-  class Channel {
-    constructor(name) { this.name = name; this.listeners = []; members.push(this); }
-    addEventListener(_event, listener) { this.listeners.push(listener); }
-    postMessage(data) { messages.push(structuredClone(data)); for (const other of members) if (other !== this && other.name === this.name) {
-      for (const listener of other.listeners) Promise.resolve().then(() => listener({ data: structuredClone(data) }));
-    } }
-  }
-  return { Channel, messages };
-}
-
 function directory(initial, name = '模拟文件夹') {
   const files = new Map(initial === undefined ? [] : [['braipen-workspace.json', initial]]);
   let modified = 1;
@@ -80,193 +64,88 @@ function directory(initial, name = '模拟文件夹') {
   } };
 }
 
-function load({ backup = snapshot(), saved, browser = false, maxBytes = 200 * 1024 * 1024,
-  settings: sharedSettings, locks = lockManager(), broadcast, captureGate } = {}) {
-  const exports = {}, settings = sharedSettings || new Map(saved ? [[bindingKey, saved]] : []), reads = [], timers = new Map();
-  const counters = { backups: 0 }, time = { now: 1000 };
-  let nextTimer = 0;
-  class ClockDate extends Date { constructor(...args) { super(...(args.length ? args : [time.now])); } static now() { return time.now; } }
-  const window = browser ? new EventTarget() : undefined;
-  if (window) window.showDirectoryPicker = async () => { throw new DOMException('Canceled', 'AbortError'); };
-  const store = {
-    MAX_BACKUP_FILE_BYTES: maxBytes,
-    async createBackup() { counters.backups++; const captured = structuredClone(backup); await captureGate?.promise; return captured; },
-    async listProjects() { return structuredClone(backup.projects); },
-    async getSetting(key) { reads.push(key); return settings.get(key); },
-    async setSetting(key, value) { settings.set(key, value); },
-  };
-  runInNewContext(outputText, { exports, require: key => { assert.equal(key, './localStore'); return store; },
-    Blob, DOMException, crypto: webcrypto, Date: ClockDate, navigator: { locks }, ...(window ? { window } : {}),
-    ...(broadcast ? { BroadcastChannel: broadcast.Channel } : {}),
-    setTimeout: (callback, delay) => { const id = ++nextTimer; timers.set(id, { callback, due: time.now + delay }); return id; },
-    clearTimeout: id => timers.delete(id) });
-  async function advance(ms) {
-    time.now += ms;
-    for (const [id, timer] of [...timers]) if (timer.due <= time.now) { timers.delete(id); timer.callback(); }
-    await settle();
-  }
-  return { sync: exports, settings, reads, backup, counters, window, advance, timers };
+function load({ folder = directory(), f = memoryStyleStore(), locks = lockManager(), support = true } = {}) {
+  const exports = {}, listeners = new Map(), timers = new Map(); let selected = folder, cancelled = false;
+  const window = { addEventListener: (name, listener) => listeners.set(name, listener), showDirectoryPicker: support ? async () => {
+    if (cancelled) throw new DOMException('cancelled', 'AbortError'); return selected.handle;
+  } : undefined };
+  runInNewContext(outputText, { exports, require: () => f.store, window, navigator: { locks: support ? locks : undefined },
+    Blob, DOMException, Error, crypto: webcrypto, JSON, Date,
+    setTimeout: fn => { const id = Symbol(); timers.set(id, fn); return id; }, clearTimeout: id => timers.delete(id),
+  });
+  return { ...f, folder, api: exports, pick: value => { selected = value; }, cancel: value => { cancelled = value; } };
 }
 
-test('v4 快照保留项目、原图与连接，环境设置只读白名单，密钥保险库与handle不进入文件', async () => {
-  const app = load(), folder = directory();
-  app.settings.set('default_connection', 'text'); app.settings.set('default_image_connection', 'image'); app.settings.set('default_model', 'custom-model');
-  app.settings.set('fallback_image_connection', 'seedream');
-  app.settings.set('vault:text', { ciphertext: [1], api_key: 'OFFLINE_KEY_SENTINEL' });
-  app.settings.set('unknown-config', 'OFFLINE_UNKNOWN_SENTINEL');
-  await app.sync.writeFolderSnapshot(folder.handle, 'workspace-1');
-  const result = JSON.parse(folder.text());
-  assert.deepEqual(result.projects, app.backup.projects); assert.deepEqual(result.cover_media, app.backup.cover_media);
-  assert.deepEqual(result.connections, app.backup.connections);
-  assert.deepEqual(result.environment, { version: 1, default_connection: 'text', default_image_connection: 'image', default_model: 'custom-model', fallback_image_connection: 'seedream' });
-  assert.equal(result.folder_sync.workspace_id, 'workspace-1');
-  assert.equal(folder.text().includes('OFFLINE_'), false); assert.equal(folder.text().includes('handle'), false);
-  assert.deepEqual(app.reads.sort(), ['default_connection', 'default_image_connection', 'default_model', 'fallback_image_connection'].sort());
-  assert.equal(folder.state.closes, 1); assert.deepEqual(JSON.parse(JSON.stringify(folder.state.options)), { keepExistingData: false, mode: 'exclusive' });
+test('文件是创作主存储，v5写入关闭并回读后才成功，不保存目录句柄到浏览器', async () => {
+  const f = load(), p = f.types.emptyProject('本机作品'); await f.store.putProject(p);
+  await f.api.chooseLocalFolder();
+  const saved = JSON.parse(f.folder.text()); assert.equal(saved.version, 5); assert.equal(saved.projects[0].project_ref, p.project_ref);
+  assert.equal(f.api.getLocalFolderSyncState().status, 'synced'); assert.equal(f.folder.state.closes, 1);
+  assert.equal(f.rows.settings.has(bindingKey), false); assert.equal(f.rows.projects.size, 0);
+  await f.store.updateProject(p.project_ref, value => { value.title = '新版'; });
+  assert.equal(JSON.parse(f.folder.text()).projects[0].title, '新版');
 });
-
-test('不同工作空间、未知同名文件、空工作空间覆盖非空快照均拒绝且原字节不变', async () => {
-  for (const old of [previous('another-workspace'), 'not json', JSON.stringify(snapshot())]) {
-    const app = load(), folder = directory(old);
-    await assert.rejects(app.sync.writeFolderSnapshot(folder.handle, 'workspace-1'), /拒绝覆盖/);
-    assert.equal(folder.text(), old); assert.equal(folder.state.writes, 0);
-  }
-  const app = load({ backup: snapshot(0) }), old = previous(), folder = directory(old);
-  await assert.rejects(app.sync.writeFolderSnapshot(folder.handle, 'workspace-1'), /没有项目/);
-  assert.equal(folder.text(), old); assert.equal(folder.state.writes, 0);
+test('打开已有工作区保留身份且不自动重写，取消选择保持原目录', async () => {
+  const original = load(), p = original.types.emptyProject('原有'); await original.store.putProject(p); await original.api.chooseLocalFolder();
+  const folder = directory(original.folder.text()), fresh = load({ folder });
+  await fresh.api.chooseLocalFolder(); assert.equal((await fresh.store.getProject(p.project_ref)).title, '原有');
+  assert.equal(folder.state.writes, 0); fresh.cancel(true); assert.equal(await fresh.api.chooseLocalFolder(), false);
+  assert.equal(fresh.api.getLocalFolderSyncState().folderName, folder.handle.name);
 });
-
-test('write、close或配额失败会abort且保留旧文件，超限在触碰文件前拒绝', async () => {
-  for (const failure of ['write', 'close', 'quota']) {
-    const app = load(), old = previous(), folder = directory(old); folder.state.failure = failure;
-    await assert.rejects(app.sync.writeFolderSnapshot(folder.handle, 'workspace-1'));
-    assert.equal(folder.text(), old); assert.equal(folder.state.aborts, 1); assert.equal(folder.state.active, 0);
-  }
-  const app = load({ maxBytes: 5 }), folder = directory();
-  await assert.rejects(app.sync.writeFolderSnapshot(folder.handle, 'workspace-1'), /200 MiB/);
-  assert.equal(folder.files.size, 0); assert.equal(folder.state.writes, 0);
+test('未知同名文件和外部修改不覆盖；失败时内存项目也不提交', async () => {
+  const bad = load({ folder: directory('unknown') }); await assert.rejects(bad.api.chooseLocalFolder()); assert.equal(bad.folder.text(), 'unknown');
+  const f = load(), p = f.types.emptyProject('原作'); await f.store.putProject(p); await f.api.chooseLocalFolder();
+  f.folder.replace('external');
+  await assert.rejects(f.store.updateProject(p.project_ref, value => { value.title = '不可覆盖'; }));
+  assert.equal(f.folder.text(), 'external'); assert.equal((await f.store.getProject(p.project_ref)).title, '原作');
+  assert.equal(f.api.getLocalFolderSyncState().status, 'error');
 });
-
-test('首次写失败清除自身空占位，修复错误后可重试；不会删除已有空同名文件', async () => {
-  const app = load(), folder = directory(); folder.state.failure = 'write';
-  await assert.rejects(app.sync.writeFolderSnapshot(folder.handle, 'workspace-1'));
-  assert.equal(folder.files.size, 0); folder.state.failure = '';
-  await app.sync.writeFolderSnapshot(folder.handle, 'workspace-1'); assert.equal(JSON.parse(folder.text()).projects.length, 1);
-  const unknown = directory(''); await assert.rejects(app.sync.writeFolderSnapshot(unknown.handle, 'workspace-1'), /拒绝覆盖/);
-  assert.equal(unknown.text(), '');
-  for (const replacement of ['', previous('external-workspace')]) {
-    const changed = directory(); changed.state.failure = 'write'; changed.state.beforeFailure = () => changed.replace(replacement);
-    await assert.rejects(app.sync.writeFolderSnapshot(changed.handle, 'workspace-1'));
-    assert.equal(changed.text(), replacement); assert.equal(changed.files.size, 1);
+test('write、close及配额失败保留旧文件，修复后可重试', async () => {
+  for (const failure of ['write','close','quota']) {
+    const f = load(), p = f.types.emptyProject('旧稿'); await f.store.putProject(p); await f.api.chooseLocalFolder();
+    const before = f.folder.text(); f.folder.state.failure = failure;
+    await assert.rejects(f.store.updateProject(p.project_ref, value => { value.title = '新稿'; }));
+    assert.equal(f.folder.text(), before); assert.equal((await f.store.getProject(p.project_ref)).title, '旧稿');
+    assert.equal(f.folder.state.aborts, 1); f.folder.state.failure = '';
+    await f.store.updateProject(p.project_ref, value => { value.title = '新稿'; });
+    assert.equal(JSON.parse(f.folder.text()).projects[0].title, '新稿');
   }
 });
-
-test('选择取消不改绑定，换目录立即写当前数据且旧目录保留，停止同步不删文件', async () => {
-  const old = directory(previous(), '旧目录'), next = directory(undefined, '新目录');
-  const app = load({ browser: true, saved: { version: 1, workspaceId: 'workspace-1', handle: old.handle } });
-  await app.sync.startLocalFolderSync();
-  assert.equal(await app.sync.chooseLocalFolder(), false);
-  assert.equal(app.settings.get(bindingKey).handle, old.handle); assert.equal(app.sync.getLocalFolderSyncState().folderName, '旧目录');
-  const before = old.text();
-  app.window.showDirectoryPicker = async () => next.handle;
-  assert.equal(await app.sync.chooseLocalFolder(), true);
-  assert.equal(app.settings.get(bindingKey).handle, next.handle); assert.equal(old.text(), before);
-  assert.equal(JSON.parse(next.text()).projects.length, 1); assert.equal(app.sync.getLocalFolderSyncState().status, 'synced');
-  await app.sync.disconnectLocalFolder(); assert.equal(app.sync.getLocalFolderSyncState().status, 'unbound');
-  assert.equal(app.settings.get(bindingKey).handle, undefined); assert.equal(next.files.size, 1);
+test('首次写入失败保留可重试绑定，不删除任何用户文件', async () => {
+  const f = load(); f.folder.state.failure = 'write';
+  await assert.rejects(f.api.chooseLocalFolder()); assert.equal(f.folder.text(), '');
+  assert.equal(f.api.getLocalFolderSyncState().folderName, f.folder.handle.name);
+  f.folder.state.failure = ''; await f.api.syncLocalFolderNow(); assert.equal(JSON.parse(f.folder.text()).version, 5);
 });
-
-test('碰撞或新目录写入失败不替换原绑定，也不显示成功', async () => {
-  for (const failure of ['collision', 'close', 'abort']) {
-    const old = directory(previous(), '旧目录'), next = directory(failure === 'collision' ? previous('other') : undefined, '失败目录');
-    next.state.failure = failure;
-    const app = load({ browser: true, saved: { version: 1, workspaceId: 'workspace-1', handle: old.handle } });
-    await app.sync.startLocalFolderSync(); app.window.showDirectoryPicker = async () => next.handle;
-    assert.equal(await app.sync.chooseLocalFolder(), false); assert.equal(app.settings.get(bindingKey).handle, old.handle);
-    assert.equal(app.sync.getLocalFolderSyncState().status, 'error'); assert.equal(app.sync.getLocalFolderSyncState().folderName, '旧目录');
-    assert.equal(app.sync.getLocalFolderSyncState().lastSyncedAt, undefined);
-  }
+test('无目录API或安全锁时仅支持文件打开下载，不尝试申请权限', async () => {
+  const f = load({ support: false }); await assert.rejects(f.api.chooseLocalFolder(), /不能直接/);
+  assert.equal(f.api.getLocalFolderSyncState().status, 'unsupported'); assert.equal(f.folder.state.requested, 0);
 });
-
-test('重载只queryPermission，权限失效与配额失败有明确状态；requestPermission仅按钮函数调用', async () => {
-  const folder = directory(previous()); folder.state.permission = 'prompt';
-  const app = load({ browser: true, saved: { version: 1, workspaceId: 'workspace-1', handle: folder.handle } });
-  await app.sync.startLocalFolderSync(); await app.advance(31_000);
-  assert.equal(app.sync.getLocalFolderSyncState().status, 'permission-required'); assert.equal(folder.state.requested, 0); assert.equal(folder.state.writes, 0);
-  await app.sync.reauthorizeLocalFolder(); assert.equal(folder.state.requested, 1); assert.equal(folder.state.writes, 0);
-  folder.state.permission = 'granted'; await app.sync.reauthorizeLocalFolder();
-  assert.equal(app.sync.getLocalFolderSyncState().status, 'synced'); assert.equal(folder.state.requested, 2);
-  folder.state.failure = 'quota'; await app.sync.syncLocalFolderNow();
-  assert.equal(app.sync.getLocalFolderSyncState().status, 'quota');
-  folder.state.permission = 'denied'; await app.sync.syncLocalFolderNow();
-  assert.equal(app.sync.getLocalFolderSyncState().status, 'permission-required'); assert.equal(folder.state.requested, 2);
+test('旧资料迁移写盘失败时不清理，校验成功后显式清理保留Key', async () => {
+  const f = load(), p = f.types.emptyProject('旧作品'); f.rows.projects.set(p.project_ref, p);
+  f.rows.settings.set('vault:a', { key: 'vault:a', value: { secret: 'SYNTHETIC_ONLY' } });
+  await f.api.chooseLocalFolder(); f.folder.state.failure = 'close';
+  await assert.rejects(f.api.migrateLegacyWorkspace()); assert.equal(f.rows.projects.size, 1);
+  await assert.rejects(f.api.clearMigratedLegacyWorkspace(), /先完成/);
+  f.folder.state.failure = ''; await f.api.migrateLegacyWorkspace();
+  assert.equal(JSON.parse(f.folder.text()).projects[0].project_ref, p.project_ref);
+  assert.equal(f.rows.projects.size, 1); assert.equal(f.api.getLocalFolderSyncState().migrated, true);
+  await f.api.clearMigratedLegacyWorkspace(); assert.equal(f.rows.projects.size, 0); assert.equal(f.rows.settings.has('vault:a'), true);
 });
-
-test('频繁事件合并、运行时30秒内合并或结束后同步，写入期间更改排队且只有一个写者', async () => {
-  const folder = directory(previous()), backup = snapshot(); backup.projects[0].runs = [{ status: 'running' }];
-  const app = load({ browser: true, backup, saved: { version: 1, workspaceId: 'workspace-1', handle: folder.handle } });
-  await app.sync.startLocalFolderSync();
-  for (let i = 0; i < 50; i++) app.window.dispatchEvent(new Event('braipen:workflow-changed'));
-  await app.advance(1500); assert.equal(app.counters.backups, 0); assert.equal(app.sync.getLocalFolderSyncState().status, 'pending');
-  await app.advance(28_500); assert.equal(app.counters.backups, 1); assert.equal(folder.state.closes, 1);
-  app.window.dispatchEvent(new Event('braipen:connections-changed')); await app.advance(1500); assert.equal(app.counters.backups, 1);
-  backup.projects[0].runs[0].status = 'completed'; app.window.dispatchEvent(new Event('braipen:workflow-changed'));
-  folder.state.gate = deferred(); await app.advance(1500);
-  assert.equal(app.sync.getLocalFolderSyncState().status, 'syncing'); assert.equal(folder.state.closes, 1);
-  const second = app.sync.syncLocalFolderNow(); app.window.dispatchEvent(new Event('braipen:projects-changed'));
-  await settle(); assert.equal(folder.state.maxActive, 1);
-  folder.state.gate.resolve(); await second; await settle();
-  assert.equal(folder.state.maxActive, 1); assert.equal(app.sync.getLocalFolderSyncState().status, 'synced'); assert.ok(folder.state.closes >= 2);
+test('写入需要权限时不自动弹窗，重新授权仅由显式按钮触发', async () => {
+  const f = load(); await f.api.chooseLocalFolder(); f.folder.state.permission = 'prompt';
+  await assert.rejects(f.api.syncLocalFolderNow()); assert.equal(f.folder.state.requested, 0);
+  assert.equal(f.api.getLocalFolderSyncState().status, 'permission-required');
+  f.folder.state.permission = 'granted'; await f.api.reauthorizeLocalFolder(); assert.equal(f.folder.state.requested, 1);
 });
-
-test('不支持目录API时降级且不会尝试选择、申请权限或读取保险库', async () => {
-  const app = load(); await app.sync.startLocalFolderSync();
-  assert.equal(app.sync.getLocalFolderSyncState().status, 'unsupported'); assert.equal(await app.sync.chooseLocalFolder(), false);
-  assert.equal(app.reads.length, 0); assert.equal(app.counters.backups, 0);
-});
-
-test('无WebLocks时目录能力明确降级，按钮选择函数不打开picker', async () => {
-  const noLocks = load({ browser: true, locks: null }); let calls = 0;
-  noLocks.window.showDirectoryPicker = async () => { calls++; return directory().handle; };
-  await noLocks.sync.startLocalFolderSync(); assert.equal(noLocks.sync.getLocalFolderSyncState().status, 'unsupported');
-  assert.match(noLocks.sync.getLocalFolderSyncState().message, /跨标签页安全锁/);
-  assert.equal(await noLocks.sync.chooseLocalFolder(), false); assert.equal(calls, 0);
-});
-
-test('双标签页锁涵盖旧快照capture到close：A延迟时B不得先写new后被A覆盖', async () => {
-  const folder = directory(previous()), backup = snapshot(), locks = lockManager(), gate = deferred();
-  backup.projects[0].title = 'old';
-  const settings = new Map([[bindingKey, { version: 1, workspaceId: 'workspace-1', handle: folder.handle }]]);
-  const a = load({ browser: true, backup, settings, locks, captureGate: gate }), b = load({ browser: true, backup, settings, locks });
-  await Promise.all([a.sync.startLocalFolderSync(), b.sync.startLocalFolderSync()]);
-  const writingA = a.sync.syncLocalFolderNow(); await settle(); assert.equal(a.counters.backups, 1);
-  backup.projects[0].title = 'new'; const writingB = b.sync.syncLocalFolderNow(); await settle();
-  assert.equal(b.counters.backups, 0); assert.equal(folder.state.closes, 0);
-  gate.resolve(); await Promise.all([writingA, writingB]);
-  assert.equal(JSON.parse(folder.text()).projects[0].title, 'new'); assert.equal(folder.state.maxActive, 1);
-});
-
-test('即使通知晚到，B也在锁内重读绑定：A停用后B不再写旧目录或显示synced', async () => {
-  const folder = directory(previous()), backup = snapshot(), locks = lockManager();
-  const settings = new Map([[bindingKey, { version: 1, workspaceId: 'workspace-1', handle: folder.handle }]]);
-  const a = load({ browser: true, backup, settings, locks }), b = load({ browser: true, backup, settings, locks });
-  await Promise.all([a.sync.startLocalFolderSync(), b.sync.startLocalFolderSync()]);
-  await a.sync.disconnectLocalFolder(); const before = folder.text(), writes = folder.state.writes;
-  backup.projects[0].title = 'after-stop'; b.window.dispatchEvent(new Event('braipen:projects-changed')); await b.advance(1500);
-  assert.equal(folder.text(), before); assert.equal(folder.state.writes, writes); assert.equal(b.sync.getLocalFolderSyncState().status, 'unbound');
-  await b.sync.syncLocalFolderNow(); assert.equal(folder.state.writes, writes); assert.equal(b.sync.getLocalFolderSyncState().status, 'unbound');
-});
-
-test('跨标签页换目录通知只传type：B重读新handle，旧目录保留，授权旧handle不能恢复停用绑定', async () => {
-  const old = directory(previous(), '旧目录'), next = directory(undefined, '新目录'), backup = snapshot(), locks = lockManager(), broadcast = broadcastHub();
-  const settings = new Map([[bindingKey, { version: 1, workspaceId: 'workspace-1', handle: old.handle }]]);
-  const a = load({ browser: true, backup, settings, locks, broadcast }), b = load({ browser: true, backup, settings, locks, broadcast });
-  await Promise.all([a.sync.startLocalFolderSync(), b.sync.startLocalFolderSync()]);
-  const before = old.text(); a.window.showDirectoryPicker = async () => next.handle; await a.sync.chooseLocalFolder(); await settle();
-  assert.equal(b.sync.getLocalFolderSyncState().folderName, '新目录'); await b.sync.syncLocalFolderNow();
-  assert.equal(old.text(), before); assert.equal(JSON.parse(next.text()).projects.length, 1);
-  const gate = deferred(); next.handle.requestPermission = () => gate.promise;
-  const authorizing = b.sync.reauthorizeLocalFolder(); await a.sync.disconnectLocalFolder(); gate.resolve('granted'); await authorizing; await settle();
-  assert.equal(settings.get(bindingKey).handle, undefined); assert.equal(b.sync.getLocalFolderSyncState().status, 'unbound');
-  assert.ok(broadcast.messages.length > 0); assert.ok(broadcast.messages.every(message => JSON.stringify(message) === '{"type":"binding-changed"}'));
+test('两个页面共用文件时锁和原内容检查阻止旧页面覆盖新文件', async () => {
+  const folder = directory(), locks = lockManager(), first = load({ folder, locks });
+  const p = first.types.emptyProject('初稿'); await first.store.putProject(p); await first.api.chooseLocalFolder();
+  const second = load({ folder, locks }); await second.api.chooseLocalFolder();
+  folder.state.gate = deferred();
+  const a = first.store.updateProject(p.project_ref, value => { value.title = '页面A'; }); await settle();
+  const b = second.store.updateProject(p.project_ref, value => { value.title = '页面B'; }); await settle();
+  folder.state.gate.resolve(); const result = await Promise.allSettled([a,b]);
+  assert.equal(result[0].status, 'fulfilled'); assert.equal(result[1].status, 'rejected');
+  assert.equal(JSON.parse(folder.text()).projects[0].title, '页面A'); assert.equal(folder.state.maxActive, 1);
 });

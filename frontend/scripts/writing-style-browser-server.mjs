@@ -13,7 +13,7 @@ const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BA
     if (path === '/__style-test/state') { json(res, { mode, calls }); return; }
     if (!path.startsWith('/api/')) { next(); return; }
     if (path.endsWith('/health')) { json(res, { status: 'ok' }); return; }
-    if (path === '/api/capabilities') { json(res, { ...fixtures.catalog, operations: ['extract_style_card', 'generate_chapter', 'continue_chapter'], stream_operations: ['generate_chapter', 'continue_chapter'], ...(mode !== 'old-service' ? { writing_style: { version: 1 } } : {}) }); return; }
+    if (path === '/api/capabilities') { json(res, { ...fixtures.catalog, operations: ['extract_style_card', 'distill_style_step', 'generate_chapter', 'continue_chapter'], stream_operations: ['generate_chapter', 'continue_chapter'], ...(mode !== 'old-service' ? { writing_style: { version: 1, distillation: { version: 1, max_rounds: 5, max_output_tokens: 20000 } } } : {}) }); return; }
     let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 1024 * 1024) { json(res, { error: { message: '测试请求过大' } }, 413); return; } }
     let p; try { p = JSON.parse(raw || '{}'); } catch { json(res, { error: { message: '测试请求无效' } }, 400); return; }
     const op = path.split('/compute/')[1]?.split('/')[0];
@@ -24,9 +24,10 @@ const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BA
       if (mode === 'failure') { json(res, { error: { message: '模拟模型限流，请稍后重试；原有文风卡保留。' } }, 429); return; }
       if (mode === 'slow') await new Promise(resolve => setTimeout(resolve, 3000));
       let result;
-      if (op === 'extract_style_card') {
-        const text = p.input.source_text, snippet = text.length > 400 ? text.slice(0, 400) : text;
-        result = { name: '从正文提取的克制文风', rules: '第三人称叙述。以动作呈现判断，短句收尾，笑点后留白；不增加参考作品的剧情设定。', candidate_examples: [{ id: 'example_' + Date.now(), text: mode === 'bad-source' ? '这不是原文中的片段。' : snippet, source: p.input.source, scene_tags: ['对话', '日常'], pov: '第三人称', pace: '低' }], warnings: [] };
+      if (op === 'extract_style_card' || op === 'distill_style_step') {
+        if (mode === 'round3-failure' && p.input.round_number === 3) { json(res, { error: { message: '模拟第三轮模型失败，最近有效草稿保留。' } }, 502); return; }
+        const text = p.input.source_text, snippet = Array.from(text).slice(0, 400).join('');
+        result = { name: '从正文提取的克制文风', rules: `第三人称叙述。以动作呈现判断，短句收尾，笑点后留白；不增加参考作品的剧情设定。第${p.input.round_number || 1}轮核验。`, candidate_examples: [{ id: 'example_' + Date.now(), text: mode === 'bad-source' ? '这不是原文中的片段。' : snippet, source: p.input.source, scene_tags: ['对话', '日常'], pov: '第三人称', pace: '低' }], warnings: [] };
       } else if (op === 'generate_chapter' || op === 'continue_chapter') result = { content: `# 第 ${p.input.chapter_number || 1} 章：模拟验收\n\n门开了。他把辞职信换成了菜单。这是合成测试正文。`, title: '模拟验收', frozen_context: { narrative_context_text: '', writing_style_context: mode === 'wrong-context' ? null : p.input.writing_style_context ?? null } };
       else if (op === 'summarize_chapter') result = { summary: '合成测试章节完成。', warnings: [], review_status: 'ready' };
       else if (op === 'context_pack') result = { ok: true, prompt_text: '', context_pack: { selected_nodes: [], selected_edges: [], warnings: [] } };

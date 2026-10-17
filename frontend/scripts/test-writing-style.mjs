@@ -55,11 +55,11 @@ test('本地卡修订和项目快照独立，删除库卡不删除项目', async
   assert.equal((await f.store.listWritingStyles()).length, 0);
   assert.equal((await f.store.getProject(p.project_ref)).writing_style.rules, '新版规则');
 });
-test('v4完整备份与恢复重映射卡标识，保留旧快照，排除密钥且不覆盖现有卡', async () => {
+test('v5完整备份与恢复重映射卡标识，保留旧快照，排除密钥且不覆盖现有卡', async () => {
   const f = memoryStyleStore(), a = await f.store.saveWritingStyle(card());
   const p = f.types.emptyProject('作品'); await f.store.putProject(p); await f.store.selectProjectWritingStyle(p.project_ref, a);
   await f.store.setSetting('vault:private', { version: 3, api_key: 'SYNTHETIC_ONLY' });
-  const backup = await f.store.createBackup(); assert.equal(backup.version, 4); assert.equal(backup.writing_styles.length, 1); assert.equal(JSON.stringify(backup).includes('SYNTHETIC_ONLY'), false);
+  const backup = await f.store.createBackup(); assert.equal(backup.version, 5); assert.equal(backup.writing_styles.length, 1); assert.equal(JSON.stringify(backup).includes('SYNTHETIC_ONLY'), false);
   const refs = await f.store.restoreBackup(JSON.stringify(backup)), restored = await f.store.getProject(refs[0]);
   assert.notEqual(restored.writing_style.id, a.id); assert.equal(restored.writing_style.rules, a.rules);
   const cards = await f.store.listWritingStyles(); assert.equal(cards.length, 2); assert.ok(cards.some(c => c.id === restored.writing_style.id));

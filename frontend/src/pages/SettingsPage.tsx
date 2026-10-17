@@ -35,8 +35,8 @@ import WritingStyleLibrary from '../components/WritingStyleLibrary';
 
 const apiStatusConfig = {
   loading: { status: "processing" as const, text: "检测中" },
-  online: { status: "success" as const, text: "API 在线" },
-  offline: { status: "error" as const, text: "API 离线" },
+  online: { status: "success" as const, text: "计算服务已连接" },
+  offline: { status: "error" as const, text: "计算服务未连接" },
 };
 
 type GenerationSettingsForm = {
@@ -108,7 +108,7 @@ export default function SettingsPage() {
         temperature: values.temperature,
       });
       if (useAppStore.getState().selectedProjectRef === selectedProjectRef) {
-        message.success("项目生成设置已保存。");
+        message.success("项目生成设置已更新。");
         await refreshProject();
       }
     } catch (e) {
@@ -131,7 +131,7 @@ export default function SettingsPage() {
         title={
           <Space>
             <ApiOutlined style={{ color: "var(--muted)" }} />
-            <span>后端状态</span>
+            <span>服务状态</span>
           </Space>
         }
       >
@@ -139,15 +139,15 @@ export default function SettingsPage() {
           <Descriptions.Item label="状态">
             <Badge status={status.status} text={status.text} />
           </Descriptions.Item>
-          <Descriptions.Item label="API Base URL">
-            <code>{API_BASE_URL}</code>
+          <Descriptions.Item label="计算服务地址">
+            <code>{API_BASE_URL || "与网页同源的计算服务"}</code>
           </Descriptions.Item>
           <Descriptions.Item label="健康检查">
-            {apiStatus === "online" ? "ok" : apiStatus === "offline" ? "unavailable" : "checking"}
+            {apiStatus === "online" ? "正常" : apiStatus === "offline" ? "未连接" : "检测中"}
           </Descriptions.Item>
         </Descriptions>
         {apiStatus === "offline" && (
-          <Alert type="error" showIcon message="无法连接后端 API，请先启动 FastAPI 服务。" style={{ marginTop: 8 }} />
+          <Alert type="error" showIcon message="计算服务暂未连接，请检查服务是否已启动。" style={{ marginTop: 8 }} />
         )}
       </Card>
 
@@ -173,8 +173,8 @@ export default function SettingsPage() {
       >
         {generationStatus ? (
           <Descriptions column={1} size="small" bordered>
-            <Descriptions.Item label="进行中">{generationStatus.running ? "true" : "false"}</Descriptions.Item>
-            <Descriptions.Item label="任务类型">{generationStatus.task_type || "-"}</Descriptions.Item>
+            <Descriptions.Item label="进行中">{generationStatus.running ? "处理中" : "空闲"}</Descriptions.Item>
+            <Descriptions.Item label="任务类型">{generationStatus.task_type ? "创作任务" : "暂无任务"}</Descriptions.Item>
             <Descriptions.Item label="目标">{generationStatus.target || "-"}</Descriptions.Item>
             {generationStatus.last_error && (
               <Descriptions.Item label="最近错误">

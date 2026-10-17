@@ -1,6 +1,7 @@
 import { lazy, useCallback, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useApiHealth, useProjects } from "./hooks/useProjectData";
+import WorkspaceNotice from './components/WorkspaceNotice';
 import IntroAnimation from "./components/intro/IntroAnimation";
 import AppLayout from "./components/layout/AppLayout";
 import DashboardPage from "./pages/DashboardPage";
@@ -10,11 +11,15 @@ const GraphPage = lazy(() => import("./pages/GraphPage"));
 import SettingsPage from "./pages/SettingsPage";
 import ReviewPage from "./pages/ReviewPage";
 import LibraryPage from "./pages/LibraryPage";
+import { useAppStore } from './store/useAppStore';
+import './localFolderSync';
 import { markIntroSeen, shouldShowIntro } from "./appConfig";
 
 export default function App() {
   useApiHealth();
   const { refresh } = useProjects();
+  const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+  useEffect(() => { const opened = () => { useAppStore.getState().selectProject(null); setWorkspaceEpoch(value => value + 1); }; window.addEventListener('braipen:workspace-opened', opened); return () => window.removeEventListener('braipen:workspace-opened', opened); }, []);
   const [introDone, setIntroDone] = useState(() => !shouldShowIntro());
   const finishIntro = useCallback(() => { markIntroSeen(); setIntroDone(true); }, []);
 
@@ -25,7 +30,8 @@ export default function App() {
   return (
     <>
       {!introDone && <IntroAnimation onFinish={finishIntro} />}
-      <div inert={!introDone}>
+      <div key={workspaceEpoch} inert={!introDone}>
+      <WorkspaceNotice />
       <Routes>
         <Route element={<AppLayout onReplayIntro={() => setIntroDone(false)} />}>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />

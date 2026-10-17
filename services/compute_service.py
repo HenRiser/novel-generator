@@ -40,7 +40,7 @@ from services.chapter_planning_contract import validate_candidate
 from services.chapter_planning_service import plan_chapter, stream_plan_chapter
 from services.work_limits import MAX_GRAPH_NODES, WorkloadLimitError, check_graph_counts
 from structured_schemas import obj, S
-from services.writing_style_service import validate_style_context, append_style_reference, extraction_messages, validate_extraction, validate_source
+from services.writing_style_service import validate_style_context, append_style_reference, extraction_messages, validate_extraction, validate_source, distillation_messages, DISTILLATION_OUTPUT_TOKENS
 
 
 async def request_text(provider, messages, **kwargs):
@@ -65,7 +65,7 @@ def provider_config(credentials, operation):
 MODEL_OPERATIONS = frozenset({
     "connection_test", "list_models", "expand_setting", "generate_outline", "generate_characters",
     "generate_chapter", "continue_chapter", "summarize_chapter", "story_delta",
-    "import_chapter", "import_synthesis", "plan_chapter", "extract_style_card",
+    "import_chapter", "import_synthesis", "plan_chapter", "extract_style_card", "distill_style_step",
 })
 OPERATIONS = MODEL_OPERATIONS | {
     "context_pack", "graph_change", "chapter_task", "scene_plan", "review_change",
@@ -614,6 +614,17 @@ async def compute(operation: str, data: dict[str, Any], credentials: dict[str, A
     if operation == "connection_test":
         await request_text(provider, [{"role": "user", "content": "Reply OK."}], temperature=0, max_tokens=128, usage_metrics=metrics)
         return {"ok": True, "message": "DeepSeek 连接正常，凭据未在服务器保存。"}
+    if operation == "distill_style_step":
+        try:
+            source_text = data.get("source_text")
+            messages = distillation_messages(source_text, data.get("round_number"), data.get("previous_draft"))
+            source = validate_source(data.get("source"))
+            if source["kind"] == "project" and len(source.get("chapter_numbers", [])) != 1:
+                raise ValueError("一次只可分析一章，请选择一个章节。")
+            raw = await request_text(provider, messages, temperature=.2, max_tokens=DISTILLATION_OUTPUT_TOKENS, json_mode=True, usage_metrics=metrics)
+            return validate_extraction(parse_model_json_response(raw), source_text, source)
+        except ValueError as exc:
+            raise ComputeError(str(exc), "invalid_style_extraction") from exc
     if operation == "extract_style_card":
         source_text = data.get("source_text")
         try:

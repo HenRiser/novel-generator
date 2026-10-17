@@ -148,6 +148,7 @@ export async function requestFingerprint(connection:ConnectionSnapshot,operation
   else if(operation==='import_chapter')pairs=[[6000,.2]];
   else if(operation==='import_synthesis')pairs=[[8000,.2]];
   else if(operation==='extract_style_card')pairs=[[4000,.2]];
+  else if(operation==='distill_style_step')pairs=[[20000,.2]];
   else if(operation==='connection_test')pairs=connection.policy.structured==='unsupported'?[[512,1]]:[[512,1],[512,1]];
   const hex=(number:number)=>{const bytes=new ArrayBuffer(8);new DataView(bytes).setFloat64(0,number===0?0:number);return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');};
   const parameters=pairs.map(([tokens,temp])=>({tokens,temperature:connection.policy.temperature==='omit'?null:hex(connection.policy.temperature==='fixed'?connection.policy.temperature_fixed:temp)}));

@@ -3,12 +3,17 @@ import { Alert, Empty, Spin, Tabs, Typography, Button, Checkbox, Input, Space } 
 import { getProjectCharacters, getProjectOutline, expandProjectSetting, updateProjectConfig, getProject } from "../api";
 import { useAppStore } from "../store/useAppStore";
 import { SETTING_RESULT_FIELDS, type SettingField } from '../settingGeneration';
+import { getWorkspaceDraft, setWorkspaceDraft } from '../localStore';
 import ProjectWritingStyle from './ProjectWritingStyle';
 
 const fieldLabels: Record<string, string> = { raw_story_idea: '白话故事设想', protagonist: '主角', supporting_characters: '配角', worldview: '世界观', core_conflict: '核心冲突', genre: '类型', style: '风格', word_count_range: '单章字数' };
 const generationFields = Object.keys(SETTING_RESULT_FIELDS) as SettingField[];
 // Keep unsaved author edits during in-page navigation, including a trip to unlock a model connection.
-const editingDrafts = new Map<string, { snapshot: string; values: Record<string, string>; fields: SettingField[] }>();
+const editingDrafts = {
+  get: (ref: string) => getWorkspaceDraft<{ snapshot: string; values: Record<string, string>; fields: SettingField[] }>('setting:' + ref),
+  set: (ref: string, value: unknown) => setWorkspaceDraft('setting:' + ref, value),
+  delete: (ref: string) => { if (getWorkspaceDraft('setting:' + ref)) setWorkspaceDraft('setting:' + ref, undefined); },
+};
 
 /**
  * 设定资产面板：展示项目大纲（novel_outline.md）与人物卡（characters.md）。

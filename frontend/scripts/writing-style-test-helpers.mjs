@@ -12,9 +12,10 @@ export function loadStyleModule(extra = {}) {
 }
 
 /** Transactional event adapter, including rollback, for the real localStore module. */
-export function memoryStyleStore() {
+export function memoryStyleStore({ beforeBrowserWrite } = {}) {
   const rows = { projects: new Map(), settings: new Map(), imports: new Map(), cover_media: new Map() };
   const db = { transaction(names, mode) {
+    if (mode === 'readwrite') beforeBrowserWrite?.();
     const working = Object.fromEntries(names.map(name => [name, structuredClone(rows[name])])), tx = {};
     let pending = 0, closed = false;
     const complete = () => queueMicrotask(() => {
@@ -38,6 +39,7 @@ export function memoryStyleStore() {
         put: value => request(() => { working[name].set(name === 'settings' ? value.key : name === 'projects' ? value.project_ref : value.id, structuredClone(value)); }),
         add: value => request(() => { const key = name === 'settings' ? value.key : name === 'projects' ? value.project_ref : value.id; if (working[name].has(key)) throw new Error('duplicate'); working[name].set(key, structuredClone(value)); }),
         delete: key => request(() => working[name].delete(key)),
+        clear: () => request(() => working[name].clear()),
       };
     };
     complete(); return tx;
@@ -45,7 +47,7 @@ export function memoryStyleStore() {
   const indexedDB = { open() { const r = { result: db }; queueMicrotask(() => r.onsuccess?.()); return r; } };
   const style = loadStyleModule(), exports = {};
   const source = ts.transpileModule(readFileSync(new URL('../src/localStore.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  runInNewContext(source, { exports, indexedDB, structuredClone, queueMicrotask, Blob, crypto: webcrypto, atob, btoa,
+  runInNewContext(source, { exports, indexedDB, structuredClone, queueMicrotask, Blob, TextEncoder, DOMException, crypto: webcrypto, atob, btoa,
     require: name => { if (name === './writingStyle') return style; if (name === './planningTrace') return {}; throw new Error(name); },
   });
   const types = {};
