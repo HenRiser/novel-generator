@@ -128,7 +128,7 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
   const stop = () => {
     controllerRef.current?.abort(); controllerRef.current = null;
     setStatus("stopped"); setOutlineGenerating(false); setBusy({ chapterStreaming: false, outlineGenerating: false });
-    setNotice("已断开生成连接。后端可能已完成保存，请刷新章节目录核对结果。");
+    setNotice("已停止接收。已完成内容与可恢复草稿请在“任务与恢复”查看，并确认本机工作区保存状态。");
   };
   const runBatch = async () => {
     if (!selectedProjectRef || !canGenerate || !readiness.value?.ready || chapterNumber !== nextChapter || endChapter < chapterNumber || endChapter > chapterNumber + 9) return;
@@ -205,7 +205,8 @@ export default function GenerationPanel({ onStreamDone, onAssetsGenerated, targe
     {readiness.error && apiStatus === "online" && <Alert type="warning" showIcon message="暂时无法确认生成条件，正文生成已暂停。" description={readiness.error} action={<Button size="small" onClick={readiness.refresh}>重试检查</Button>} />}
     {readiness.value?.blockers.map((blocker) => <Alert key={`${blocker.code}-${blocker.chapter_number ?? "project"}`} type={blocker.action === "wait" ? "info" : "warning"} showIcon message={blocker.message}
       description={blocker.action === "project_settings" ? "在「故事设定 → 创作设定」手动填写，或点击某项旁的「用白话生成」；也可以勾选多项，一起生成。" : undefined}
-      action={blocker.action === "confirm_chapter" || blocker.action === "retry_summary" || blocker.action === "read_chapter"
+      action={blocker.code === "chapter_missing" ? <Button size="small" onClick={() => onTargetChapterChange(blocker.chapter_number!)}>转到第 {blocker.chapter_number} 章</Button>
+        : blocker.action === "confirm_chapter" || blocker.action === "retry_summary" || blocker.action === "read_chapter"
         ? <Link to={`/reader?chapter=${blocker.chapter_number}`}><Button size="small">{blocker.action === "confirm_chapter" ? "去确认正文" : blocker.action === "retry_summary" ? "查看并重试摘要" : "查看章节"}</Button></Link>
         : blocker.action === "generate_assets" ? <Button size="small" onClick={onAssetsGenerated}>查看故事设定</Button>
         : blocker.action === "model_settings" ? <Link to="/settings"><Button size="small">配置模型连接</Button></Link>

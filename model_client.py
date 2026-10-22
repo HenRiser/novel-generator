@@ -191,8 +191,10 @@ async def request_text_stream(config, messages, *, temperature=.7, max_tokens=40
                             if delta.get('refusal') or delta.get('tool_calls'): truncated=True
                             text=delta.get('content') or '';reasoning=delta.get('reasoning_content') or ''
                         if reasoning and isinstance(reasoning,str): yield {'kind':'reasoning','text':reasoning}
-                        if text and isinstance(text,str): seen=True;yield {'kind':'content','text':text}
+                        if text and isinstance(text,str): seen=seen or bool(text.strip());yield {'kind':'content','text':text}
                     if len(buffer)+event_bytes>MAX_EVENT_BYTES: raise DeepSeekClientError('流式事件超过容量限制。')
+                # EOF does not dispatch an unfinished SSE frame, including data after a stop.
+                if event_lines or (buffer.strip() and not buffer.startswith(b':')): raise DeepSeekClientError('模型流末尾事件不完整，未保存为完整结果。')
                 if truncated or not finished or not stopped or not seen: raise DeepSeekClientError('模型流截断、拒绝或缺少完成标记；未保存为完整结果。')
             finally: await response.aclose()
     except (DeepSeekClientError,asyncio.TimeoutError,DestinationRejected): raise

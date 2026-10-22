@@ -11,6 +11,13 @@ export function loadStyleModule(extra = {}) {
   return exports;
 }
 
+export function loadActivityModule() {
+  const exports = {};
+  const source = ts.transpileModule(readFileSync(new URL('../src/workspaceActivity.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  runInNewContext(source, { exports });
+  return exports;
+}
+
 /** Transactional event adapter, including rollback, for the real localStore module. */
 export function memoryStyleStore({ beforeBrowserWrite } = {}) {
   const rows = { projects: new Map(), settings: new Map(), imports: new Map(), cover_media: new Map() };
@@ -45,12 +52,12 @@ export function memoryStyleStore({ beforeBrowserWrite } = {}) {
     complete(); return tx;
   } };
   const indexedDB = { open() { const r = { result: db }; queueMicrotask(() => r.onsuccess?.()); return r; } };
-  const style = loadStyleModule(), exports = {};
+  const style = loadStyleModule(), activity = loadActivityModule(), exports = {};
   const source = ts.transpileModule(readFileSync(new URL('../src/localStore.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   runInNewContext(source, { exports, indexedDB, structuredClone, queueMicrotask, Blob, TextEncoder, DOMException, crypto: webcrypto, atob, btoa,
-    require: name => { if (name === './writingStyle') return style; if (name === './planningTrace') return {}; throw new Error(name); },
+    require: name => { if (name === './writingStyle') return style; if (name === './workspaceActivity') return activity; if (name === './planningTrace') return {}; throw new Error(name); },
   });
   const types = {};
   runInNewContext(ts.transpileModule(readFileSync(new URL('../src/localTypes.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: types, crypto: webcrypto });
-  return { store: exports, style, types, rows };
+  return { store: exports, style, activity, types, rows };
 }

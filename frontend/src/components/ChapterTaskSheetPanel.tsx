@@ -1,3 +1,4 @@
+import { getWorkspaceDraft, setWorkspaceDraft } from '../localStore';
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -98,6 +99,14 @@ function toForm(task: ChapterTaskSheet | null): ChapterTaskDraftRequest {
   };
 }
 
+function validEditorForm(value: unknown): value is ChapterTaskDraftRequest {
+  if (!value || typeof value !== 'object') return false;
+  const form = value as Record<string, unknown>;
+  return Object.entries(EMPTY_FORM).every(([key, fallback]) => Array.isArray(fallback)
+    ? Array.isArray(form[key]) && (form[key] as unknown[]).every(item => typeof item === 'string')
+    : typeof form[key] === typeof fallback);
+}
+
 function splitLines(value: string): string[] {
   return value.split(/\r?\n/);
 }
@@ -130,7 +139,7 @@ function formConsistencyErrors(form: ChapterTaskDraftRequest): string[] {
     NONE_BUDGET_INCOMPATIBLE_FUNCTIONS.has(form.primary_function)
   ) {
     errors.push(
-      `主要功能 ${form.primary_function} 与新增设定预算 none 不兼容；请修改章节功能或提高新增设定预算。`,
+      `主要功能 ${FUNCTION_OPTIONS.find(option => option.value === form.primary_function)?.label || "所选功能"} 与“不增加新设定”的预算 不兼容；请修改章节功能或提高新增设定预算。`,
     );
   }
   const incompatibleSecondary = form.secondary_functions.filter(
@@ -139,7 +148,7 @@ function formConsistencyErrors(form: ChapterTaskDraftRequest): string[] {
   );
   if (incompatibleSecondary.length > 0) {
     errors.push(
-      `次要功能 ${incompatibleSecondary.join("、")} 与新增设定预算 none 不兼容；请修改章节功能或提高新增设定预算。`,
+      `次要功能 ${incompatibleSecondary.map(value => FUNCTION_OPTIONS.find(option => option.value === value)?.label || "所选功能").join("、")} 与“不增加新设定”的预算 不兼容；请修改章节功能或提高新增设定预算。`,
     );
   }
   if (form.secondary_functions.includes(form.primary_function)) {
@@ -185,6 +194,7 @@ export function ChapterTaskSheetPanel({
   const callbacksRef = useRef({ onApprovedTaskChange, onTaskStateChange, onEditorStateChange });
   callbacksRef.current = { onApprovedTaskChange, onTaskStateChange, onEditorStateChange };
   const scope = `${projectRef}:${chapterNumber}`;
+  const draftName = `chapter-task:${scope}`;
   const activeScopeRef = useRef(scope);
   activeScopeRef.current = scope;
   const hasUnsavedChanges = JSON.stringify(form) !== savedFormRef.current;
@@ -199,7 +209,7 @@ export function ChapterTaskSheetPanel({
   const canUseApi = Boolean(projectRef && isWorkspaceProject && apiStatus === "online");
   const consistencyErrors = useMemo(() => formConsistencyErrors(form), [form]);
   const historySummary = useMemo(
-    () => (data?.history ?? []).map((task) => `r${task.revision} ${task.status}`).join(" · "),
+    () => (data?.history ?? []).map((task) => `版本 ${task.revision} · ${task.status === "approved" ? "已批准" : task.status === "draft" ? "草稿" : "已被替代"}`).join(" · "),
     [data],
   );
 
@@ -242,8 +252,10 @@ export function ChapterTaskSheetPanel({
         loadedRefreshRef.current = refreshToken;
         setData(result);
         const nextForm = toForm(result.latest_draft ?? result.approved);
-        savedFormRef.current = JSON.stringify(nextForm);
-        setForm(nextForm);
+        const cached = getWorkspaceDraft<{ base: string; form: ChapterTaskDraftRequest }>(draftName);
+        const restored = cached && typeof cached.base === 'string' && validEditorForm(cached.form) ? cached : undefined;
+        savedFormRef.current = restored?.base ?? JSON.stringify(nextForm);
+        setForm(restored?.form ?? nextForm);
         callbacksRef.current.onApprovedTaskChange(result.approved);
         callbacksRef.current.onTaskStateChange?.(result.approved, result.latest_draft);
       })
@@ -259,6 +271,20 @@ export function ChapterTaskSheetPanel({
       });
     return () => { ignore = true; };
   }, [canUseApi, chapterNumber, projectRef, scope, refreshToken, hasUnsavedChanges, saving, approving]);
+
+  useEffect(() => {
+    if (loadedScopeRef.current !== scope || !data) return;
+    if (JSON.stringify(form) !== savedFormRef.current) setWorkspaceDraft(draftName, { base: savedFormRef.current, form });
+    else if (getWorkspaceDraft(draftName)) setWorkspaceDraft(draftName, undefined);
+  }, [form, scope, data, draftName]);
+
+  const sourceChanged = Boolean(data && savedFormRef.current !== JSON.stringify(toForm(data.latest_draft ?? data.approved)));
+  function resetEditor() {
+    if (!data) return;
+    const current = toForm(data.latest_draft ?? data.approved);
+    savedFormRef.current = JSON.stringify(current);
+    setForm(current); setWorkspaceDraft(draftName, undefined);
+  }
 
   function updateList(field: ListField, value: string) {
     setForm((current) => ({ ...current, [field]: splitLines(value) }));
@@ -281,7 +307,7 @@ export function ChapterTaskSheetPanel({
   }
 
   async function saveDraft() {
-    if (!canUseApi) {
+    if (!canUseApi || sourceChanged) {
       return;
     }
     if (consistencyErrors.length > 0) {
@@ -300,6 +326,8 @@ export function ChapterTaskSheetPanel({
         payload[field] = [...new Set(form[field].map((item) => item.trim()).filter(Boolean))];
       }
       const result = await saveChapterTaskDraft(projectRef, chapterNumber, payload);
+      const pending = getWorkspaceDraft<{ form: unknown }>(draftName);
+      if (pending && JSON.stringify(pending.form) === JSON.stringify(form)) setWorkspaceDraft(draftName, undefined);
       if (!isCurrent()) return;
       setData(result);
       const nextForm = toForm(result.latest_draft);
@@ -318,7 +346,7 @@ export function ChapterTaskSheetPanel({
 
   async function approveDraft() {
     const draft = data?.latest_draft;
-    if (!canUseApi || !draft || hasUnsavedChanges) {
+    if (!canUseApi || !draft || hasUnsavedChanges || sourceChanged) {
       return;
     }
     const lifecycle = lifecycleRef.current;
@@ -369,11 +397,12 @@ export function ChapterTaskSheetPanel({
         </Space>
       }
     >
-      {!projectRef && <Alert type="info" showIcon message="选择 workspace 项目后创建章节任务单。" />}
+      {!projectRef && <Alert type="info" showIcon message="选择工作区中的作品后创建章节任务单。" />}
       {projectRef && !isWorkspaceProject && (
-        <Alert type="warning" showIcon message="章节任务单 v1 仅支持 workspace book 项目。" />
+        <Alert type="warning" showIcon message="请先将作品导入当前工作区，再创建章节任务单。" />
       )}
 
+      {sourceChanged && <Alert type="warning" showIcon message="已恢复编辑稿，但已保存的规划发生变化。" description="请先复制需要保留的修改，再载入最新规划，避免覆盖新版本。" action={<Button size="small" onClick={resetEditor} disabled={saving || approving}>放弃编辑稿并载入最新规划</Button>} style={{ marginBottom: 12 }} />}
       <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
         <Descriptions.Item label="生成生效">{data?.approved ? `版本 ${data.approved.revision}` : "无"}</Descriptions.Item>
         <Descriptions.Item label="编辑中">{data?.latest_draft ? `版本 ${data.latest_draft.revision}` : "无"}</Descriptions.Item>
@@ -511,13 +540,13 @@ export function ChapterTaskSheetPanel({
         ))}
       </div>
 
-      {hasUnsavedChanges && <Alert type="info" showIcon message="有未保存的修改，请先保存草稿，再批准当前内容。" style={{ marginTop: 16 }} />}
+      {hasUnsavedChanges && <Alert type="info" showIcon message="编辑稿已纳入工作区；请保存草稿并批准后用于正文。关闭页面前请确认本机保存状态。" style={{ marginTop: 16 }} />}
       <Divider style={{ margin: "16px 0" }} />
       <Space>
         <Button
           type="default"
           onClick={() => void saveDraft()}
-          disabled={fieldsDisabled || consistencyErrors.length > 0}
+          disabled={fieldsDisabled || sourceChanged || consistencyErrors.length > 0}
           loading={saving}
         >
           {data?.latest_draft ? "保存草稿" : data?.approved ? "创建新草稿修订" : "保存草稿"}
@@ -525,7 +554,7 @@ export function ChapterTaskSheetPanel({
         <Button
           type="primary"
           onClick={() => void approveDraft()}
-          disabled={fieldsDisabled || consistencyErrors.length > 0 || !data?.latest_draft || hasUnsavedChanges}
+          disabled={fieldsDisabled || sourceChanged || consistencyErrors.length > 0 || !data?.latest_draft || hasUnsavedChanges}
           loading={approving}
         >
           批准草稿

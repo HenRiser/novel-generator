@@ -26,11 +26,136 @@ test('写盘失败不提交新版项目，重试后写入成功', async () => {
   await assert.rejects(f.store.updateProject(p.project_ref, value => { value.title = '新项目'; }, 0), /磁盘|无法保存/);
   assert.equal((await f.store.getProject(p.project_ref)).title, '原项目');
   assert.equal((await f.store.getProject(p.project_ref)).revision, 0);
+  assert.equal(f.store.workspaceHasUnsavedChanges(), true);
+  assert.equal((await f.store.createBackup()).projects[0].title, '新项目');
   f.store.setWorkspaceWriter(async snapshot => { written = structuredClone(snapshot); });
-  await f.store.updateProject(p.project_ref, value => { value.title = '新项目'; }, 0);
+  await f.store.flushWorkspace();
   assert.equal(written.projects[0].title, '新项目');
   assert.equal((await f.store.getProject(p.project_ref)).revision, 1);
   assert.equal(f.store.workspaceHasUnsavedChanges(), false);
+});
+
+test('失败候选不可被后续更新覆盖，普通下载合并最新编辑稿，重试保留修订校验', async () => {
+  const f = memoryStyleStore(), p = f.types.emptyProject('原项目'); await f.store.putProject(p);
+  f.store.setWorkspaceWriter(async () => { throw new Error('磁盘故障'); });
+  await assert.rejects(f.store.updateProject(p.project_ref, value => { value.assets.outline = '完整新大纲'; }, 0));
+  await assert.rejects(f.store.updateProject(p.project_ref, value => { value.title = '后续覆盖'; }, 0), /重试保存/);
+  f.store.setWorkspaceDraft('qa', { content: '失败后继续编辑的正文' });
+  const backup = await f.store.createBackup();
+  assert.equal(backup.projects[0].assets.outline, '完整新大纲'); assert.equal(backup.projects[0].title, '原项目');
+  assert.equal(backup.drafts[0].value.content, '失败后继续编辑的正文');
+  let written; f.store.setWorkspaceWriter(async value => { written = value; });
+  await f.store.flushWorkspace();
+  assert.equal(written.drafts[0].value.content, '失败后继续编辑的正文');
+  assert.equal((await f.store.getProject(p.project_ref)).revision, 1);
+  await assert.rejects(f.store.updateProject(p.project_ref, value => { value.title = '陈旧编辑'; }, 0), /已在另一处更新/);
+  assert.equal(f.store.workspaceHasUnsavedChanges(), false);
+});
+
+test('重试写盘期间新增草稿仍标记待保存，下一次保存才清除', async () => {
+  const f = memoryStyleStore(), p = f.types.emptyProject('原项目'); await f.store.putProject(p);
+  f.store.setWorkspaceWriter(async () => { throw new Error('磁盘故障'); });
+  await assert.rejects(f.store.updateProject(p.project_ref, value => { value.title = '新项目'; }));
+  let release, writing; const started = new Promise(resolve => { writing = resolve; });
+  f.store.setWorkspaceWriter(async () => { writing(); await new Promise(resolve => { release = resolve; }); });
+  const retry = f.store.flushWorkspace(); await started;
+  f.store.setWorkspaceDraft('qa', { content: '写入中的新编辑' }); release(); await retry;
+  assert.equal(f.store.workspaceHasUnsavedChanges(), true);
+  f.store.setWorkspaceWriter(async () => {}); await f.store.flushWorkspace();
+  assert.equal(f.store.workspaceHasUnsavedChanges(), false);
+});
+
+test('删除作品同一提交清理所属草稿，失败可重试且其他作品草稿保留', async () => {
+  const f = memoryStyleStore(), p = f.types.emptyProject('删除'), other = f.types.emptyProject('保留');
+  await f.store.putProject(p); await f.store.putProject(other);
+  const owned = ['setting:' + p.project_ref, 'style-source:' + p.project_ref,
+    'braipen:chapter-draft:' + JSON.stringify([p.project_ref, 1]), 'asset-editor:' + JSON.stringify([p.project_ref, 'outline']),
+    ...['chapter-task:', 'scene-plan:', 'chapter-planning:'].map(prefix => prefix + p.project_ref + ':1')];
+  for (const key of [...owned, 'setting:' + other.project_ref, 'global']) f.store.setWorkspaceDraft(key, { content: key });
+  f.store.setWorkspaceWriter(async () => { throw new Error('磁盘故障'); });
+  await assert.rejects(f.store.deleteProject(p.project_ref));
+  assert.ok(f.store.getWorkspaceDraft(owned[0])); assert.equal((await f.store.listProjects()).length, 2);
+  const candidate = await f.store.createBackup(); assert.equal(candidate.projects.length, 1); assert.equal(candidate.drafts.length, 2);
+  let disk; f.store.setWorkspaceWriter(async value => { disk = value; }); await f.store.flushWorkspace();
+  assert.equal(disk.projects.length, 1); assert.equal(disk.drafts.length, 2);
+  assert.equal(f.store.getWorkspaceDraft(owned[0]), undefined); assert.ok(f.store.getWorkspaceDraft('setting:' + other.project_ref));
+});
+
+test('打开工作区最终替换前复核未保存更新，失败候选需明确允许替换', async () => {
+  const f = memoryStyleStore(), p = f.types.emptyProject('旧作品'), target = memoryStyleStore();
+  await f.store.putProject(p); f.store.setWorkspaceWriter(async () => {}); await f.store.flushWorkspace();
+  const targetText = JSON.stringify(await target.store.createBackup());
+  f.store.setWorkspaceWriter(async () => { throw new Error('磁盘故障'); });
+  const failed = f.store.updateProject(p.project_ref, value => { value.title = '必须保留'; });
+  const opened = f.store.openWorkspace(targetText);
+  await assert.rejects(failed); await assert.rejects(opened, /未保存/);
+  assert.equal((await f.store.createBackup()).projects[0].title, '必须保留');
+  await f.store.openWorkspace(targetText, true);
+  assert.equal((await f.store.listProjects()).length, 0); assert.equal(f.store.hasRescue(), false);
+});
+
+test('旧工作区导入异步结果不能写入新工作区或污染应急副本', async () => {
+  const f = memoryStyleStore(), oldEpoch = f.store.getWorkspaceEpoch();
+  const empty = JSON.stringify(await f.store.createBackup());
+  await f.store.openWorkspace(empty);
+  await assert.rejects(f.store.putImport('late_import', { title: '旧小说' }, undefined, oldEpoch), /工作区已切换/);
+  await assert.rejects(f.store.commitImport('late_import', f.types.emptyProject('迟到提交'), oldEpoch), /工作区已切换/);
+  assert.equal((await f.store.listImports()).length, 0); assert.equal(f.store.hasRescue(), false);
+  assert.equal(f.store.workspaceHasUnsavedChanges(), false);
+  await f.store.putImport('current_import', { title: '新工作区导入' }, undefined, f.store.getWorkspaceEpoch());
+  assert.equal((await f.store.listImports()).length, 1);
+});
+
+test('切换真正执行前复查当前工作区的任务，不拒绝载入文件中的旧运行状态', async () => {
+  for (const kind of ['run', 'batch', 'cover']) {
+    const f = memoryStyleStore(), p = f.types.emptyProject('当前作品'); await f.store.putProject(p);
+    f.store.setWorkspaceWriter(async () => {}); await f.store.flushWorkspace();
+    const empty = JSON.stringify(await memoryStyleStore().store.createBackup());
+    let started, release; const entered = new Promise(resolve => { started = resolve; });
+    f.store.setWorkspaceWriter(async () => { started(); await new Promise(resolve => { release = resolve; }); });
+    const begin = kind === 'cover' ? f.store.saveCoverAttempt(p.project_ref, { id: 'attempt_test', status: 'running', started_at: new Date().toISOString() }) : f.store.updateProject(p.project_ref, value => {
+      if (kind === 'run') value.runs.push({ run_id: 'run_test', input: {}, status: 'running' });
+      else value.batch.status = 'running';
+    });
+    await entered;
+    let bindingChanged = false;
+    const change = f.store.openWorkspace(empty, true, () => { bindingChanged = true; });
+    release(); await begin; await assert.rejects(change, /正在运行/);
+    assert.equal(bindingChanged, false); assert.equal((await f.store.listProjects()).length, 1);
+    await assert.rejects(f.store.changeWorkspaceBinding(() => { bindingChanged = true; }), /正在运行/);
+    const runningSnapshot = await f.store.createBackup(), fresh = memoryStyleStore();
+    await fresh.store.openWorkspace(JSON.stringify(runningSnapshot));
+    const recovered = (await fresh.store.listProjects())[0];
+    assert.equal(recovered.project_ref, p.project_ref); assert.equal(recovered.revision, runningSnapshot.projects[0].revision);
+    if (kind === 'run') assert.equal(recovered.runs[0].status, 'interrupted');
+    if (kind === 'batch') assert.equal(recovered.batch.status, 'stopped');
+    if (kind === 'cover') assert.equal(recovered.cover.attempt.status, 'unknown');
+    await fresh.store.openWorkspace(empty);
+    assert.equal((await fresh.store.listProjects()).length, 0);
+  }
+});
+
+test('真实活动在取消清理完成前阻止切换，释放幂等且不会清除新工作区任务', async () => {
+  const f = memoryStyleStore(), empty = JSON.stringify(await f.store.createBackup());
+  const epoch = f.store.getWorkspaceEpoch(), first = f.activity.beginWorkspaceActivity(epoch), second = f.activity.beginWorkspaceActivity(epoch);
+  await assert.rejects(f.store.openWorkspace(empty, true), /处理中/);
+  first(); first(); await assert.rejects(f.store.changeWorkspaceBinding(() => {}), /处理中/);
+  assert.equal(f.activity.hasWorkspaceActivity(epoch), true);
+  second(); await f.store.openWorkspace(empty);
+  const currentEpoch = f.store.getWorkspaceEpoch(), current = f.activity.beginWorkspaceActivity(currentEpoch);
+  first(); second(); assert.equal(f.activity.hasWorkspaceActivity(currentEpoch), true);
+  await assert.rejects(f.store.openWorkspace(empty), /处理中/);
+  current(); await f.store.openWorkspace(empty);
+});
+
+test('切换与迁移IO期间不能启动新的模型任务，完成后可以重新开始', async () => {
+  const f = memoryStyleStore(), empty = JSON.stringify(await f.store.createBackup());
+  let entered, release; const started = new Promise(resolve => { entered = resolve; });
+  const open = f.store.openWorkspace(empty, false, undefined, undefined, async () => { entered(); await new Promise(resolve => { release = resolve; }); });
+  await started;
+  assert.throws(() => f.activity.beginWorkspaceActivity(f.store.getWorkspaceEpoch()), /正在切换/);
+  release(); await open;
+  const finish = f.activity.beginWorkspaceActivity(f.store.getWorkspaceEpoch()); finish();
 });
 
 test('v5重新打开保留标识、修订、文风和编辑及导入草稿', async () => {

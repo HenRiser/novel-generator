@@ -7,7 +7,8 @@ import { useCoverProject } from '../hooks/useCoverProject';
 import { imageConnections, imageSnapshot, resolveImageConnection, resolveFallbackImageConnection, acquireImageConnection, defaultImageConnectionId, fallbackImageConnectionId, setFallbackImageConnection, imageProviderPresets, type ImageProviderPreset } from '../imageConnections';
 import { requestCoverImages, CoverRequestError, canOfferSeedreamFallback } from '../imageClient';
 import { acquireConnection, capabilities, connections, resolveConnection, type ConnectionLease } from '../providerConnections';
-import { getProject } from '../localStore';
+import { getProject, getWorkspaceEpoch } from '../localStore';
+import { beginWorkspaceActivity } from '../workspaceActivity';
 import { defaultCoverLayout, getCoverBlob, saveCoverVersion, selectCoverVersion, saveCoverLayout, saveCoverConnection, saveCoverPreferences, saveCoverAttempt, MAX_COVER_VERSIONS } from '../coverStorage';
 import { coverSource, imageDataBlob, blobBase64, downloadCoverBlob, exportCover } from '../coverArtwork';
 import type { ConnectionProfile, CoverStyleId, CoverEditKind } from '../providerTypes';
@@ -94,7 +95,9 @@ export default function CoverPanel({ projectRef }: { projectRef: string }) {
     setBusy(true); setStage('准备连接'); setError(''); setNotice(''); setUnsavedImage(null); setFallbackRequest(null);
     const active = new AbortController(); controller.current = active;
     let attempted = false, saved = 0;
+    let finishActivity: (() => void) | undefined;
     try {
+      finishActivity = beginWorkspaceActivity(getWorkspaceEpoch());
       await navigator.locks.request('braipen:cover:' + projectRef, { ifAvailable: true }, async lock => {
         if (!lock) throw new Error('此作品正在另一个标签页生成图片，请等待完成。');
         const current = await getProject(projectRef);
@@ -136,7 +139,7 @@ export default function CoverPanel({ projectRef }: { projectRef: string }) {
       const text = saved ? `已保存 ${saved}/${count} 张候选，结果会保留。${message}` : message;
       if (attempted) try { await saveCoverAttempt(projectRef, { id: attempt, status: e instanceof CoverRequestError && failedCodes.has(e.code) ? 'failed' : 'unknown', started_at: startedAt, requested: count, completed: saved, error: text }, attempt); } catch { /* Keep original failure and in-memory image for download. */ }
       if (live.current) { setError(text); if (!useFallback && !active.signal.aborted && canOfferSeedreamFallback(e, snapshot?.preset || '')) setFallbackRequest({ edit }); }
-    } finally { if (live.current) { setBusy(false); setStage(''); controller.current = null; } }
+    } finally { finishActivity?.(); if (live.current) { setBusy(false); setStage(''); controller.current = null; } }
   }
   async function applyVersion() {
     if (!preview) return;

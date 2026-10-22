@@ -48,8 +48,8 @@ export default function LocalTasksPanel() {
   if (!ref || (!runs.length && !orphanSummaries.length && !recoverBatch && !running && !rescue && !error)) return null;
   return <div style={{ padding: '12px 24px 0' }} aria-label="任务恢复">
     {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 8 }} />}
-    {rescue && <Alert type="warning" showIcon title="有未保存的结果，请在刷新前下载应急副本。" action={<Button onClick={downloadRescue}>下载应急副本</Button>} />}
-    <Collapse items={[{ key: 'tasks', label: `任务与恢复 · ${running ? '正在执行' : `${runs.length + orphanSummaries.length} 项待处理`}`, children: <Space orientation="vertical" style={{ width: '100%' }}>
+    {rescue && <Alert type="warning" showIcon title="工作区有可下载的应急副本，请核对其中内容后再关闭页面。" action={<Button onClick={downloadRescue}>下载应急副本</Button>} />}
+    <Collapse items={[{ key: 'tasks', label: `当前作品的任务与恢复 · ${running ? '正在执行' : `${runs.length + orphanSummaries.length} 项待处理`}`, children: <Space orientation="vertical" style={{ width: '100%' }}>
       <p>关闭页面后任务暂停。已保存结果可以直接应用；结果未知的步骤重新执行可能再次计费。本机记住的 Key 会自动读取，仅本次使用的 Key 需重新填写。</p>
       {!running&&<details><summary>原连接已删除或缺失？修复连接关联或采用新配置</summary><Space wrap><Select aria-label="恢复连接关联" placeholder="选择匹配的连接" style={{minWidth:220}} value={replacement||undefined} onChange={setReplacement} options={connectionList.filter(p=>p.enabled).map(p=>({value:p.id,label:p.name}))}/><Button disabled={busy||!replacement} onClick={()=>void act(()=>rebindFrozenConnection(ref,replacement))}>修复连接关联</Button></Space><p>仅允许原目的地、模型与能力策略完全匹配；换服务应新建任务，不能伪装为原任务恢复。</p></details>}
       {running && <Button danger onClick={() => { const run = runs.find(r => r.status === 'running'); if (run) cancelLocalRun(ref, run.run_id); void stopLocalBatch(ref, true).catch(e => setError(String(e))); }}>立即中断当前任务</Button>}

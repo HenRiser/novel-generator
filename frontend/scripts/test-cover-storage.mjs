@@ -5,14 +5,14 @@ import { webcrypto } from 'node:crypto';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { loadStyleModule } from './writing-style-test-helpers.mjs';
+import { loadStyleModule, loadActivityModule } from './writing-style-test-helpers.mjs';
 
 function load(name, dependencies = {}, environment = {}) {
   const source = readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
   runInNewContext(outputText, { exports, structuredClone, crypto: webcrypto, Blob, atob, btoa,
-    require: key => { if (key === './writingStyle') return loadStyleModule(); assert.ok(key in dependencies, `Unexpected import ${key}`); return dependencies[key]; }, ...environment });
+    require: key => { if (key === './writingStyle') return loadStyleModule(); if (key === './workspaceActivity') return loadActivityModule(); assert.ok(key in dependencies, `Unexpected import ${key}`); return dependencies[key]; }, ...environment });
   return exports;
 }
 const store = load('localStore', { './planningTrace': { readPlanningTrace: () => ({ invalid: false, entries: [] }) } });

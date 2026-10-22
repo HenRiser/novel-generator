@@ -1,4 +1,4 @@
-// Isolated Edge profile, actual application UI/IndexedDB/canvas. No keys or model calls.
+// Isolated Edge, actual UI/canvas and memory workspace with a simulated file writer. No keys or model calls.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -8,10 +8,10 @@ import { createServer } from 'vite';
 
 const require = createRequire(import.meta.url), runtime = process.env.BRAIPEN_PLAYWRIGHT_PATH;
 const { chromium } = runtime ? await import(pathToFileURL(join(runtime, 'index.mjs')).href) : require('playwright');
-const root = fileURLToPath(new URL('../', import.meta.url)), report = resolve(process.env.BRAIPEN_REPORT_DIR || join(root, '../reports/cover-upload-2026-10-08'));
+const root = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]+$/, ''), report = resolve(process.env.BRAIPEN_REPORT_DIR || join(root, '../reports/functional-review-2026-10-23/cover/upload'));
 await mkdir(report, { recursive: true });
 const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, logLevel: 'error', server: { host: '127.0.0.1', port: 0 },
-  plugins: [{ name: 'cover-upload-check', configureServer(value) { value.middlewares.use('/__cover_upload', (_, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><title>local upload setup</title>'); }); } }] });
+  plugins: [{ name: 'cover-upload-check', configureServer(value) { value.middlewares.use('/__cover_upload', async (_, response) => { response.setHeader('Content-Type', 'text/html'); response.end(await value.transformIndexHtml('/__cover_upload', '<!doctype html><html><head><title>local upload setup</title></head><body><div id="root"></div></body></html>')); }); } }] });
 let browser, page, projectRef;
 const results = [], pageErrors = [], writes = [], external = [];
 async function step(name, task) { try { await task(); results.push({ name, status: 'passed' }); console.log('PASS ' + name); } catch (error) { results.push({ name, status: 'failed', error: error.message }); await page?.screenshot({ path: join(report, 'upload-failure.png'), fullPage: true }).catch(() => {}); throw error; } }
@@ -28,9 +28,14 @@ try {
     if (request.url().endsWith('/health')) return route.fulfill({ json: { status: 'ok' } });
     return route.fulfill({ json: { protocol_version: 2, providers: [], image_providers: [], supported_protocols: ['chat_completions'] } });
   });
+  await page.goto(origin + '/writing', { waitUntil: 'networkidle' });
+  const moduleBase = await page.evaluate(() => performance.getEntriesByType('resource').find(r => r.name.endsWith('/src/localStore.ts'))?.name.replace(/localStore\.ts$/, ''));
+  assert(moduleBase);
   await page.goto(origin + '/__cover_upload');
+  await page.evaluate(base => { window.coverModuleBase = base; }, moduleBase);
   const fixture = await page.evaluate(async () => {
-    const store = await import('/src/localStore.ts'), types = await import('/src/localTypes.ts'), preferences = await import('/src/workspacePreferences.ts');
+    const store = await import(window.coverModuleBase + 'localStore.ts'), types = await import(window.coverModuleBase + 'localTypes.ts'), preferences = await import(window.coverModuleBase + 'workspacePreferences.ts');
+    store.setWorkspaceWriter(async snapshot => { window.savedCoverWorkspace = JSON.stringify(snapshot); });
     const p = types.emptyProject('本地上传与裁剪验收', { raw_story_idea: '本地上传不读取或发送故事材料。' });
     p.assets.characters = '本地原始人物卡'; p.assets.outline = '本地原始大纲'; await store.putProject(p); preferences.rememberProject(p.project_ref);
     const canvas = document.createElement('canvas'); canvas.width = 200; canvas.height = 300;
@@ -46,14 +51,14 @@ try {
     return { ref: p.project_ref, firstId: first.id, files };
   });
   projectRef = fixture.ref;
-  const project = () => page.evaluate(async ref => (await import('/src/localStore.ts')).getProject(ref), projectRef);
+  const project = () => page.evaluate(async ref => (await import(window.coverModuleBase + 'localStore.ts')).getProject(ref), projectRef);
   const waitCount = count => page.evaluate(async ({ ref, count }) => {
-    const store = await import('/src/localStore.ts');
+    const store = await import(window.coverModuleBase + 'localStore.ts');
     for (let tries = 0; tries < 300; tries++) { if ((await store.getProject(ref)).cover.versions.length === count) return; await new Promise(resolve => setTimeout(resolve, 20)); }
     throw new Error('candidate count did not become ' + count);
   }, { ref: projectRef, count });
   const waitSelected = id => page.evaluate(async ({ ref, id }) => {
-    const store = await import('/src/localStore.ts');
+    const store = await import(window.coverModuleBase + 'localStore.ts');
     for (let tries = 0; tries < 300; tries++) { if ((await store.getProject(ref)).cover.selected_id === id) return; await new Promise(resolve => setTimeout(resolve, 20)); }
     throw new Error('selected candidate did not become ' + id);
   }, { ref: projectRef, id });
@@ -61,7 +66,7 @@ try {
   const editor = () => page.getByRole('group', { name: '2:3 封面裁剪框', exact: true });
   const save = () => page.getByRole('button', { name: '保存裁剪为候选 · 本地', exact: true }).click();
   const before = await project();
-  await page.goto(origin + '/writing'); await page.getByRole('tab', { name: '作品封面', exact: true }).click();
+  await page.evaluate(async ref => { (await import(window.coverModuleBase + 'store/useAppStore.ts')).useAppStore.getState().selectProject(ref); history.replaceState(null, '', '/writing'); await import(window.coverModuleBase + 'main.tsx'); }, projectRef); await page.getByRole('tab', { name: '作品封面', exact: true }).click();
   await page.getByLabel('上传封面图片', { exact: true }).waitFor({ state: 'visible' });
 
   await step('上传PNG显示固定2:3框；鼠标拖动和键盘滑块移动均保持边界', async () => {
@@ -95,7 +100,7 @@ try {
     await page.getByRole('button', { name: '裁剪当前预览 · 本地', exact: true }).click(); await editor().waitFor({ state: 'visible' });
     await page.getByRole('slider', { name: '裁剪范围', exact: true }).focus(); await page.getByRole('slider', { name: '裁剪范围', exact: true }).press('Home'); await save(); await waitCount(5);
     const p = await project(); assert.equal(p.cover.versions.at(-1).parent_id, parent.id); assert.equal(p.cover.selected_id, fixture.firstId); assert.equal(p.cover.versions.length, 5);
-    assert.ok(await page.evaluate(async id => (await (await import('/src/localStore.ts')).getCoverBlob(id)).size > 0, parent.media_id));
+    assert.ok(await page.evaluate(async id => (await (await import(window.coverModuleBase + 'localStore.ts')).getCoverBlob(id)).size > 0, parent.media_id));
     await page.getByRole('button', { name: '设为作品封面', exact: true }).click();
     await waitSelected(p.cover.versions.at(-1).id);
     await page.getByRole('button', { name: '预览图片版本 1', exact: true }).click(); await page.getByRole('button', { name: '设为作品封面', exact: true }).click();
@@ -109,14 +114,14 @@ try {
       const img = document.querySelector('.cover-crop-stage img'); await img.decode();
       const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight;
       const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0);
-      const { coverCropRect, initialCoverCrop } = await import('/src/coverCrop.ts'); const rect = coverCropRect(canvas.width, canvas.height, initialCoverCrop);
+      const { coverCropRect, initialCoverCrop } = await import(window.coverModuleBase + 'coverCrop.ts'); const rect = coverCropRect(canvas.width, canvas.height, initialCoverCrop);
       return { width: canvas.width, height: canvas.height, top: Array.from(ctx.getImageData(rect.x + 20, rect.y + 20, 1, 1).data), bottom: Array.from(ctx.getImageData(rect.x + 20, rect.y + rect.height - 20, 1, 1).data) };
     });
     assert.equal(displayed.width, 450); assert.equal(displayed.height, 600);
     await page.screenshot({ path: join(report, 'upload-phone-exif-display.png'), fullPage: true });
     await save(); await waitCount(6);
     const pixels = await page.evaluate(async ref => {
-      const store = await import('/src/localStore.ts'), p = await store.getProject(ref), version = p.cover.versions.at(-1), blob = await store.getCoverBlob(version.media_id), bitmap = await createImageBitmap(blob);
+      const store = await import(window.coverModuleBase + 'localStore.ts'), p = await store.getProject(ref), version = p.cover.versions.at(-1), blob = await store.getCoverBlob(version.media_id), bitmap = await createImageBitmap(blob);
       const canvas = document.createElement('canvas'); canvas.width = bitmap.width; canvas.height = bitmap.height; const ctx = canvas.getContext('2d'); ctx.drawImage(bitmap, 0, 0); bitmap.close();
       return { width: canvas.width, height: canvas.height, top: Array.from(ctx.getImageData(20, 20, 1, 1).data), bottom: Array.from(ctx.getImageData(20, canvas.height - 20, 1, 1).data) };
     }, projectRef);
@@ -171,37 +176,44 @@ try {
     await page.locator('.cover-upload').screenshot({ path: join(report, 'upload-crop-mobile-detail.png') });
     await page.getByRole('button', { name: '取消裁剪', exact: true }).click(); await page.setViewportSize({ width: 1440, height: 1100 });
   });
-  await step('刷新保留版本、选中项；v3备份恢复重映射父子版本并逐字节保留PNG', async () => {
-    await page.reload(); await page.getByRole('tab', { name: '作品封面', exact: true }).click(); await page.getByLabel('上传封面图片', { exact: true }).waitFor({ state: 'visible' });
-    const p = await project(); assert.equal(p.cover.versions.length, 6); assert.equal(p.cover.selected_id, fixture.firstId);
-    const restored = await page.evaluate(async ref => {
-      const store = await import('/src/localStore.ts'), original = await store.getProject(ref), backup = await store.createBackup(), refs = await store.restoreBackup(JSON.stringify(backup)), copy = await store.getProject(refs[0]);
-      const bytesEqual = await Promise.all(original.cover.versions.map(async (version, index) => {
-        const originalBytes = Array.from(new Uint8Array(await (await store.getCoverBlob(version.media_id)).arrayBuffer())), newBytes = Array.from(new Uint8Array(await (await store.getCoverBlob(copy.cover.versions[index].media_id)).arrayBuffer())); return JSON.stringify(originalBytes) === JSON.stringify(newBytes);
-      }));
-      return { version: backup.version, copy, bytesEqual };
-    }, projectRef);
-    assert.equal(restored.version, 3); assert.equal(restored.copy.cover.versions.length, 6); assert.ok(restored.bytesEqual.every(Boolean));
-    assert.notEqual(restored.copy.cover.versions[0].id, fixture.firstId); assert.equal(restored.copy.cover.selected_id, restored.copy.cover.versions[0].id);
-    assert.equal(restored.copy.cover.versions[4].parent_id, restored.copy.cover.versions[3].id); assert.equal(restored.copy.cover.versions[5].origin, 'upload');
+  await step('v5文件重新打开保留项目、封面和父子标识，PNG字节完全一致', async () => {
+    const backup = await page.evaluate(async () => (await import(window.coverModuleBase + 'localStore.ts')).createBackup());
+    assert.equal(backup.version, 5);
+    await page.goto(origin + '/__cover_upload');
+    await page.evaluate(async ({base, backup, ref}) => {
+      window.coverModuleBase = base; const store = await import(base + 'localStore.ts');
+      const assertEmpty = (await store.listProjects()).length;
+      if (assertEmpty !== 0) throw new Error('Fresh page must not restore creative data from browser storage');
+      await store.openWorkspace(JSON.stringify(backup));
+      store.setWorkspaceWriter(async snapshot => { window.savedCoverWorkspace = JSON.stringify(snapshot); });
+      (await import(base + 'store/useAppStore.ts')).useAppStore.getState().selectProject(ref);
+      history.replaceState(null, '', '/writing'); await import(base + 'main.tsx');
+    }, { base: moduleBase, backup, ref: projectRef });
+    await page.getByRole('tab', { name: '作品封面', exact: true }).click();
+    await page.getByLabel('上传封面图片', { exact: true }).waitFor({ state: 'visible' });
+    const p = await project(); assert.equal(p.project_ref, projectRef); assert.equal(p.cover.versions.length, 6); assert.equal(p.cover.selected_id, fixture.firstId);
+    const reopened = await page.evaluate(async () => (await import(window.coverModuleBase + 'localStore.ts')).createBackup());
+    assert.deepEqual(reopened.projects[0].cover.versions, JSON.parse(JSON.stringify(backup.projects[0].cover.versions)));
+    assert.deepEqual(reopened.cover_media, backup.cover_media);
     await page.screenshot({ path: join(report, 'upload-restored-desktop.png'), fullPage: true });
   });
-  await step('浏览器没有WebLocks时仍可纯本地保存，IndexedDB保持候选和已采用封面', async () => {
+  await step('浏览器没有WebLocks时仍可纯本地保存，工作区保留候选和已采用封面', async () => {
     await upload('image/png'); await editor().waitFor({ state: 'visible' });
     await page.evaluate(() => Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true }));
     try { await save(); await waitCount(7); const p = await project(); assert.equal(p.cover.selected_id, fixture.firstId); assert.equal(p.cover.versions.at(-1).origin, 'upload'); }
     finally { await page.evaluate(() => delete navigator.locks); }
   });
-  await step('原生IndexedDB配额异常拒绝候选且保留裁剪图，达到30版本前检拒绝读取', async () => {
+  await step('本机写盘失败保留裁剪与待保存候选，重试提交，达到30版本前检拒绝读取', async () => {
     await upload('image/png'); await editor().waitFor({ state: 'visible' });
-    await page.evaluate(() => { window.originalCoverAdd = IDBObjectStore.prototype.add; IDBObjectStore.prototype.add = function (...args) { if (this.name === 'cover_media') throw new DOMException('synthetic quota', 'QuotaExceededError'); return window.originalCoverAdd.apply(this, args); }; });
+    await page.evaluate(async () => { (await import(window.coverModuleBase + 'localStore.ts')).setWorkspaceWriter(async () => { throw new DOMException('本机存储空间不足', 'QuotaExceededError'); }); });
     await save(); await page.getByText(/存储空间不足/).waitFor({ state: 'visible' }); assert.equal((await project()).cover.versions.length, 7); assert.equal(await editor().count(), 1);
-    await page.evaluate(() => { IDBObjectStore.prototype.add = window.originalCoverAdd; delete window.originalCoverAdd; }); await page.getByRole('button', { name: '取消裁剪', exact: true }).click();
-    await page.evaluate(async ref => { const store = await import('/src/localStore.ts'); let p = await store.getProject(ref); const version = p.cover.versions[1], blob = await store.getCoverBlob(version.media_id); while (p.cover.versions.length < 30) { await store.saveCoverVersion(ref, { origin: 'upload', source: { idea: '', characters: '' }, width: version.width, height: version.height }, blob, undefined, { preserveAttempt: true }); p = await store.getProject(ref); } }, projectRef);
+    await page.evaluate(async () => { const store = await import(window.coverModuleBase + 'localStore.ts'); const pending = await store.createBackup(); if(pending.projects[0].cover.versions.length !== 8) throw new Error('Pending cover candidate missing'); store.setWorkspaceWriter(async snapshot => { window.savedCoverWorkspace = JSON.stringify(snapshot); }); await store.flushWorkspace(); });
+    assert.equal((await project()).cover.versions.length, 8); await page.getByRole('button', { name: '取消裁剪', exact: true }).click();
+    await page.evaluate(async ref => { const store = await import(window.coverModuleBase + 'localStore.ts'); let p = await store.getProject(ref); const version = p.cover.versions[1], blob = await store.getCoverBlob(version.media_id); while (p.cover.versions.length < 30) { await store.saveCoverVersion(ref, { origin: 'upload', source: { idea: '', characters: '' }, width: version.width, height: version.height }, blob, undefined, { preserveAttempt: true }); p = await store.getProject(ref); } }, projectRef);
     await upload('image/png'); await page.getByText(/本作品最多保存 30 个版本/).last().waitFor({ state: 'visible' }); assert.equal((await project()).cover.versions.length, 30); assert.equal(await editor().count(), 0);
   });
   assert.deepEqual(writes, []); assert.deepEqual(pageErrors, []); assert.equal(await page.locator('vite-error-overlay').count(), 0);
-  console.log('PASS ' + results.length + ' local upload/crop UI scenarios; zero API writes');
+  console.log('PASS ' + results.length + ' local upload/crop UI scenarios; zero API writes; simulated file writer');
 } finally {
   await writeFile(join(report, 'upload-browser-results.json'), JSON.stringify({ results, network_writes: writes, external_requests: external, pageErrors, credentials: 'none', paid_calls: 0 }, null, 2));
   await writeFile(join(report, 'upload-browser-log.txt'), results.map(result => `${result.status.toUpperCase()} ${result.name}${result.error ? ': ' + result.error : ''}`).join('\n') + `\nAPI writes: ${writes.length}; external requests: ${external.length}; page errors: ${pageErrors.length}; credentials: none\n`);

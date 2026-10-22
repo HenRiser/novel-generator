@@ -1,15 +1,18 @@
-// Real IndexedDB upgrade, atomic writes, guard revocation, quota failure, and byte-exact restore.
+// Real legacy IndexedDB read-only migration plus memory/file atomic writes, revocation, and byte-exact restore.
 // Uses the existing Playwright runtime; never sends image requests or reads real credentials.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'vite';
 
 const require = createRequire(import.meta.url);
 const runtime = process.env.BRAIPEN_PLAYWRIGHT_PATH;
 const { chromium } = runtime ? await import(pathToFileURL(join(runtime, 'index.mjs')).href) : require('playwright');
-const root = fileURLToPath(new URL('../', import.meta.url));
+const root = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]+$/, '');
+const report = resolve(process.env.BRAIPEN_REPORT_DIR || join(root, '../reports/functional-review-2026-10-23/cover/storage'));
+await mkdir(report, { recursive: true });
 const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error',
   plugins: [{ name: 'cover-storage-check', configureServer(value) {
     value.middlewares.use('/__cover_storage', (_, response) => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end('<!doctype html><title>封面存储验证</title><p>封面存储事务验证</p>'); });
@@ -32,8 +35,10 @@ try {
     legacy.cover = { layout: { title: '旧封面', author: '', titleColor: '#ffffff', authorColor: '#ffffff', titlePosition: 'top', fontFamily: 'serif', titleSize: 10, authorSize: 3 },
       selected_id: 'old_cover', versions: [{ id: 'old_cover', media_id: 'old_media', prompt: 'INTERNAL_LEGACY_PROMPT', source: { idea: '旧设想', characters: '' },
         created_at: new Date().toISOString(), width: 1, height: 1, mime_type: 'image/png' }] };
-    const pixel = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jS1sAAAAASUVORK5CYII='), c => c.charCodeAt(0));
-    // Seed the prior image schema, then validate physical prompt removal in DB4.
+    const pixelCanvas = document.createElement('canvas'); pixelCanvas.width = 1; pixelCanvas.height = 1;
+    const pixelBlob = await new Promise(resolve => pixelCanvas.toBlob(resolve, 'image/png'));
+    const pixel = new Uint8Array(await pixelBlob.arrayBuffer());
+    // Legacy records remain untouched until explicit migration and cleanup.
     await new Promise((resolve, reject) => {
       const request = indexedDB.open('braipen.local.v1', 3);
       request.onupgradeneeded = () => { for (const [name, keyPath] of [['projects', 'project_ref'], ['settings', 'key'], ['imports', 'id']]) request.result.createObjectStore(name, { keyPath }); request.result.createObjectStore('cover_media', { keyPath: 'id' }).createIndex('project_ref', 'project_ref'); };
@@ -45,8 +50,14 @@ try {
     const check = (condition, message) => { if (!condition) throw new Error(message); };
     let changed = 0;
     window.addEventListener('braipen:workflow-changed', () => changed++);
+    check((await store.listProjects()).length === 0, 'Fresh app must not load legacy creative records automatically');
+    const legacySnapshot = await store.readLegacyWorkspace();
+    check(!JSON.stringify(legacySnapshot).includes('INTERNAL_LEGACY_PROMPT'), 'Explicit migration removes obsolete prompt from file candidate');
+    await store.openWorkspace(JSON.stringify(legacySnapshot));
+    const writer = async snapshot => { window.coverWorkspaceFile = JSON.stringify(snapshot); };
+    store.setWorkspaceWriter(writer);
     const upgraded = await store.getProject(original.project_ref);
-    check(!JSON.stringify(await store.getProject(legacy.project_ref)).includes('INTERNAL_LEGACY_PROMPT'), 'Legacy prompt must be removed by database upgrade');
+    check(!JSON.stringify(await store.getProject(legacy.project_ref)).includes('INTERNAL_LEGACY_PROMPT'), 'Opened migration snapshot must omit obsolete prompt');
     const migratedBackup = await store.createBackup();
     check(!JSON.stringify(migratedBackup).includes('INTERNAL_LEGACY_PROMPT'), 'Export must not retain a legacy prompt');
     check(migratedBackup.cover_media.length === 1, 'Legacy migration must preserve image bytes');
@@ -87,13 +98,14 @@ try {
     check((await store.getProject(ref)).cover.versions.length === 2, 'Revoked guard must leave no candidate');
     await store.setSetting('connection:' + profile.id, profile);
 
-    const originalAdd = IDBObjectStore.prototype.add;
-    IDBObjectStore.prototype.add = function (...args) { if (this.name === 'cover_media') throw new DOMException('mock quota', 'QuotaExceededError'); return originalAdd.apply(this, args); };
+    store.setWorkspaceWriter(async () => { throw new DOMException('本机存储空间不足', 'QuotaExceededError'); });
     let quota = '';
     try { await cover.saveCoverVersion(ref, metadata, blob, guard); } catch (error) { quota = error.message; }
-    finally { IDBObjectStore.prototype.add = originalAdd; }
-    check(quota.includes('存储空间不足') && (await store.getProject(ref)).cover.versions.length === 2, 'Quota failure must abort image plus metadata together');
-    check(blob.size === sourceBytes.length, 'Caller retains downloadable original blob after quota failure');
+    check(quota.includes('存储空间不足') && (await store.getProject(ref)).cover.versions.length === 2, 'Write failure must not commit image or metadata');
+    check((await store.createBackup()).projects[0].cover.versions.length === 3, 'Failed candidate remains downloadable for recovery');
+    check(blob.size === sourceBytes.length, 'Caller retains original blob after failure');
+    store.setWorkspaceWriter(writer); await store.flushWorkspace();
+    check((await store.getProject(ref)).cover.versions.length === 3, 'Explicit retry commits exactly the pending candidate');
 
     const batchProject = types.emptyProject('批次事务验证'); await store.putProject(batchProject);
     const textProfile = { ...profile, id: 'text_test', key_version: 'text-key-version', revisions: [{ ...profile.revisions[0], profile_id: 'text_test', destination_fingerprint: 'text-destination' }] };
@@ -121,7 +133,7 @@ try {
     await cover.saveCoverAttempt(ref, undefined, 'attempt_stale');
     check((await store.getProject(ref)).cover.attempt.id === 'attempt_pending', 'A stale cleanup must not clear a newer image attempt');
     const backup = await store.createBackup();
-    check(backup.version === 4 && backup.cover_media.length === 2, 'Quota/revocation failures must leave no orphan media');
+    check(backup.version === 5 && backup.cover_media.length === 3, 'Only successful or explicitly retried candidates enter file backup');
     const [copyRef] = await store.restoreBackup(JSON.stringify(backup));
     const copy = await store.getProject(copyRef);
     check(copy.cover.selected_id === copy.cover.versions[0].id && copy.cover.versions[1].parent_id === copy.cover.versions[0].id, 'Restore remaps selected and parent IDs');
@@ -136,21 +148,27 @@ try {
     let dimensionError = '';
     try { await store.restoreBackup(JSON.stringify(damaged)); } catch (error) { dimensionError = error.message; }
     check(dimensionError.includes('尺寸') && (await store.listProjects()).length === 2, 'Invalid dimensions reject restore before writes');
-    IDBObjectStore.prototype.add = function (...args) { if (this.name === 'cover_media') throw new DOMException('mock quota', 'QuotaExceededError'); return originalAdd.apply(this, args); };
+    const beforeFailedRestore = await store.createBackup();
+    store.setWorkspaceWriter(async () => { throw new DOMException('本机存储空间不足', 'QuotaExceededError'); });
     try { await store.restoreBackup(JSON.stringify(backup)); } catch (error) { quota = error.message; }
-    finally { IDBObjectStore.prototype.add = originalAdd; }
-    check(quota.includes('存储空间不足') && (await store.listProjects()).length === 2, 'Restore quota failure leaves no partial project or media');
-    check((await store.createBackup()).cover_media.length === 4, 'Only committed original and restored media exist');
+    check(quota.includes('存储空间不足') && (await store.listProjects()).length === 2, 'Failed restore leaves no partial formal project');
+    check((await store.createBackup()).cover_media.length === 9, 'Failed restore retains complete candidate for a recovery download');
+    await store.openWorkspace(JSON.stringify(beforeFailedRestore), true);
+    store.setWorkspaceWriter(writer);
+    check((await store.createBackup()).cover_media.length === 6, 'Reopening saved file restores only original and successful copy media');
     await store.deleteProject(ref);
     let removed = false; try { await cover.getCoverBlob(first.media_id); } catch { removed = true; }
-    check(removed && (await store.createBackup()).cover_media.length === 2, 'Deleting a project removes only its own media');
-    return { changed, bytes: sourceBytes.length, quota, revoked, dimensions: dimensionError, remainingProjects: (await store.listProjects()).length };
+    check(removed && (await store.createBackup()).cover_media.length === 3, 'Deleting a project removes only its own media');
+    const nativeProjects = await new Promise((resolve, reject) => { const request = indexedDB.open('braipen.local.v1'); request.onsuccess = () => { const db=request.result, tx=db.transaction('projects','readonly'), rows=tx.objectStore('projects').getAll(); rows.onsuccess=()=>resolve(rows.result); tx.oncomplete=()=>db.close(); }; request.onerror=()=>reject(request.error); });
+    check(nativeProjects.length === 2 && JSON.stringify(nativeProjects).includes('INTERNAL_LEGACY_PROMPT'), 'Legacy database remains unchanged by file workspace operations');
+    return { changed, nativeLegacyProjects: nativeProjects.length, bytes: sourceBytes.length, quota, revoked, dimensions: dimensionError, remainingProjects: (await store.listProjects()).length };
   });
   assert.ok(result.changed >= 8);
   assert.equal(result.remainingProjects, 1);
   assert.deepEqual(errors, []);
-  console.log('PASS real IndexedDB upgrade, candidate merge, selection/rollback/layout, guard revocation, atomic quota failure, byte-exact backup/restore, connection remapping, interrupted attempt, and cascade deletion');
+  console.log('PASS explicit read-only legacy migration, memory/file candidate merge, selection/rollback/layout, guard revocation, atomic quota failure, byte-exact backup/restore, connection remapping, interrupted attempt, and cascade deletion');
   console.log(JSON.stringify(result));
+  await writeFile(join(report, 'storage-browser-results.json'), JSON.stringify({ status:'passed', result, errors, credentials:'none', paid_calls:0, file_writer:'simulated' }, null, 2));
 } finally {
   if (browser) await browser.close();
   await server.close();

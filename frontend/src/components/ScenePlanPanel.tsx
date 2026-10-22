@@ -1,3 +1,4 @@
+import { getWorkspaceDraft, setWorkspaceDraft } from '../localStore';
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -75,6 +76,15 @@ function toForm(plan: ScenePlan | null, task: ChapterTaskSheet | null): ScenePla
     source_chapter_task_revision: plan.source_chapter_task_revision,
     scenes: withSceneNumbers(plan.scenes),
   };
+}
+
+function validEditorForm(value: unknown): value is ScenePlanDraftRequest {
+  if (!value || typeof value !== 'object') return false;
+  const form = value as ScenePlanDraftRequest;
+  return Array.isArray(form.scenes) && form.scenes.length >= 2 && form.scenes.length <= 4 && form.scenes.every(scene => scene &&
+    Object.entries(EMPTY_SCENE).every(([key, fallback]) => Array.isArray(fallback)
+      ? Array.isArray(scene[key as keyof ScenePlanScene]) && (scene[key as keyof ScenePlanScene] as unknown[]).every(item => typeof item === 'string')
+      : typeof scene[key as keyof ScenePlanScene] === typeof fallback));
 }
 
 function splitLines(value: string): string[] {
@@ -159,6 +169,7 @@ export function ScenePlanPanel({
   const callbacksRef = useRef({ onScenePlanStateChange, approvedChapterTask, onEditorStateChange });
   callbacksRef.current = { onScenePlanStateChange, approvedChapterTask, onEditorStateChange };
   const scope = `${projectRef}:${chapterNumber}`;
+  const draftName = `scene-plan:${scope}`;
   const activeScopeRef = useRef(scope);
   activeScopeRef.current = scope;
   const hasUnsavedChanges = JSON.stringify(form) !== savedFormRef.current;
@@ -174,18 +185,18 @@ export function ScenePlanPanel({
   const hasApprovedPlan = Boolean(data?.approved);
   const hasServerDraft = Boolean(data?.latest_draft);
   const scenePlanStatusLabel = loading
-    ? "Loading"
+    ? "正在读取"
     : data?.approved
       ? `已生效版本 ${data.approved.revision}`
       : data?.latest_draft
         ? `草稿版本 ${data.latest_draft.revision}`
-        : "Not created";
+        : "未创建";
   const validationErrors = useMemo(
     () => localValidationErrors(form, currentApprovedTask),
     [currentApprovedTask, form],
   );
   const historySummary = useMemo(
-    () => (data?.history ?? []).map((plan) => `r${plan.revision} ${plan.status}`).join(" → "),
+    () => (data?.history ?? []).map((plan) => `版本 ${plan.revision} · ${plan.status === "approved" ? "已批准" : plan.status === "draft" ? "草稿" : "已被替代"}`).join(" → "),
     [data],
   );
   const unboundTaskWarning = Boolean(
@@ -236,8 +247,10 @@ export function ScenePlanPanel({
         setData(result);
         const task = result.current_approved_chapter_task ?? callbacksRef.current.approvedChapterTask;
         const nextForm = toForm(result.latest_draft ?? result.approved, task);
-        savedFormRef.current = JSON.stringify(nextForm);
-        setForm(nextForm);
+        const cached = getWorkspaceDraft<{ base: string; form: ScenePlanDraftRequest }>(draftName);
+        const restored = cached && typeof cached.base === 'string' && validEditorForm(cached.form) ? cached : undefined;
+        savedFormRef.current = restored?.base ?? JSON.stringify(nextForm);
+        setForm(restored?.form ?? nextForm);
         callbacksRef.current.onScenePlanStateChange(result.approved, result.latest_draft);
       })
       .catch((loadError) => {
@@ -252,6 +265,20 @@ export function ScenePlanPanel({
       });
     return () => { ignore = true; };
   }, [canUseApi, chapterNumber, projectRef, scope, refreshToken, hasUnsavedChanges, saving, approving]);
+
+  useEffect(() => {
+    if (loadedScopeRef.current !== scope || !data) return;
+    if (JSON.stringify(form) !== savedFormRef.current) setWorkspaceDraft(draftName, { base: savedFormRef.current, form });
+    else if (getWorkspaceDraft(draftName)) setWorkspaceDraft(draftName, undefined);
+  }, [form, scope, data, draftName]);
+
+  const sourceChanged = Boolean(data && (data.latest_draft || data.approved || form.id) && savedFormRef.current !== JSON.stringify(toForm(data.latest_draft ?? data.approved, data.current_approved_chapter_task ?? approvedChapterTask)));
+  function resetEditor() {
+    if (!data) return;
+    const current = toForm(data.latest_draft ?? data.approved, data.current_approved_chapter_task ?? approvedChapterTask);
+    savedFormRef.current = JSON.stringify(current);
+    setForm(current); setWorkspaceDraft(draftName, undefined);
+  }
 
   function updateScene(index: number, patch: Partial<ScenePlanScene>) {
     setForm((current) => ({
@@ -331,7 +358,7 @@ export function ScenePlanPanel({
   }
 
   async function saveDraft() {
-    if (!canUseApi) {
+    if (!canUseApi || sourceChanged) {
       return;
     }
     setShowValidationErrors(true);
@@ -346,6 +373,8 @@ export function ScenePlanPanel({
     setMessage("");
     try {
       const result = await saveScenePlanDraft(projectRef, chapterNumber, normalizedForm());
+      const pending = getWorkspaceDraft<{ form: unknown }>(draftName);
+      if (pending && JSON.stringify(pending.form) === JSON.stringify(form)) setWorkspaceDraft(draftName, undefined);
       if (!isCurrent()) return;
       setData(result);
       const nextForm = toForm(result.latest_draft, result.current_approved_chapter_task ?? callbacksRef.current.approvedChapterTask);
@@ -356,7 +385,7 @@ export function ScenePlanPanel({
       setMessage("场景计划草稿已保存。批准后才会进入正文生成。");
     } catch (saveError) {
       if (!isCurrent()) return;
-      setError(safePublicMessage(saveError instanceof Error ? saveError.message : "", "场景计划 draft 保存失败。"));
+      setError(safePublicMessage(saveError instanceof Error ? saveError.message : "", "场景计划草稿保存失败。"));
     } finally {
       if (isCurrent()) setSaving(false);
     }
@@ -364,7 +393,7 @@ export function ScenePlanPanel({
 
   async function approveDraft() {
     const draft = data?.latest_draft;
-    if (!canUseApi || !draft || hasUnsavedChanges) {
+    if (!canUseApi || !draft || hasUnsavedChanges || sourceChanged) {
       return;
     }
     const lifecycle = lifecycleRef.current;
@@ -420,6 +449,7 @@ export function ScenePlanPanel({
         </Space>
       }
     >
+      {sourceChanged && <Alert type="warning" showIcon message="已恢复编辑稿，但已保存的规划发生变化。" description="请先复制需要保留的修改，再载入最新规划，避免覆盖新版本。" action={<Button size="small" onClick={resetEditor} disabled={saving || approving}>放弃编辑稿并载入最新规划</Button>} style={{ marginBottom: 12 }} />}
       <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
         <Descriptions.Item label="生成生效">{data?.approved ? `版本 ${data.approved.revision}` : "无"}</Descriptions.Item>
         <Descriptions.Item label="编辑中">{data?.latest_draft ? `版本 ${data.latest_draft.revision}` : "无"}</Descriptions.Item>
@@ -530,12 +560,12 @@ export function ScenePlanPanel({
         ))}
       </div>
 
-      {hasUnsavedChanges && <Alert type="info" showIcon message="有未保存的修改，请先保存草稿，再批准当前内容。" style={{ marginTop: 16 }} />}
+      {hasUnsavedChanges && <Alert type="info" showIcon message="编辑稿已纳入工作区；请保存草稿并批准后用于正文。关闭页面前请确认本机保存状态。" style={{ marginTop: 16 }} />}
       <Divider style={{ margin: "16px 0" }} />
       <Space>
         <Button onClick={addScene} disabled={fieldsDisabled || form.scenes.length >= 4}>添加场景</Button>
-        <Button onClick={() => void saveDraft()} disabled={fieldsDisabled || saving} loading={saving}>保存草稿</Button>
-        <Button type="primary" onClick={() => void approveDraft()} disabled={fieldsDisabled || approving || !data?.latest_draft || hasUnsavedChanges} loading={approving}>
+        <Button onClick={() => void saveDraft()} disabled={fieldsDisabled || sourceChanged || saving} loading={saving}>保存草稿</Button>
+        <Button type="primary" onClick={() => void approveDraft()} disabled={fieldsDisabled || sourceChanged || approving || !data?.latest_draft || hasUnsavedChanges} loading={approving}>
           批准草稿
         </Button>
       </Space>

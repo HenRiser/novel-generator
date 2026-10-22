@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Button, Card, Modal, Space } from 'antd';
-import { createBackup, downloadRescue, exportBackup, hasRescue, MAX_BACKUP_FILE_BYTES, workspaceHasUnsavedChanges } from '../localStore';
+import { downloadRescue, exportBackup, hasRescue, MAX_BACKUP_FILE_BYTES, workspaceHasUnsavedChanges } from '../localStore';
 import { getLocalFolderSyncState, openWorkspaceFile, subscribeLocalFolderSync } from '../localFolderSync';
 import LocalFolderPanel from './LocalFolderPanel';
 
@@ -30,7 +30,7 @@ export default function LocalDataPanel({ onProjectsChanged }: Props) {
         {(dirty || !folder.folderName) && <Alert type="warning" showIcon title={dirty ? '本次内容尚未保存到本机文件，请保存或下载工作区后再关闭页面。' : '尚未打开自动保存文件夹，创作后需手动下载工作区。'} />}
         <Space wrap>
           <Button disabled={busy} onClick={() => input.current?.click()}>打开工作区文件</Button>
-          <Button disabled={busy} loading={busy} onClick={() => void action(async () => { await createBackup(); await exportBackup(); setNotice('已发起文件下载，请确认文件已保存到电脑。'); })}>下载工作区</Button>
+          <Button disabled={busy} loading={busy} onClick={() => void action(async () => { await exportBackup(); setNotice('已发起文件下载，包含尚未写入文件夹的更新；请确认文件已保存到电脑。'); })}>下载工作区</Button>
           {rescue && <Button disabled={busy} onClick={downloadRescue}>下载未保存的应急副本</Button>}
         </Space>
         <input ref={input} hidden type="file" accept=".json,application/json" onChange={event => {

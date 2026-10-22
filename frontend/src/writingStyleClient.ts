@@ -1,5 +1,7 @@
 import { compute, newIdentity } from './computeClient';
-import { capabilities, acquireConnection, resolveConnection } from './providerConnections';
+import { capabilities, acquireConnection, resolveConnection, type ConnectionLease } from './providerConnections';
+import { getWorkspaceEpoch } from './localStore';
+import { beginWorkspaceActivity } from './workspaceActivity';
 import { createWritingStyle, STYLE_LIMITS, styleCharacters, validateStyleExample, validateStyleSource, validateWritingStyle, type StyleExample, type StyleSource } from './writingStyle';
 
 export const DISTILLATION_STAGES = ['提取整体文风', '整理语言与段落', '梳理对白与节奏', '汇总文风卡', '核对原文'] as const;
@@ -37,12 +39,16 @@ export async function extractWritingStyle(sourceText: string, source: StyleSourc
 export async function distillWritingStyle(sourceText: string, source: StyleSource, connectionId?: string, model?: string, signal?: AbortSignal,
   handlers: { onProgress?: (round: number, stage: string) => void; onDraft?: (value: ExtractionResult, round: number) => void } = {}): Promise<ExtractionResult> {
   checkInput(sourceText, source); signal?.throwIfAborted();
-  const caps = await capabilities(true, signal), support = caps.writing_style?.distillation;
-  if (support?.version !== 1 || support.max_rounds !== 5 || support.max_output_tokens !== 20000 || !caps.operations?.includes('distill_style_step')) throw new Error('当前服务尚未支持五轮文风提取，请更新服务后重试。');
-  const connection = await resolveConnection(connectionId, model), lease = await acquireConnection(connection, signal);
-  const task = newIdentity();
-  let value: ExtractionResult | undefined, previous: Record<string, unknown> | null = null;
+  const endActivity = beginWorkspaceActivity(getWorkspaceEpoch());
+  let lease: ConnectionLease | undefined;
   try {
+    const caps = await capabilities(true, signal), support = caps.writing_style?.distillation;
+    if (support?.version !== 1 || support.max_rounds !== 5 || support.max_output_tokens !== 20000 || !caps.operations?.includes('distill_style_step')) throw new Error('当前服务尚未支持五轮文风提取，请更新服务后重试。');
+    signal?.throwIfAborted();
+    const connection = await resolveConnection(connectionId, model);
+    signal?.throwIfAborted(); lease = await acquireConnection(connection, signal);
+    const task = newIdentity();
+    let value: ExtractionResult | undefined, previous: Record<string, unknown> | null = null;
     for (let round = 1; round <= DISTILLATION_STAGES.length; round++) {
       signal?.throwIfAborted(); await lease.check();
       handlers.onProgress?.(round, DISTILLATION_STAGES[round - 1]);
@@ -54,5 +60,5 @@ export async function distillWritingStyle(sourceText: string, source: StyleSourc
       handlers.onDraft?.(value, round);
     }
     return value!;
-  } finally { lease.close(); }
+  } finally { try { lease?.close(); } finally { endActivity(); } }
 }

@@ -110,7 +110,8 @@ class GenerationMetricsTests(unittest.TestCase):
         ]
         for trailer in trailers:
             with self.subTest(trailer=trailer):
-                self.sdk.chat.completions.create.return_value = iter([chunk(content=BODY), trailer])
+                choices = trailer.get("choices") if isinstance(trailer, dict) else trailer.choices
+                self.sdk.chat.completions.create.return_value = iter([chunk(content=BODY, finish_reason=None if choices else "stop"), trailer])
                 metrics = {}
                 events = list(client.stream_generate_text_events(MESSAGES, usage_metrics=metrics))
                 self.assertEqual(events, [{"kind": "content", "text": BODY}])
@@ -135,7 +136,7 @@ class GenerationMetricsTests(unittest.TestCase):
 
     def test_final_compatible_usage_updates_early_zero_snapshot(self):
         self.sdk.chat.completions.create.return_value = iter([
-            chunk(content=BODY, usage={
+            chunk(content=BODY, finish_reason="stop", usage={
                 "prompt_tokens": 100, "completion_tokens": 0,
                 "prompt_tokens_details": {"cached_tokens": 0},
                 "completion_tokens_details": {"reasoning_tokens": 0},
@@ -158,7 +159,7 @@ class GenerationMetricsTests(unittest.TestCase):
             self.now = 12.0
             yield chunk(content=" \n")
             self.now = 13.0
-            yield chunk(content=BODY)
+            yield chunk(content=BODY, finish_reason="stop")
             self.now = 16.0
             yield {"choices": [], "usage": {"prompt_tokens": 100, "completion_tokens": 20}}
         self.sdk.chat.completions.create.return_value = provider()
@@ -260,7 +261,7 @@ class GenerationMetricsTests(unittest.TestCase):
         self.log.side_effect = OSError("stderr unavailable")
         for streaming in (False, True):
             with self.subTest(streaming=streaming):
-                self.sdk.chat.completions.create.return_value = iter([chunk(content=BODY)]) if streaming else response()
+                self.sdk.chat.completions.create.return_value = iter([chunk(content=BODY, finish_reason="stop")]) if streaming else response()
                 result = list(self.generate(streaming=True))[-1] if streaming else self.generate()
                 self.assertTrue(result["ok"] if streaming else result.ok)
         self.assertEqual(self.persist.call_count, 2)

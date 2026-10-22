@@ -229,6 +229,25 @@ class ProtocolAdapterTests(unittest.IsolatedAsyncioTestCase):
                 async for e in compute_service.stream_compute('generate_chapter',body_input(),{'api_key':'KEY','_connection':c},{}):events.append(e)
         self.assertEqual(events,[]);network.assert_not_called()
 
+    async def test_stream_rejects_incomplete_trailers_and_whitespace_only_body(self):
+        for protocol in ('chat_completions', 'messages'):
+            for content in ('body', ' \n\t '):
+                events = ([{'choices': [{'delta': {'content': content}, 'finish_reason': 'stop'}]}, '[DONE]']
+                          if protocol == 'chat_completions' else [
+                              {'type': 'content_block_delta', 'delta': {'type': 'text_delta', 'text': content}},
+                              {'type': 'message_delta', 'delta': {'stop_reason': 'end_turn'}}, {'type': 'message_stop'}])
+                wire = ''.join('data: ' + (e if isinstance(e, str) else json.dumps(e)) + '\n\n' for e in events).encode()
+                for tail in (b'', b': keepalive', b'data: {"error":true}', b'data: {"error":true}\n'):
+                    with self.subTest(protocol=protocol, content=content, tail=tail), \
+                         patch.object(models, '_client', client_factory(lambda req: response(wire + tail))):
+                        async def collect():
+                            return [e async for e in models.request_text_stream(models.ModelConfig(connection(protocol=protocol), 'KEY'), [{'role': 'user', 'content': 'test'}])]
+                        if content.strip() and (not tail or tail.startswith(b':')):
+                            self.assertEqual(await collect(), [{'kind': 'content', 'text': content}])
+                        else:
+                            with self.assertRaises(models.DeepSeekClientError):
+                                await collect()
+
     async def test_strict_schema_preserves_two_new_nodes_and_reviewed_edge_references(self):
         from structured_schemas import SCHEMAS
         from tests.test_story_delta_json_mode import valid_payload

@@ -3,7 +3,7 @@ import { Alert, Button, Card, Descriptions, Input, Select, Space, Tag, Typograph
 import { Link } from 'react-router-dom';
 import { safePublicMessage } from '../api';
 import { authorizePlanningRun, generateChapterPlanning, getPlanningRun, savePlanningScenes, savePlanningTask } from '../chapterPlanning';
-import { assertConnectionGuard, getProject } from '../localStore';
+import { assertConnectionGuard, getProject, getWorkspaceDraft, setWorkspaceDraft } from '../localStore';
 import { cancelLocalRun, recoverInterrupted } from '../localWorkflow';
 import { buildPlanningInput, validatePlanningResult, type PlanningRequest, type PlanningResult } from '../planningInput';
 import { readPlanningTrace } from '../planningTrace';
@@ -42,6 +42,7 @@ export function ChapterPlanningPanel({ projectRef, chapterNumber, disabled, task
   const [previewOpen, setPreviewOpen] = useState(true);
   const [error, setError] = useState(''), [message, setMessage] = useState('');
   const scope = `${projectRef}:${chapterNumber}`;
+  const draftName = `chapter-planning:${scope}`;
   const epoch = useRef(0), sequence = useRef(0), initializedScope = useRef('');
   const controller = useRef<AbortController | null>(null);
   const callbacks = useRef({ onSaved, onActionChange });
@@ -59,7 +60,8 @@ export function ChapterPlanningPanel({ projectRef, chapterNumber, disabled, task
       if (generation !== epoch.current || request !== sequence.current) return;
       if (initializedScope.current !== scope) {
         initializedScope.current = scope;
-        setForm(initialForm(run));
+        const cached = getWorkspaceDraft<Form>(draftName);
+        setForm(cached && ['author_intent', 'characters', 'forbidden'].every(key => typeof cached[key as keyof Form] === 'string') && BUDGETS.some(item => item.value === cached.canon_budget) ? cached : initialForm(run));
       }
       setProject(p); setGuardValid(authorized); setLoaded(true);
     } catch (reason) {
@@ -85,6 +87,12 @@ export function ChapterPlanningPanel({ projectRef, chapterNumber, disabled, task
       window.removeEventListener('braipen:connections-changed', connectionsChanged);
     };
   }, [projectRef, refresh]);
+
+  useEffect(() => {
+    if (!loaded || initializedScope.current !== scope || !project) return;
+    if (JSON.stringify(form) !== JSON.stringify(initialForm(getPlanningRun(project, chapterNumber)))) setWorkspaceDraft(draftName, form);
+    else if (getWorkspaceDraft(draftName)) setWorkspaceDraft(draftName, undefined);
+  }, [loaded, scope, draftName, form, project, chapterNumber]);
 
   const run = project ? getPlanningRun(project, chapterNumber) : undefined;
   let result: PlanningResult | undefined;

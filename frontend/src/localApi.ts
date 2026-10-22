@@ -9,7 +9,7 @@ import { changed, projectLock, stopLocalBatch, confirmLocalChapter, contextInput
 import type { BatchGenerationRequest, ChapterStatus, GenerationReadiness, GenerationRequest, NarrativeGraphDocument, NarrativeGraphViewsDocument, ChapterTaskResponse, ScenePlanResponse } from './types';
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
-const success = (p: LocalProject) => ({ ok: true, project_ref: p.project_ref, message: '已保存在本浏览器。' });
+const success = (p: LocalProject) => ({ ok: true, project_ref: p.project_ref, message: '内容已更新，请留意工作区的本机保存状态。' });
 const planResponse = (p: LocalProject, n: number) => p.chapter_tasks[n] || { ...success(p), chapter_number: n, task: null, approved: null, latest_draft: null, history: [] };
 const sceneResponse = (p: LocalProject, n: number) => p.scene_plans[n] || { ...success(p), chapter_number: n, plan: null, approved: null, latest_draft: null, history: [], current_approved_chapter_task: p.chapter_tasks[n]?.approved || null };
 
@@ -21,6 +21,13 @@ export async function readiness(p: LocalProject, n: number, writingStyle: 'proje
   if (fields.some(k => !(k === 'style' && selectedStyle) && missing(k))) blockers.push({ code: 'project_settings_missing', message: '请补全小说设定。', action: 'project_settings' });
   if (!await connectionConfigured(String(p.config.connection_id || 'legacy-deepseek')).catch(() => false)) blockers.push({ code: 'model_key_missing', message: '请在模型连接中保存 API Key；旧版加密 Key 需先迁移。', action: 'model_settings' });
   const can_generate_assets = blockers.length === 0 && !fields.some(missing);
+  if (!Number.isSafeInteger(n) || n < 1) blockers.push({ code: 'chapter_number_invalid', message: '请选择有效的正整数章节编号。', action: 'wait' });
+  else {
+    const previous = Object.values(p.chapters).filter(c => c.chapter_number < n).sort((a, b) => a.chapter_number - b.chapter_number);
+    const gap = previous.findIndex((chapter, index) => chapter.chapter_number !== index + 1);
+    const missingChapter = gap >= 0 ? gap + 1 : previous.length + 1;
+    if (missingChapter < n) blockers.push({ code: 'chapter_missing', message: `第 ${missingChapter} 章尚未生成，请按顺序完成前文。`, chapter_number: missingChapter, action: 'wait' });
+  }
   if ((!p.assets.outline || !p.assets.characters) && selectedStyle && missing('style')) blockers.push({ code: 'assets_style_missing', message: '生成大纲和人物卡前，请填写创作设定中的“风格”短描述；文风卡用于正文表达。', action: 'project_settings' });
   if (!p.assets.outline || !p.assets.characters) blockers.push({ code: 'assets_missing', message: '请先生成大纲与人物卡。', action: 'generate_assets' });
   for (const c of Object.values(p.chapters)) if (c.chapter_number < n && (c.workflow.status !== 'confirmed' || c.workflow.summary_status !== 'ready')) {
@@ -45,7 +52,7 @@ function chapterStatus(p: LocalProject, n: number): ChapterStatus {
     review: { status: count('pending_review') ? 'pending_review' : 'ready', pending_count: count('pending_review'), accepted_count: count('accepted'), rejected_count: count('rejected'), failed_count: count('failed') },
     ai_runs: { chapter_generation: runIds('generate_chapter'), story_delta_analysis: runIds('story_delta') },
     events: { chapter_generated: [], story_delta_analyzed: [], knowledge_draft_change_accepted: [], knowledge_draft_change_rejected: [] },
-    context_pack: { status: 'ready', message: '使用本浏览器已审核的故事记忆。' },
+    context_pack: { status: 'ready', message: '使用当前工作区已审核的故事记忆。' },
     latest_function_review: last ? { id: last.id || '', type: last.type, verdict: last.verdict, score: last.score, categories: last.categories, created_at: last.created_at || '', ai_run_id: last.ai_run_id || '' } : null,
     warnings: p.chapters[n]?.workflow.warnings || [], next_actions: count('pending_review') ? ['review_knowledge_drafts'] : [] };
 }

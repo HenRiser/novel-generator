@@ -122,6 +122,52 @@ try {
     const saved = await project(failed);
     assert.equal(saved.assets.outline, ''); assert.equal(saved.assets.characters, '');
   });
+  await check('大纲与人物可编辑，未提交文字跨页面保留，保存后进入工作区', async () => {
+    const ref = await seed('资料编辑验收', '原始大纲。', '原始人物卡。');
+    await page.getByRole('tab', { name: '故事设定', exact: true }).click();
+    await page.getByRole('button', { name: '编辑小说大纲', exact: true }).click();
+    await page.getByRole('textbox', { name: '编辑小说大纲', exact: true }).fill('作者修改的大纲。');
+    await page.locator('a.nav-item[href="/settings"]').click();
+    await page.locator('a.nav-item[href="/writing"]').click();
+    const editor = page.getByRole('textbox', { name: '编辑小说大纲', exact: true });
+    await editor.waitFor(); assert.equal(await editor.inputValue(), '作者修改的大纲。');
+    await page.getByRole('button', { name: '保存小说大纲修改', exact: true }).click();
+    await page.getByText('作者修改的大纲。', { exact: true }).waitFor();
+    assert.equal((await project(ref)).assets.outline, '作者修改的大纲。');
+    await page.getByRole('tab', { name: '人物卡', exact: true }).click();
+    await page.getByRole('button', { name: '编辑人物卡', exact: true }).click();
+    await page.getByRole('textbox', { name: '编辑人物卡', exact: true }).fill('作者修改的人物卡。');
+    await page.getByRole('button', { name: '保存人物卡修改', exact: true }).click();
+    await page.getByText('作者修改的人物卡。', { exact: true }).waitFor();
+    assert.equal((await project(ref)).assets.characters, '作者修改的人物卡。');
+    await page.screenshot({ path: join(report, 'edited-assets.png'), animations: 'disabled' });
+  });
+  await check('资料编辑基线变化拒绝覆盖，并保留当前草稿', async () => {
+    const ref = await seed('资料冲突验收', '原始大纲。');
+    await page.getByRole('tab', { name: '故事设定', exact: true }).click();
+    await page.getByRole('button', { name: '编辑小说大纲', exact: true }).click();
+    await page.getByRole('textbox', { name: '编辑小说大纲', exact: true }).fill('尚未提交的大纲。');
+    await page.evaluate(async ({ ref, base }) => (await import(base + 'localStore.ts')).updateProject(ref, p => { p.assets.outline = '另一操作的新大纲。'; }), { ref, base: moduleBase });
+    await page.getByRole('button', { name: '保存小说大纲修改', exact: true }).click();
+    await page.getByText(/小说大纲已在其他操作中更新/).waitFor();
+    assert.equal((await project(ref)).assets.outline, '另一操作的新大纲。');
+    assert.equal(await page.getByRole('textbox', { name: '编辑小说大纲', exact: true }).inputValue(), '尚未提交的大纲。');
+  });
+  await check('只有名称与来源的文风草稿也会随工作区保留', async () => {
+    await page.locator('a.nav-item[href="/settings"]').click();
+    await page.getByRole('tab', { name: '文风库', exact: true }).click();
+    await page.getByRole('textbox', { name: '文风卡名称', exact: true }).fill('尚无规则的草稿');
+    await page.getByRole('textbox', { name: '文风来源', exact: true }).fill('尚待整理的来源');
+    await page.locator('a.nav-item[href="/writing"]').click();
+    await page.locator('a.nav-item[href="/settings"]').click();
+    await page.getByRole('tab', { name: '文风库', exact: true }).click();
+    assert.equal(await page.getByRole('textbox', { name: '文风卡名称', exact: true }).inputValue(), '尚无规则的草稿');
+    assert.equal(await page.getByRole('textbox', { name: '文风来源', exact: true }).inputValue(), '尚待整理的来源');
+    const snapshot = await page.evaluate(async base => (await import(base + 'localStore.ts')).createBackup(), moduleBase);
+    assert(snapshot.drafts.some(d => d.name === 'workspace-draft:style-editor' && d.value.card.name === '尚无规则的草稿'));
+    await page.locator('a.nav-item[href="/writing"]').click();
+    await page.getByRole('tab', { name: 'AI 共创', exact: true }).click();
+  });
   await check('桌面与手机入口完整可见，没有横向溢出', async () => {
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 1000 });

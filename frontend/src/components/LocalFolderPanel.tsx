@@ -27,7 +27,7 @@ export default function LocalFolderPanel() {
           if (workspaceHasUnsavedChanges()) Modal.confirm({ title: '当前内容尚未保存到文件', content: '请先下载工作区副本。继续打开已有工作区会替换当前页面内容；选择新的空文件夹会保存当前内容。', okText: '继续打开', cancelText: '先保留当前内容', onOk: () => action(() => chooseLocalFolder(true)) });
           else void action(() => chooseLocalFolder());
         }}>打开工作区</Button>}
-        {bound && <><Button disabled={blocked} onClick={() => void action(state.status === 'permission-required' ? reauthorizeLocalFolder : syncLocalFolderNow)}>{state.status === 'permission-required' ? '重新授权' : '保存到本机文件夹'}</Button><Button disabled={blocked} onClick={() => void action(disconnectLocalFolder)}>关闭文件夹</Button></>}
+        {bound && <><Button disabled={blocked} onClick={() => void action(state.status === 'permission-required' ? reauthorizeLocalFolder : syncLocalFolderNow)}>{state.status === 'permission-required' ? '重新授权并重试保存' : state.status === 'error' ? '重试保存到本机文件夹' : '保存到本机文件夹'}</Button><Button disabled={blocked} onClick={() => void action(disconnectLocalFolder)}>关闭文件夹</Button></>}
       </Space>
       {bound && <Space wrap>
         <Button disabled={blocked} onClick={() => void action(migrateLegacyWorkspace)}>迁移旧浏览器创作资料</Button>

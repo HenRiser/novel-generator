@@ -2,6 +2,7 @@ import type { ConnectionGuard, ConnectionProfile } from './providerTypes';
 import type { LocalProject } from './localTypes';
 import type { CoverAttempt, CoverLayout, CoverState, CoverStyleId, CoverVersion, CoverVersionInput } from './coverTypes';
 import { readPlanningTrace } from './planningTrace';
+import { beginWorkspaceTransition, hasWorkspaceActivity } from './workspaceActivity';
 import { validateWritingStyle, validateStyleContext, remapWritingStyleIds, remapWritingStyleSources, type WritingStyleCard, type WritingStyleContext } from './writingStyle';
 
 const DATABASE = 'braipen.local.v1';
@@ -71,6 +72,10 @@ const creativeSetting = (key: string) => key.startsWith('writing-style:') || key
 let workspaceWriter: ((snapshot: WorkspaceBackup) => Promise<void>) | undefined;
 let workspaceQueue: Promise<unknown> = Promise.resolve();
 let unsavedWorkspace = false;
+type PendingWorkspace = { rows: Rows; snapshot: WorkspaceBackup; removeDrafts?: (name: string) => boolean };
+let pendingWorkspace: PendingWorkspace | undefined;
+let workspaceEpoch = 0;
+export const getWorkspaceEpoch = () => workspaceEpoch;
 const editorDrafts = new Map<string, unknown>();
 export function getWorkspaceDraft<T>(key: string): T | undefined { return structuredClone(editorDrafts.get('workspace-draft:' + key)) as T | undefined; }
 export function setWorkspaceDraft(key: string, value: unknown): void {
@@ -81,15 +86,43 @@ export function setWorkspaceDraft(key: string, value: unknown): void {
   workspaceChanged();
 }
 
-export const workspaceHasUnsavedChanges = () => unsavedWorkspace;
+export const workspaceHasUnsavedChanges = () => unsavedWorkspace || Boolean(pendingWorkspace);
 export function setWorkspaceWriter(writer?: (snapshot: WorkspaceBackup) => Promise<void>): void { workspaceWriter = writer; }
+function assertWorkspaceIdle(): void {
+  if (hasWorkspaceActivity(workspaceEpoch)) throw new Error('创作请求仍在处理中，请等待完成，或取消并等待清理后再切换工作区。');
+  for (const project of workspaceRows.projects.values() as Iterable<LocalProject>) {
+    if (project.runs.some(run => run.status === 'running') || ['running', 'stopping'].includes(project.batch.status) || project.cover?.attempt?.status === 'running') {
+      throw new Error('请先结束正在运行的创作任务，再切换或关闭工作区。');
+    }
+  }
+}
+/** Change file bindings only after all earlier creative writes have settled. */
+export function changeWorkspaceBinding(change: () => void, requireSaved = false): Promise<void> {
+  const task = workspaceQueue.then(() => {
+    assertWorkspaceIdle();
+    if (requireSaved && workspaceHasUnsavedChanges()) throw new Error('请先保存或下载当前内容。');
+    change();
+  });
+  workspaceQueue = task.catch(() => undefined); return task;
+}
 export function markWorkspaceSaved(snapshot: WorkspaceBackup): void { unsavedWorkspace = JSON.stringify(snapshot.drafts) !== JSON.stringify([...editorDrafts].map(([name, value]) => ({ name, value }))); workspaceChanged(); }
 function workspaceChanged(): void { if (typeof window !== 'undefined') window.dispatchEvent(new Event('braipen:workspace-changed')); }
 
+function commitWorkspace(rows: Rows, snapshot: WorkspaceBackup, removeDrafts?: (name: string) => boolean): void {
+  for (const name of ['projects', 'imports', 'cover_media']) workspaceRows[name] = rows[name];
+  workspaceRows.settings = new Map([...rows.settings].filter(([key]) => creativeSetting(String(key))));
+  if (removeDrafts) for (const name of editorDrafts.keys()) if (removeDrafts(name)) editorDrafts.delete(name);
+  unsavedWorkspace = !workspaceWriter || JSON.stringify(snapshot.drafts) !== JSON.stringify([...editorDrafts].map(([name, value]) => ({ name, value })));
+  workspaceChanged();
+}
+
 async function transact<T>(stores: string[], mode: IDBTransactionMode,
   execute: (tx: IDBTransaction, result: (value: T) => void, fail: (error: unknown) => void) => void,
+  removeDrafts?: (name: string) => boolean,
 ): Promise<T> {
+  const epoch = workspaceEpoch;
   const run = async () => {
+    if (epoch !== workspaceEpoch) throw new Error('工作区已切换，原工作区的更新未应用。');
     const config = await browserTransact<any[]>(['settings'], 'readonly', (tx, done) => {
       const r = tx.objectStore('settings').getAll(); r.onsuccess = () => done(r.result.filter((row: any) => !creativeSetting(row.key) && row.key !== 'local-folder-sync.v1'));
     });
@@ -120,12 +153,15 @@ async function transact<T>(stores: string[], mode: IDBTransactionMode,
               const changed = stores.some(name => name !== 'settings') ||
                 JSON.stringify([...merged.settings].filter(([key]) => creativeSetting(String(key)))) !== JSON.stringify([...workspaceRows.settings]);
               if (changed) {
-                const snapshot = await backupFromRows(merged);
-                if (workspaceWriter) await workspaceWriter(snapshot);
-                for (const name of stores) if (name !== 'settings') workspaceRows[name] = merged[name];
-                workspaceRows.settings = new Map([...merged.settings].filter(([key]) => creativeSetting(String(key))));
-                unsavedWorkspace = !workspaceWriter || JSON.stringify(snapshot.drafts) !== JSON.stringify([...editorDrafts].map(([name, value]) => ({ name, value })));
-                workspaceChanged();
+                if (pendingWorkspace) throw new Error('上次更新尚未保存，请先在工作区设置中重试保存，或下载副本。');
+                const snapshot = await backupFromRows(merged, removeDrafts);
+                try { if (workspaceWriter) await workspaceWriter(snapshot); }
+                catch (error) {
+                  pendingWorkspace = { rows: merged, snapshot, removeDrafts };
+                  unsavedWorkspace = true; workspaceChanged();
+                  throw error;
+                }
+                commitWorkspace(merged, snapshot, removeDrafts);
               }
             }
             resolve(value);
@@ -420,6 +456,13 @@ export function deleteProject(ref: string): Promise<void> {
     const media = tx.objectStore('cover_media');
     const request = media.index('project_ref').openKeyCursor(ref);
     request.onsuccess = () => { const cursor = request.result; if (cursor) { media.delete(cursor.primaryKey); cursor.continue(); } };
+  }, name => {
+    if (name === 'workspace-draft:setting:' + ref || name === 'workspace-draft:style-source:' + ref) return true;
+    if (['chapter-task:', 'scene-plan:', 'chapter-planning:'].some(prefix => name.startsWith('workspace-draft:' + prefix + ref + ':'))) return true;
+    for (const prefix of ['workspace-draft:braipen:chapter-draft:', 'workspace-draft:asset-editor:']) {
+      if (name.startsWith(prefix)) { try { return JSON.parse(name.slice(prefix.length))[0] === ref; } catch { return false; } }
+    }
+    return false;
   });
 }
 
@@ -537,10 +580,12 @@ export function listImports<T>(): Promise<T[]> {
   });
 }
 
-export async function putImport(id: string, data: unknown, guard?: ConnectionGuard): Promise<void> {
+export async function putImport(id: string, data: unknown, guard?: ConnectionGuard, expectedEpoch = workspaceEpoch): Promise<void> {
+  if (expectedEpoch !== workspaceEpoch) throw new Error('工作区已切换，原工作区的导入结果未写入。');
   checkFields(data);
   try {
     await transact<void>(['imports','settings'], 'readwrite', (tx, _done, fail) => {
+      if (expectedEpoch !== workspaceEpoch) { fail(new Error('工作区已切换，原工作区的导入结果未写入。')); return; }
       const store = tx.objectStore('imports');
       const request = store.get(id);
       request.onsuccess = () => {
@@ -548,12 +593,14 @@ export async function putImport(id: string, data: unknown, guard?: ConnectionGua
         if(guard){const permission=tx.objectStore('settings').get('connection:'+guard.profile_id);permission.onsuccess=()=>{try{checkConnectionGuard(permission.result?.value,guard);save();}catch(error){fail(error);}};}else save();
       };
     });
-  } catch (error) { rememberRescue({ import_id: id, draft: data }); throw storageError(error); }
+  } catch (error) { if (expectedEpoch === workspaceEpoch) rememberRescue({ import_id: id, draft: data }); throw storageError(error); }
 }
 
-export function commitImport(id: string, project: LocalProject): Promise<string> {
+export function commitImport(id: string, project: LocalProject, expectedEpoch = workspaceEpoch): Promise<string> {
+  if (expectedEpoch !== workspaceEpoch) return Promise.reject(new Error('工作区已切换，原工作区的导入结果未写入。'));
   validateProject(project);
   return transact<string>(['imports', 'projects'], 'readwrite', (tx, done, fail) => {
+    if (expectedEpoch !== workspaceEpoch) { fail(new Error('工作区已切换，原工作区的导入结果未写入。')); return; }
     const imports = tx.objectStore('imports');
     const request = imports.get(id);
     request.onsuccess = () => {
@@ -649,7 +696,7 @@ export function rememberRescue(value: unknown): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event('braipen:rescue'));
 }
 
-export function hasRescue(): boolean { return rescue !== undefined; }
+export function hasRescue(): boolean { return rescue !== undefined || Boolean(pendingWorkspace); }
 
 function download(value: unknown, filename: string): void {
   const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
@@ -661,6 +708,11 @@ function download(value: unknown, filename: string): void {
 }
 
 export function downloadRescue(): void {
+  if (pendingWorkspace) {
+    download({ ...pendingWorkspace.snapshot, drafts: structuredClone([...editorDrafts]
+      .filter(([name]) => !pendingWorkspace!.removeDrafts?.(name)).map(([name, value]) => ({ name, value }))) }, 'braipen-rescue.json');
+    return;
+  }
   if (rescue === undefined) throw new Error('当前没有尚未保存的应急副本。');
   const projects = object(rescue) && Array.isArray(rescue.projects) ? rescue.projects : [rescue];
   try {
@@ -718,12 +770,12 @@ function validateBackupMedia(projects: LocalProject[], value: unknown): CoverMed
 }
 
 export type WorkspaceBackup = { format: string; version: number; created_at: string; connections: unknown; projects: LocalProject[]; cover_media: BackupCoverMedia[]; writing_styles: WritingStyleCard[]; imports: ImportRecord<unknown>[]; drafts: Array<{ name: string; value: unknown }> };
-async function backupFromRows(rows: Rows): Promise<WorkspaceBackup> {
+async function backupFromRows(rows: Rows, removeDrafts?: (name: string) => boolean): Promise<WorkspaceBackup> {
   const projects = structuredClone([...rows.projects.values()]) as LocalProject[];
   const settings = [...rows.settings.values()];
   const styles = settings.filter(row => row.key.startsWith(STYLE_PREFIX)).map(row => structuredClone(row.value)) as WritingStyleCard[];
   const imports = structuredClone([...rows.imports.values()]) as ImportRecord<unknown>[];
-  const drafts = structuredClone([...editorDrafts].map(([name, value]) => ({ name, value })));
+  const drafts = structuredClone([...editorDrafts].filter(([name]) => !removeDrafts?.(name)).map(([name, value]) => ({ name, value })));
   projects.forEach(validateProject); styles.forEach(validateWritingStyle); checkFields(imports); checkFields(drafts);
   const media = [...rows.cover_media.values()] as CoverMedia[];
   if (media.reduce((total, row) => total + row.blob.size, 0) > MAX_BACKUP_COVER_BYTES) throw new Error('工作区封面总量超过 120 MiB。');
@@ -732,9 +784,14 @@ async function backupFromRows(rows: Rows): Promise<WorkspaceBackup> {
   validateBackupMedia(projects, cover_media);
   return { format: 'braipen-backup', version: 5, created_at: new Date().toISOString(), connections: safeCopy(settings.filter(row => row.key.startsWith('connection:')).map(row => row.value)), projects, cover_media, writing_styles: styles, imports, drafts };
 }
-export async function createBackup(): Promise<WorkspaceBackup> {
+async function currentBackup(): Promise<WorkspaceBackup> {
   const config = await browserTransact<any[]>(['settings'], 'readonly', (tx, done) => { const r = tx.objectStore('settings').getAll(); r.onsuccess = () => done(r.result.filter((row: any) => !creativeSetting(row.key))); });
-  return backupFromRows({ ...workspaceRows, settings: new Map([...config.map(row => [row.key, row] as const), ...workspaceRows.settings]) });
+  const rows = pendingWorkspace?.rows || workspaceRows;
+  return backupFromRows({ ...rows, settings: new Map([...config.map(row => [row.key, row] as const), ...[...rows.settings].filter(([key]) => creativeSetting(String(key)))]) }, pendingWorkspace?.removeDrafts);
+}
+export async function createBackup(): Promise<WorkspaceBackup> {
+  await workspaceQueue;
+  return currentBackup();
 }
 
 export async function exportBackup(): Promise<void> {
@@ -894,33 +951,66 @@ export async function restoreBackup(text: string): Promise<string[]> {
 }
 
 /** Open a workspace in place; unlike backup recovery this preserves all identities. */
-export async function openWorkspace(text: string): Promise<void> {
+export async function openWorkspace(text: string, allowReplace = false, changeBinding?: () => void, verifySource?: () => Promise<void>, writeEmptyWorkspace?: () => Promise<void>): Promise<void> {
   const { projects, media, styles, raw } = readBackup(text);
   for (const row of media) {
     const image = await inspectCoverBlob(row.blob);
     const version = projects.flatMap(project => project.cover?.versions || []).find(item => item.media_id === row.id)!;
     if (image.width !== version.width || image.height !== version.height) throw new Error('工作区封面尺寸无效。');
   }
-  await workspaceQueue;
-  const imports = (raw.imports || []) as ImportRecord<unknown>[];
-  const drafts = (raw.drafts || []) as Array<{ name: string; value: unknown }>;
-  workspaceRows.projects = new Map(projects.map(project => [project.project_ref, project]));
-  workspaceRows.cover_media = new Map(media.map(row => [row.id, row]));
-  workspaceRows.imports = new Map(imports.map(row => [row.id, row]));
-  workspaceRows.settings = new Map(styles.map(card => [STYLE_PREFIX + card.id, { key: STYLE_PREFIX + card.id, value: card }]));
-  editorDrafts.clear(); for (const row of drafts) editorDrafts.set(row.name, row.value);
-  unsavedWorkspace = false; rescue = undefined;
-  notifyWritingStyles(false); workspaceChanged();
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('braipen:projects-changed'));
-    window.dispatchEvent(new Event('braipen:workspace-opened'));
-  }
+  const task = workspaceQueue.then(async () => {
+    assertWorkspaceIdle();
+    const endTransition = beginWorkspaceTransition(workspaceEpoch);
+    try {
+      await verifySource?.();
+      assertWorkspaceIdle();
+      if (workspaceHasUnsavedChanges() && !allowReplace) throw new Error('当前还有未保存内容，请先保存或下载副本，再打开工作区。');
+      if (writeEmptyWorkspace) {
+        if (workspaceRows.projects.size || workspaceRows.imports.size || workspaceRows.cover_media.size || workspaceRows.settings.size || editorDrafts.size) throw new Error('工作区已新增内容，请在空工作区中重新迁移。');
+        await writeEmptyWorkspace();
+      }
+      // Persisted task markers are history, not live requests in this new session.
+      for (const project of projects) {
+        for (const run of project.runs) if (run.status === 'running') {
+          run.status = 'interrupted'; run.error = run.result ? '结果已保存，确认后可直接应用，无需重新调用模型。' : '上次请求结果未知。手动重试可能再次计费。';
+        }
+        if (['running', 'stopping'].includes(project.batch.status)) Object.assign(project.batch, { status: 'stopped', stage: 'interrupted', message: '连续生成已暂停，请手动继续。' });
+        for (const chapter of Object.values(project.chapters)) if (['pending', 'running'].includes(chapter.workflow.summary_status)) {
+          Object.assign(chapter.workflow, { summary_status: 'failed', review_status: 'failed', error: '后台处理已中断，请手动继续。' });
+        }
+        if (project.cover?.attempt?.status === 'running') Object.assign(project.cover.attempt, { status: 'unknown', error: '上次图片请求结果未知，请检查已保存的候选图，避免重复调用。' });
+      }
+      workspaceEpoch++;
+      const imports = (raw.imports || []) as ImportRecord<unknown>[];
+      const drafts = (raw.drafts || []) as Array<{ name: string; value: unknown }>;
+      workspaceRows.projects = new Map(projects.map(project => [project.project_ref, project]));
+      workspaceRows.cover_media = new Map(media.map(row => [row.id, row]));
+      workspaceRows.imports = new Map(imports.map(row => [row.id, row]));
+      workspaceRows.settings = new Map(styles.map(card => [STYLE_PREFIX + card.id, { key: STYLE_PREFIX + card.id, value: card }]));
+      editorDrafts.clear(); for (const row of drafts) editorDrafts.set(row.name, row.value);
+      unsavedWorkspace = false; rescue = undefined; pendingWorkspace = undefined;
+      changeBinding?.();
+      notifyWritingStyles(false); workspaceChanged();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new Event('braipen:projects-changed'));
+        window.dispatchEvent(new Event('braipen:workspace-opened'));
+      }
+    } finally { endTransition(); }
+  });
+  workspaceQueue = task.catch(() => undefined); return task;
 }
 
 export async function flushWorkspace(): Promise<void> {
   const task = workspaceQueue.then(async () => {
     if (!workspaceWriter) throw new Error('尚未打开本机文件夹，请选择文件夹或下载工作区文件。');
-    const snapshot = await createBackup(); await workspaceWriter(snapshot); markWorkspaceSaved(snapshot);
+    const snapshot = await currentBackup(); await workspaceWriter(snapshot);
+    if (pendingWorkspace) {
+      commitWorkspace(pendingWorkspace.rows, snapshot, pendingWorkspace.removeDrafts);
+      pendingWorkspace = undefined; rescue = undefined;
+      notifyWritingStyles(false);
+      if (typeof window !== 'undefined') window.dispatchEvent(new Event('braipen:projects-changed'));
+    }
+    markWorkspaceSaved(snapshot);
   });
   workspaceQueue = task.catch(() => undefined); return task;
 }

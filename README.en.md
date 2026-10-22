@@ -9,7 +9,7 @@ A local-first novel writing workspace with author-controlled settings, planning,
 ## Features
 
 - Edit settings manually or ask a text model to fill selected protagonist, supporting-character, world or conflict fields while preserving other author edits.
-- Generate outlines and character cards, stream prose, edit and confirm chapters, continue writing, and retain versions.
+- Generate or manually edit outlines and character cards, stream prose, edit and confirm chapters, continue writing, and retain versions. Unsubmitted asset and chapter-planning edits are included in the workspace file; saves check their original content to prevent overwriting newer changes.
 - Generate batches of 1–10 chapters while the page stays open, with explicit recovery after interruption. Confirmed prose proceeds to summary and checks.
 - Request chapter-task and scene proposals through LangGraph; author approval determines what becomes generation input. No server-side persistent checkpoints.
 - Use narrative graphs, context previews, Story Delta and reviewed knowledge candidates to maintain story memory.
@@ -17,6 +17,8 @@ A local-first novel writing workspace with author-controlled settings, planning,
 - Upload and crop covers to 2:3, generate 1/2/4 candidates with five presets, use controlled edits, and retain cover versions.
 - Configure text and image connections, display model lists or enter model IDs, test connections and freeze per-request configuration.
 - Open a local folder for automatic workspace-file saving. Reopen the folder each session; unsupported browsers use file open/download. Legacy browser content has an explicit migration and cleanup flow.
+- Failed file writes preserve the complete pending workspace. Downloads include pending changes; retry commits them only after verified writing. Other formal updates wait until that pending save is resolved.
+- Workspace switching is blocked during request preparation, execution and cancellation cleanup, using the existing request timeouts. Reopened task markers become interrupted or unknown states and never trigger automatic retries.
 - Read chapters with typography preferences and choose the default Editorial theme, Silver or Midnight colors across responsive layouts.
 
 ## Writing-style cards and examples

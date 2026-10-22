@@ -39,9 +39,14 @@ The server processes only the request's selected material and credentials. Creat
 ## Checks
 
 ```powershell
+npm test
 node --test scripts/test-writing-style.mjs scripts/test-writing-style-workflow.mjs scripts/test-file-workspace.mjs scripts/test-style-distillation.mjs scripts/test-key-backup.mjs scripts/test-local-folder-sync.mjs
 npm run build
 ```
+
+`npm test` discovers the existing Node unit scripts without running browser fixtures. Browser scripts use an existing Playwright installation (`BRAIPEN_PLAYWRIGHT_PATH`) and can select the existing Python environment with `BRAIPEN_TEST_PYTHON`. `test-outline-entry-browser.mjs` covers asset editing, retained drafts and conflicts; `test-planning-drafts-browser.mjs` covers chapter and scene drafts across navigation and workspace reopening. Models are simulated and real user data is not used.
+
+`test-import-lifecycle-browser.mjs` covers cancellation, workspace switching and import drafts. `test-file-workspace-opfs-browser.mjs` exercises native browser file handles in isolated OPFS, including exclusive locks and retry; operating-system folder permission dialogs remain a separate manual check.
 
 For browser integration using real IndexedDB and mock model responses:
 

@@ -1,7 +1,8 @@
+import { beginWorkspaceActivity } from './workspaceActivity';
 import { acquireConnection, resolveConnection, legacySnapshot, capabilities, stable } from './providerConnections';
 import type { ConnectionSnapshot } from './providerTypes';
 import { compute, computeStream, computePlanningStream, newIdentity, prepareCompute, MODEL_OPERATIONS } from './computeClient';
-import { getProject, listProjects, rememberRescue, updateProject } from './localStore';
+import { getProject, getWorkspaceEpoch, listProjects, rememberRescue, updateProject } from './localStore';
 import type { LocalChapter, LocalProject, LocalRun } from './localTypes';
 import { validatePlanningResult } from './planningInput';
 import { selectPlanningTransport } from './planningStreamContract';
@@ -138,10 +139,13 @@ function requiredContent(value: unknown): string {
 
 export async function projectLock<T>(ref: string, task: () => Promise<T>): Promise<T> {
   if (!navigator.locks) throw new Error('当前浏览器不支持安全的多标签任务锁，请使用新版 Edge 或 Chrome。');
-  return navigator.locks.request(`braipen:project:${ref}`, { ifAvailable: true }, async lock => {
-    if (!lock) throw new Error('此作品正在计算，请等待完成或先停止任务。');
-    return task();
-  });
+  const finishActivity = beginWorkspaceActivity(getWorkspaceEpoch());
+  try {
+    return await navigator.locks.request(`braipen:project:${ref}`, { ifAvailable: true }, async lock => {
+      if (!lock) throw new Error('此作品正在计算，请等待完成或先停止任务。');
+      return task();
+    });
+  } finally { finishActivity(); }
 }
 
 type RunOptions = { signal?: AbortSignal; stream?: boolean; handlers?: ChapterStreamHandlers; retry?: LocalRun; connection?: ConnectionSnapshot };
@@ -279,7 +283,7 @@ export async function recoverInterrupted(ref: string): Promise<LocalProject> {
 }
 
 function validateChapterStart(p: LocalProject, number: number) {
-  if (!Number.isInteger(number) || number < 1) throw new Error('章节编号无效。');
+  if (!Number.isSafeInteger(number) || number < 1) throw new Error('章节编号无效。');
   ensureEditable(p.chapters[number]);
   const previous = Object.values(p.chapters).filter(c => c.chapter_number < number);
   if (previous.length !== number - 1) throw new Error('请按顺序生成章节，不能跳过缺失的前章。');
@@ -293,7 +297,7 @@ async function generateLocked(ref: string, number: number, request: GenerationRe
   const result = await runLocked(p, 'generate_chapter', contextInput(p, number, request as unknown as Record<string, unknown>, 'generate'), { stream: true, handlers, signal, connection: ['running','stopping'].includes(p.batch.status) ? p.batch.connection : undefined });
   const chapter = (await getProject(ref)).chapters[number];
   const event: ChapterStreamDoneEvent = { type: 'done', ok: true, chapter_number: number, title: chapter.title,
-    chapter_file: chapter.filename, workflow: chapter.workflow, message: '正文已保存在本浏览器，确认后生成摘要。',
+    chapter_file: chapter.filename, workflow: chapter.workflow, message: '正文已生成，确认后生成摘要；本机保存状态见工作区提示。',
     consistency_warnings: (result.consistency_warnings || []) as ChapterStreamDoneEvent['consistency_warnings'], function_review: result.function_review as NoRevealReview | undefined };
   handlers.onDone?.(event); return event;
 }
@@ -399,7 +403,7 @@ export async function resolveLocalRun(ref: string, id: string, saveDraft = false
 
 export async function stopLocalBatch(ref: string, immediate = false) {
   const p = await updateProject(ref, d => {
-    if (['running', 'stopping'].includes(d.batch.status)) { d.batch.status = 'stopping'; d.batch.message = '将在当前步骤保存后暂停。'; }
+    if (['running', 'stopping'].includes(d.batch.status)) { d.batch.status = 'stopping'; d.batch.message = immediate ? '正在中断当前任务。' : '将在当前章完成确认与摘要后停止。'; }
   }, undefined, false);
   if (immediate) {
     for (const run of p.runs) if (run.status === 'running') cancelLocalRun(ref, run.run_id);
@@ -457,7 +461,8 @@ export async function startLocalBatch(ref: string, request: BatchGenerationReque
             else await generateLocked(ref, n, request, {}, controller.signal);
           }
           p = await getProject(ref);
-          if (p.batch.status === 'stopping') break;
+          // A graceful stop finishes confirmation and summary for this chapter.
+          controller.signal.throwIfAborted();
           const c = p.chapters[n];
           if (c.workflow.status !== 'confirmed') await confirmLocked(ref, n, c.content, c.revision);
           await updateProject(ref, d => { d.batch.stage = 'summarizing'; }, undefined, false);

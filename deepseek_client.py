@@ -82,7 +82,7 @@ async def request_text(provider: ProviderConfig, messages: list[dict[str, str]],
             _capture_usage(response, usage)
             if not response.choices:
                 raise DeepSeekClientError("模型未返回结果。")
-            _raise_if_truncated(_finish_reason(response.choices[0]))
+            _require_complete(_finish_reason(response.choices[0]), response.choices[0].message)
             content = _extract_message_text(response.choices[0].message)
             if not content.strip():
                 raise DeepSeekClientError("模型未返回正文。")
@@ -111,7 +111,8 @@ async def request_text_stream(provider: ProviderConfig, messages: list[dict[str,
                 model=provider.model, messages=messages, temperature=temperature, max_tokens=max_tokens,
                 stream=True, stream_options={"include_usage": True}), max(0, deadline - monotonic()))
             async with stream:
-                seen_content = truncated = False
+                seen_content = False
+                finish_reason = ""
                 iterator = stream.__aiter__()
                 while True:
                     try:
@@ -120,15 +121,14 @@ async def request_text_stream(provider: ProviderConfig, messages: list[dict[str,
                         break
                     _capture_usage(chunk, usage)
                     choices = chunk.get("choices") if isinstance(chunk, dict) else getattr(chunk, "choices", None)
-                    if choices and _finish_reason(choices[0]) == "length":
-                        truncated = True
+                    finish_reason = _stream_completion(finish_reason, choices)
                     delta = _stream_chunk_delta(chunk)
                     for field, kind in (("reasoning_content", "reasoning"), ("content", "content")):
                         text = _extract_delta_field_text(delta, field)
                         if text:
                             seen_content = seen_content or (kind == "content" and bool(text.strip()))
                             yield {"kind": kind, "text": text}
-                _raise_if_truncated("length" if truncated else "")
+                _require_complete(finish_reason)
                 if not seen_content:
                     raise DeepSeekClientError("模型流结束但未返回完整正文。")
     except (DeepSeekClientError, asyncio.TimeoutError):
@@ -222,8 +222,33 @@ def _finish_reason(choice: Any) -> str:
 def _raise_if_truncated(finish_reason: str) -> None:
     if finish_reason == "length":
         raise DeepSeekClientError(
-            "模型输出达到 Token 上限，内容可能被截断，未作为完整结果保存。请提高 max_tokens 或缩小生成范围后重试。"
+            "模型输出达到令牌上限，内容可能被截断，未作为完整结果保存。请提高输出额度或缩小生成范围后重试。"
         )
+
+
+def _completion_field(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
+
+
+def _require_complete(finish_reason: str, message: Any = None) -> None:
+    _raise_if_truncated(finish_reason)
+    if finish_reason != "stop" or any(_completion_field(message, name) for name in ("refusal", "tool_calls", "function_call")):
+        raise DeepSeekClientError("模型输出中断、拒绝或缺少正常结束标记，未作为完整结果保存。")
+
+
+def _stream_completion(previous: str, choices: Any) -> str:
+    if not choices:
+        return previous  # A usage-only trailer is valid after the final choice.
+    choice = choices[0]
+    delta = _completion_field(choice, "delta")
+    if previous and any(_completion_field(delta, name) for name in ("content", "reasoning_content")):
+        raise DeepSeekClientError("模型结束后仍返回内容，未作为完整结果保存。")
+    if any(_completion_field(delta, name) for name in ("refusal", "tool_calls", "function_call")):
+        raise DeepSeekClientError("模型返回拒绝或非正文结果，未作为完整结果保存。")
+    reason = _finish_reason(choice)
+    if previous and reason:
+        raise DeepSeekClientError("模型返回重复的结束标记，未作为完整结果保存。")
+    return reason or previous
 
 
 def _capture_usage(response: Any, metrics: dict[str, Any] | None) -> None:
@@ -371,7 +396,7 @@ def generate_text(
     if not getattr(response, "choices", None):
         raise DeepSeekClientError("模型没有返回候选结果。")
 
-    _raise_if_truncated(_finish_reason(response.choices[0]))
+    _require_complete(_finish_reason(response.choices[0]), response.choices[0].message)
     content = _extract_message_text(response.choices[0].message)
     if not content:
         raise DeepSeekClientError("模型返回内容为空，请调整 Prompt 或稍后重试。")
@@ -410,14 +435,13 @@ def stream_generate_text_events(
             stream=True,
         )
         seen_content = False
-        truncated = False
+        finish_reason = ""
         for chunk in stream:
             # DeepSeek attaches usage to the final choice; compatible providers
             # may instead send a usage-only chunk with no choices.
             _capture_usage(chunk, usage_metrics)
             choices = chunk.get("choices") if isinstance(chunk, dict) else getattr(chunk, "choices", None)
-            if choices and _finish_reason(choices[0]) == "length":
-                truncated = True
+            finish_reason = _stream_completion(finish_reason, choices)
             delta = _stream_chunk_delta(chunk)
             content = _extract_delta_field_text(delta, "content")
             if content:
@@ -430,11 +454,11 @@ def stream_generate_text_events(
             if reasoning_content:
                 yield {"kind": "reasoning", "text": reasoning_content}
 
-        _raise_if_truncated("length" if truncated else "")
         if not seen_content:
             raise DeepSeekClientError(
                 "Model stream ended without final content. Increase max_tokens or use a non-reasoning model for streaming generation."
             )
+        _require_complete(finish_reason)
     except DeepSeekClientError:
         raise
     except AuthenticationError as exc:

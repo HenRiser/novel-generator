@@ -21,7 +21,7 @@ export default function WritingStyleLibrary({ projectRef }: { projectRef: string
   const options = cards.map(card => ({ value: `${card.id}@${card.revision}`, label: `${card.name} · v${card.revision}` }));
   const selected = `${draft.id}@${revision}`;
   if (revision && !options.some(option => option.value === selected)) options.push({ value: selected, label: `${draft.name} · 当前编辑的 v${revision}` });
-  useEffect(() => { if (draft.rules.trim() || draft.examples.length) setWorkspaceDraft('style-editor', { card: structuredClone(draft), revision, candidates: structuredClone(candidates) }); else if (getWorkspaceDraft('style-editor')) setWorkspaceDraft('style-editor', undefined); }, [draft, revision, candidates]);
+  useEffect(() => { if (draft.name !== '新的文风卡' || draft.source.label !== '手动编写' || draft.rules.trim() || draft.examples.length || revision || candidates.length) setWorkspaceDraft('style-editor', { card: structuredClone(draft), revision, candidates: structuredClone(candidates) }); else if (getWorkspaceDraft('style-editor')) setWorkspaceDraft('style-editor', undefined); }, [draft, revision, candidates]);
   const edit = (patch: Partial<WritingStyleCard>) => { setDraft(value => ({ ...value, ...patch })); setNotice(''); };
   const open = (card: WritingStyleCard, saved = 0) => { setDraft(structuredClone(card)); setRevision(saved); setCandidates([]); setChosen([]); setError(''); setNotice(''); };
   const report = (reason: unknown) => setError(reason instanceof Error ? reason.message : '文风操作未完成，草稿保留。');

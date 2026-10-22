@@ -5,14 +5,14 @@ import { webcrypto } from 'node:crypto';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { loadStyleModule } from './writing-style-test-helpers.mjs';
+import { loadStyleModule, loadActivityModule } from './writing-style-test-helpers.mjs';
 
 function load(name, environment = {}) {
   const source = readFileSync(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
   runInNewContext(outputText, { exports, structuredClone, crypto: webcrypto, Blob, atob, btoa,
-    require: key => { if (key === './writingStyle') return loadStyleModule(); assert.equal(key, './planningTrace'); return { readPlanningTrace: () => ({ invalid: false, entries: [] }) }; }, ...environment });
+    require: key => { if (key === './writingStyle') return loadStyleModule(); if (key === './workspaceActivity') return loadActivityModule(); assert.equal(key, './planningTrace'); return { readPlanningTrace: () => ({ invalid: false, entries: [] }) }; }, ...environment });
   return exports;
 }
 const crop = load('coverCrop'), store = load('localStore'), types = load('localTypes');

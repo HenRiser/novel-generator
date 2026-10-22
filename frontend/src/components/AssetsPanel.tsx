@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState, useRef } from "react";
-import { Alert, Empty, Spin, Tabs, Typography, Button, Checkbox, Input, Space } from "antd";
+import { Alert, Spin, Tabs, Typography, Button, Checkbox, Input, Space } from "antd";
 import { getProjectCharacters, getProjectOutline, expandProjectSetting, updateProjectConfig, getProject } from "../api";
 import { useAppStore } from "../store/useAppStore";
 import { SETTING_RESULT_FIELDS, type SettingField } from '../settingGeneration';
 import { getWorkspaceDraft, setWorkspaceDraft } from '../localStore';
 import ProjectWritingStyle from './ProjectWritingStyle';
+import ProjectAssetEditor from './ProjectAssetEditor';
 
 const fieldLabels: Record<string, string> = { raw_story_idea: '白话故事设想', protagonist: '主角', supporting_characters: '配角', worldview: '世界观', core_conflict: '核心冲突', genre: '类型', style: '风格', word_count_range: '单章字数' };
 const generationFields = Object.keys(SETTING_RESULT_FIELDS) as SettingField[];
@@ -30,6 +31,7 @@ export default function AssetsPanel({ onPrepareAssets }: { onPrepareAssets: () =
   const [selectedFields, setSelectedFields] = useState<SettingField[]>([]);
   const controller = useRef<AbortController | null>(null);
   const requestEpoch = useRef(0);
+  const loadSequence = useRef(0);
   const currentProject = selectedProject?.project_ref === selectedProjectRef ? selectedProject : null;
   const settingSnapshot = JSON.stringify(Object.fromEntries(Object.keys(fieldLabels).map(key => [key, String(currentProject?.config[key] || (key === 'raw_story_idea' ? currentProject?.config.seed_prompt : '') || '')])));
   useEffect(() => {
@@ -76,6 +78,8 @@ export default function AssetsPanel({ onPrepareAssets }: { onPrepareAssets: () =
 
 
   const loadAssets = useCallback(async () => {
+    const ticket = ++loadSequence.current;
+    const active = () => ticket === loadSequence.current && useAppStore.getState().selectedProjectRef === selectedProjectRef;
     if (!selectedProjectRef) {
       setOutline("");
       setCharacters("");
@@ -88,17 +92,19 @@ export default function AssetsPanel({ onPrepareAssets }: { onPrepareAssets: () =
         getProjectOutline(selectedProjectRef),
         getProjectCharacters(selectedProjectRef),
       ]);
+      if (!active()) return;
       setOutline(outlineResult.content ?? "");
       setCharacters(charactersResult.content ?? "");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "设定资产加载失败。");
+      if (active()) setError(e instanceof Error ? e.message : "设定资产加载失败。");
     } finally {
-      setLoading(false);
+      if (active()) setLoading(false);
     }
   }, [apiStatus, selectedProjectRef]);
 
   useEffect(() => {
     void loadAssets();
+    return () => { loadSequence.current++; };
   }, [loadAssets]);
 
   if (!selectedProjectRef) {
@@ -106,22 +112,6 @@ export default function AssetsPanel({ onPrepareAssets }: { onPrepareAssets: () =
   }
   if (!currentProject) return <Spin aria-label="正在读取故事设定" />;
 
-  const renderMarkdownish = (content: string, name: string) => (
-    <div
-      style={{
-        whiteSpace: "pre-wrap",
-        fontSize: 13,
-        lineHeight: 1.7,
-        color: "var(--ink)",
-        maxHeight: "calc(100vh - 320px)",
-        overflowY: "auto",
-      }}
-    >
-      {content || <Empty description={`还没有${name}。下一步，根据已保存的创作设定生成大纲与人物卡。`} image={Empty.PRESENTED_IMAGE_SIMPLE}>
-        <Button type="primary" onClick={onPrepareAssets}>前往生成大纲与人物卡</Button>
-      </Empty>}
-    </div>
-  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -152,12 +142,12 @@ export default function AssetsPanel({ onPrepareAssets }: { onPrepareAssets: () =
             {
               key: "outline",
               label: "小说大纲",
-              children: renderMarkdownish(outline, "小说大纲"),
+              children: <ProjectAssetEditor key={`${selectedProjectRef}:outline`} projectRef={selectedProjectRef} kind="outline" content={outline} onSaved={loadAssets} onPrepareAssets={onPrepareAssets} />,
             },
             {
               key: "characters",
               label: "人物卡",
-              children: renderMarkdownish(characters, "人物卡"),
+              children: <ProjectAssetEditor key={`${selectedProjectRef}:characters`} projectRef={selectedProjectRef} kind="characters" content={characters} onSaved={loadAssets} onPrepareAssets={onPrepareAssets} />,
             },
             { key: 'writing-style', label: '文风卡', children: <ProjectWritingStyle key={selectedProjectRef} projectRef={selectedProjectRef} /> },
           ]}

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
-import { loadStyleModule } from './writing-style-test-helpers.mjs';
+import { loadStyleModule, loadActivityModule } from './writing-style-test-helpers.mjs';
 
 // Exercise the real backup serializer and download Blob with a read-only IDB
 // adapter. The adapter only delivers getAll events; it cannot filter secrets.
@@ -32,7 +32,7 @@ function fixture() {
   const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } });
   const exports = {};
   runInNewContext(outputText, { exports, indexedDB, structuredClone, queueMicrotask, Blob,
-    require: name => { if (name === './writingStyle') return loadStyleModule(); assert.equal(name, './planningTrace'); return {}; },
+    require: name => { if (name === './workspaceActivity') return loadActivityModule(); if (name === './writingStyle') return loadStyleModule(); assert.equal(name, './planningTrace'); return {}; },
     URL: { createObjectURL: blob => { blobs.push(blob); return 'blob:synthetic-backup'; }, revokeObjectURL() {} },
     document: { body: { appendChild() {} }, createElement: () => { const link = { click() { links.push({ name: link.download, href: link.href }); }, remove() {} }; return link; } },
     setTimeout: callback => { callback(); },

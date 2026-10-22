@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import deepseek_client as client
 from services.generation_service import generate_single_chapter, stream_generate_single_chapter
@@ -46,6 +46,19 @@ class DeepSeekContentTests(unittest.TestCase):
         self.sdk.chat.completions.create.return_value = response(content="这是被截断的半句", finish_reason="length")
         with self.assertRaisesRegex(client.DeepSeekClientError, "截断"):
             client.generate_text(MESSAGES)
+
+    def test_sync_requires_normal_stop_and_rejects_nontext_results(self):
+        for reason in (None, "content_filter", "tool_calls", "unknown"):
+            with self.subTest(reason=reason):
+                self.sdk.chat.completions.create.return_value = response(content="部分正文", finish_reason=reason)
+                with self.assertRaises(client.DeepSeekClientError):
+                    client.generate_text(MESSAGES)
+        for field in ("refusal", "tool_calls", "function_call"):
+            invalid = response(content="部分正文")
+            setattr(invalid.choices[0].message, field, "nontext")
+            self.sdk.chat.completions.create.return_value = invalid
+            with self.assertRaises(client.DeepSeekClientError):
+                client.generate_text(MESSAGES)
 
     def test_connectivity_check_can_accept_reasoning_only(self):
         self.sdk.chat.completions.create.return_value = response(reasoning="OK", finish_reason="length")
@@ -111,6 +124,18 @@ class DeepSeekContentTests(unittest.TestCase):
         ])
         self.assertEqual(list(client.stream_generate_text(MESSAGES)), ["完整正文"])
 
+    def test_stream_rejects_missing_stop_refusal_and_late_content(self):
+        invalid_streams = [[chunk(content="部分正文", finish_reason=reason)]
+                           for reason in (None, "content_filter", "tool_calls", "unknown")]
+        invalid_streams += [[chunk(content="正文", finish_reason="stop"), chunk(content="迟到的正文")],
+                            [chunk(content="正文", finish_reason="stop"), chunk(finish_reason="stop")],
+                            [{"choices": [{"delta": {"content": "正文", "refusal": "rejected"}, "finish_reason": "stop"}]}]]
+        for chunks in invalid_streams:
+            with self.subTest(chunks=chunks):
+                self.sdk.chat.completions.create.return_value = iter(chunks)
+                with self.assertRaises(client.DeepSeekClientError):
+                    list(client.stream_generate_text(MESSAGES))
+
     def test_stream_object_choice_also_checks_finish_reason(self):
         self.sdk.chat.completions.create.return_value = iter([SimpleNamespace(choices=[SimpleNamespace(
             delta=SimpleNamespace(content="部分正文", reasoning_content=None), finish_reason="length",
@@ -147,6 +172,53 @@ class DeepSeekContentTests(unittest.TestCase):
         self.assertEqual([event["type"] for event in events], ["delta", "error"])
         self.assertEqual(events[-1]["partial_length"], len("部分正文"))
         persist.assert_not_called()
+
+
+class RequestScopedCompletionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nonstream_requires_stop_without_retry(self):
+        sdk = MagicMock()
+        sdk.__aenter__ = AsyncMock(return_value=sdk)
+        sdk.__aexit__ = AsyncMock(return_value=False)
+        for reason in (None, "content_filter", "tool_calls", "length", "stop"):
+            sdk.chat.completions.create = AsyncMock(return_value=response(content="正文", finish_reason=reason))
+            with patch.object(client, "AsyncOpenAI", return_value=sdk):
+                call = client.request_text(client.ProviderConfig("sk-" + "x" * 32), MESSAGES)
+                if reason == "stop":
+                    self.assertEqual(await call, "正文")
+                else:
+                    with self.assertRaises(client.DeepSeekClientError):
+                        await call
+            sdk.chat.completions.create.assert_awaited_once()
+
+    async def test_stream_requires_stop_and_always_closes_without_retry(self):
+        class Stream:
+            closed = False
+            async def __aenter__(self): return self
+            async def __aexit__(self, *_): self.closed = True
+            def __aiter__(self): return self.events()
+            async def events(self):
+                for item in self.chunks: yield item
+        cases = [([chunk(content="部分正文", finish_reason=reason)], False)
+                 for reason in (None, "content_filter", "tool_calls", "length")]
+        cases += [([chunk(content="正文", finish_reason="stop"), {"choices": [], "usage": {}}], True),
+                  ([chunk(content="正文", finish_reason="stop"), chunk(content="迟到内容")], False),
+                  ([chunk(content=" \n ", finish_reason="stop")], False)]
+        for chunks, valid in cases:
+            stream = Stream(); stream.chunks = chunks
+            sdk = MagicMock()
+            sdk.__aenter__ = AsyncMock(return_value=sdk)
+            sdk.__aexit__ = AsyncMock(return_value=False)
+            sdk.chat.completions.create = AsyncMock(return_value=stream)
+            with self.subTest(chunks=chunks), patch.object(client, "AsyncOpenAI", return_value=sdk):
+                async def collect():
+                    return [item async for item in client.request_text_stream(client.ProviderConfig("sk-" + "x" * 32), MESSAGES)]
+                if valid:
+                    self.assertEqual(await collect(), [{"kind": "content", "text": "正文"}])
+                else:
+                    with self.assertRaises(client.DeepSeekClientError):
+                        await collect()
+            self.assertTrue(stream.closed)
+            sdk.chat.completions.create.assert_awaited_once()
 
 
 if __name__ == "__main__":
