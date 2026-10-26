@@ -16,7 +16,7 @@ export default function LocalFolderPanel() {
   return <Card title="本机工作区">
     <Space orientation="vertical" size={14} style={{ width: '100%' }}>
       <Typography.Paragraph type="secondary">打开电脑上的文件夹后，设定、文风卡、正文、封面及创作草稿保存在一个工作区文件中。每次打开页面需重新选择工作区；浏览器只保留模型连接、Key 和界面偏好。</Typography.Paragraph>
-      <Alert type={['error','quota'].includes(state.status) ? 'error' : state.status === 'synced' ? 'success' : 'info'} showIcon title={error || state.message} />
+      <Alert type={error || ['error','quota'].includes(state.status) ? 'error' : state.status === 'synced' ? 'success' : 'info'} showIcon title={error || state.message} />
       <Descriptions size="small" column={1} items={[
         { key: 'folder', label: '本机文件夹', children: state.folderName || '尚未打开' },
         ...(bound ? [{ key: 'file', label: '工作区文件', children: LOCAL_FOLDER_FILE }] : []),
