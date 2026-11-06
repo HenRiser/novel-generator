@@ -79,10 +79,22 @@ class PinnedBackend(httpcore.AsyncNetworkBackend):
     async def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         if host != self.host or port != self.port or local_address is not None:
             raise DestinationRejected("请求目标与连接不一致。")
-        addresses = await public_addresses(host, port, self.denied)
-        # No retry to a re-resolved hostname. TLS start_tls is subsequently called by httpcore
-        # with the original URL hostname, never the IP passed to connect_tcp here.
-        return ClosingStream(await self.delegate.connect_tcp(addresses[0], port, timeout, socket_options=socket_options))
+        try:
+            with anyio.fail_after(timeout) as scope:
+                addresses = await public_addresses(host, port, self.denied)
+                # Retry only this validated numeric set, with one DNS + connect budget.
+                # httpcore still passes the original hostname to TLS start_tls.
+                for index, address in enumerate(addresses):
+                    remaining = None if timeout is None else scope.deadline - anyio.current_time()
+                    if remaining is not None and remaining <= 0:
+                        raise httpcore.ConnectTimeout()
+                    try:
+                        return ClosingStream(await self.delegate.connect_tcp(address, port, remaining, socket_options=socket_options))
+                    except (httpcore.ConnectError, httpcore.ConnectTimeout):
+                        if index == len(addresses) - 1:
+                            raise
+        except TimeoutError as exc:
+            raise httpcore.ConnectTimeout() from exc
 
     async def connect_unix_socket(self, *args, **kwargs):
         raise DestinationRejected("不允许Unix socket。")

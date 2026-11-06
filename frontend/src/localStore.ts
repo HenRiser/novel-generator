@@ -451,11 +451,17 @@ export async function updateProject(ref: string, mutate: (project: LocalProject)
 }
 
 export function deleteProject(ref: string): Promise<void> {
-  return transact(['projects', 'cover_media'], 'readwrite', tx => {
+  return transact(['projects', 'cover_media', 'imports'], 'readwrite', tx => {
     tx.objectStore('projects').delete(ref);
     const media = tx.objectStore('cover_media');
     const request = media.index('project_ref').openKeyCursor(ref);
     request.onsuccess = () => { const cursor = request.result; if (cursor) { media.delete(cursor.primaryKey); cursor.continue(); } };
+    const imports = tx.objectStore('imports'), imported = imports.getAll();
+    imported.onsuccess = () => {
+      for (const record of imported.result as ImportRecord<unknown>[]) if (record.project_ref === ref || (object(record.data) && record.data.project_ref === ref)) {
+        releaseImportProject(record); imports.put(record);
+      }
+    };
   }, name => {
     if (name === 'workspace-draft:setting:' + ref || name === 'workspace-draft:style-source:' + ref) return true;
     if (['chapter-task:', 'scene-plan:', 'chapter-planning:'].some(prefix => name.startsWith('workspace-draft:' + prefix + ref + ':'))) return true;
@@ -566,6 +572,16 @@ export async function saveCoverAttempt(ref: string, attempt?: CoverAttempt, expe
 
 type ImportRecord<T> = { id: string; data: T; project_ref?: string };
 
+function releaseImportProject(record: ImportRecord<unknown>): void {
+  delete record.project_ref;
+  if (object(record.data)) {
+    delete record.data.project_ref;
+    if (record.data.phase === 'committed') record.data.phase = 'ready';
+    if (Number.isSafeInteger(record.data.revision)) record.data.revision = Number(record.data.revision) + 1;
+    record.data.updated_at = new Date().toISOString(); record.data.error = '';
+  }
+}
+
 export function getImport<T>(id: string): Promise<T | undefined> {
   return transact(['imports'], 'readonly', (tx, done) => {
     const request = tx.objectStore('imports').get(id);
@@ -607,10 +623,15 @@ export function commitImport(id: string, project: LocalProject, expectedEpoch = 
       try {
         if (!request.result) throw new Error('找不到待提交的导入草稿。');
         const record = request.result as ImportRecord<unknown>;
-        if (record.project_ref) { done(record.project_ref); return; }
-        tx.objectStore('projects').add(project);
-        imports.put({ ...record, project_ref: project.project_ref });
-        done(project.project_ref);
+        const projects = tx.objectStore('projects');
+        const create = () => { projects.add(project); imports.put({ ...record, project_ref: project.project_ref }); done(project.project_ref); };
+        if (record.project_ref) {
+          const target = projects.get(record.project_ref);
+          target.onsuccess = () => { try {
+            if (target.result) done(record.project_ref!);
+            else { releaseImportProject(record); create(); }
+          } catch (error) { fail(error); } };
+        } else create();
       } catch (error) { fail(error); }
     };
   }).catch(error => { rememberRescue(project); throw storageError(error); });
@@ -850,6 +871,20 @@ export function parseBackup(text: string): LocalProject[] {
   return readBackup(text).projects;
 }
 
+function backupConnections(raw: Record<string, unknown>): ConnectionProfile[] {
+  const profiles = raw.connections === undefined ? [] : raw.connections;
+  if (!Array.isArray(profiles)) throw new Error('备份连接描述无效。');
+  const ids = new Set<string>();
+  for (const profile of profiles) {
+    if (!object(profile) || typeof profile.id !== 'string' || !profile.id || !Array.isArray(profile.revisions) ||
+        profile.revisions.some(revision => !object(revision)) || (profile.draft !== undefined && !object(profile.draft)) ||
+        (!profile.revisions.length && !profile.draft)) throw new Error('备份连接描述无效。');
+    if (ids.has(profile.id)) throw new Error('备份含重复连接。');
+    ids.add(profile.id);
+  }
+  return profiles as ConnectionProfile[];
+}
+
 export function restoreCopies(projects: LocalProject[]): LocalProject[] {
   projects.forEach(validateProject);
   const refs = new Map(projects.map(project => [project.project_ref, `book:bk_${crypto.randomUUID().replace(/-/g, '')}`]));
@@ -917,12 +952,9 @@ export async function restoreBackup(text: string): Promise<string[]> {
     mediaIds.set(version.media_id, { id: copies[i].cover!.versions[j].media_id, project_ref: copies[i].project_ref });
   }));
   const restoredMedia = media.map(row => ({ ...row, ...mediaIds.get(row.id)! }));
-  const descriptors = Array.isArray(raw.connections) ? raw.connections as ConnectionProfile[] : [];
+  const descriptors = backupConnections(raw);
   const mapped = new Map<string,string>();
   for (const profile of descriptors) {
-    checkFields(profile);
-    if (typeof profile.id !== 'string' || !Array.isArray(profile.revisions) || !profile.revisions.length) throw new Error('备份连接描述无效。');
-    if (mapped.has(profile.id)) throw new Error('备份含重复连接。');
     mapped.set(profile.id, crypto.randomUUID());
   }
   const remapConnections = (value: unknown): void => {
@@ -953,6 +985,8 @@ export async function restoreBackup(text: string): Promise<string[]> {
 /** Open a workspace in place; unlike backup recovery this preserves all identities. */
 export async function openWorkspace(text: string, allowReplace = false, changeBinding?: () => void, verifySource?: () => Promise<void>, writeEmptyWorkspace?: () => Promise<void>): Promise<void> {
   const { projects, media, styles, raw } = readBackup(text);
+  const profiles = backupConnections(raw);
+  const imports = (raw.imports || []) as ImportRecord<unknown>[];
   for (const row of media) {
     const image = await inspectCoverBlob(row.blob);
     const version = projects.flatMap(project => project.cover?.versions || []).find(item => item.media_id === row.id)!;
@@ -980,8 +1014,31 @@ export async function openWorkspace(text: string, allowReplace = false, changeBi
         }
         if (project.cover?.attempt?.status === 'running') Object.assign(project.cover.attempt, { status: 'unknown', error: '上次图片请求结果未知，请检查已保存的候选图，避免重复调用。' });
       }
+      const projectRefs = new Set(projects.map(project => project.project_ref));
+      for (const record of imports) {
+        const ref = record.project_ref || (object(record.data) ? record.data.project_ref : undefined);
+        if (typeof ref === 'string' && !projectRefs.has(ref)) releaseImportProject(record);
+      }
+      if (profiles.length) await browserTransact<void>(['settings'], 'readwrite', (tx, _done, fail) => {
+        const store = tx.objectStore('settings'), request = store.getAll();
+        request.onsuccess = () => { try {
+          const existing = new Map<string, ConnectionProfile>(request.result.map((row: { key: string; value: ConnectionProfile }) => [row.key, row.value]));
+          for (const profile of profiles) {
+            const current = existing.get('connection:' + profile.id);
+            if (!current) continue;
+            const destination = profile.revisions[0] || profile.draft!;
+            const snapshots = [...profile.revisions, ...(profile.draft ? [profile.draft] : []), ...(current.revisions || []), ...(current.draft ? [current.draft] : [])];
+            if (snapshots.some(snapshot => ['protocol', 'base_url', 'auth_mode'].some(field => snapshot[field as keyof typeof snapshot] !== destination[field as keyof typeof destination]))) {
+              throw new Error('工作区连接与此浏览器的同名标识目的地冲突，请先在模型连接中处理冲突后重新打开。');
+            }
+          }
+          // Keep existing revisions and credentials intact; imported descriptors never enable a connection or restore a Key.
+          for (const profile of profiles) if (!existing.has('connection:' + profile.id)) {
+            store.add({ key: 'connection:' + profile.id, value: { ...profile, enabled: false, deleted: false, epoch: 0, key_version: crypto.randomUUID(), test: undefined } });
+          }
+        } catch (error) { fail(error); } };
+      });
       workspaceEpoch++;
-      const imports = (raw.imports || []) as ImportRecord<unknown>[];
       const drafts = (raw.drafts || []) as Array<{ name: string; value: unknown }>;
       workspaceRows.projects = new Map(projects.map(project => [project.project_ref, project]));
       workspaceRows.cover_media = new Map(media.map(row => [row.id, row]));
@@ -992,6 +1049,7 @@ export async function openWorkspace(text: string, allowReplace = false, changeBi
       changeBinding?.();
       notifyWritingStyles(false); workspaceChanged();
       if (typeof window !== 'undefined') {
+        if (profiles.length) window.dispatchEvent(new Event('braipen:connections-changed'));
         window.dispatchEvent(new Event('braipen:projects-changed'));
         window.dispatchEvent(new Event('braipen:workspace-opened'));
       }

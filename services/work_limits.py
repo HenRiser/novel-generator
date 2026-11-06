@@ -18,7 +18,7 @@ MAX_CHARACTER_TERM_UNITS = 64_000_000
 class WorkloadLimitError(ValueError):
     code = "workload_too_large"
     status = 413
-    message = "本次图谱或目标超出计算上限，请缩小所选图谱或目标后重试。"
+    message = "本次输入超出计算工作量上限，请缩小图谱、目标或正文与约束后重试。"
 
     def __init__(self):
         super().__init__(self.message)

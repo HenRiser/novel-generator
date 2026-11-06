@@ -54,9 +54,9 @@ async function upload() {
   await page.getByRole('button', { name: '保存分章与前缀', exact: true }).waitFor();
   await page.waitForFunction(() => !document.querySelector('[aria-label="导入小说文件"]').disabled);
 }
-async function restoreDraft() {
+async function restoreDraft(title = /合成小说/) {
   await page.getByRole('combobox', { name: '恢复导入草稿' }).click();
-  await page.getByTitle(/合成小说/).last().click();
+  await page.getByTitle(title).last().click();
   await page.getByRole('button', { name: '保存分章与前缀', exact: true }).waitFor();
 }
 async function refusedSwitch() {
@@ -172,6 +172,64 @@ try {
     releaseHeld(); releaseHeld = undefined;
     await page.getByRole('button', { name: '从检查点提取 · 调用模型', exact: true }).click();
     await until(async () => (await store.listImports())[0].phase === 'review'); assert.equal(calls.length, 4);
+  });
+  await check('隔离浏览器工作区恢复连接，原生IndexedDB保留描述并排除Key', async () => {
+    const backup = await page.evaluate(async () => {
+      const original = await store.getSetting('connection:legacy-deepseek');
+      for (const [id, protocol] of [['recovery-text', 'chat_completions'], ['recovery-image', 'openai_images']]) {
+        const profile = structuredClone(original); profile.id = id; profile.name = id;
+        profile.revisions = profile.revisions.map(snapshot => ({ ...snapshot, profile_id: id, protocol }));
+        await store.setSetting('connection:' + id, profile);
+      }
+      await store.setSetting('vault:recovery-text', { api_key: 'SYNTHETIC_RECOVERY_KEY' });
+      return JSON.stringify(await store.createBackup());
+    });
+    assert.equal(backup.includes('SYNTHETIC_RECOVERY_KEY'), false);
+    const freshContext = await browser.newContext();
+    try {
+      await freshContext.route('**/*', route => { if (new URL(route.request().url()).origin === origin) return route.continue(); external.push(route.request().url()); return route.abort(); });
+      const freshPage = await freshContext.newPage(); freshPage.on('pageerror', error => errors.push(error.message));
+      await freshPage.goto(origin + '/__import-audit'); await freshPage.waitForFunction(() => window.store && window.connections);
+      const result = await freshPage.evaluate(async text => {
+        await connections.ensureConnections(); await store.openWorkspace(text, true);
+        const saved = await store.createBackup();
+        return { descriptors: saved.connections.filter(profile => profile.id.startsWith('recovery-')).map(profile => ({ id: profile.id, enabled: profile.enabled })).sort((a, b) => a.id.localeCompare(b.id)), hasKey: Boolean(await store.getSetting('vault:recovery-text')) };
+      }, backup);
+      assert.deepEqual(result, { descriptors: [{ id: 'recovery-image', enabled: false }, { id: 'recovery-text', enabled: false }], hasKey: false });
+    } finally { await freshContext.close(); }
+  });
+  await check('删除导入作品保留审核材料，恢复后可在界面重新创建且不再调用模型', async () => {
+    const modelCalls = calls.length;
+    await page.evaluate(() => window.leaveImport());
+    await page.getByLabel('导入小说文件').waitFor({ state: 'detached' });
+    await page.evaluate(async () => {
+      const value = (await store.listImports())[0];
+      value.results['1'].reviewed = true;
+      value.synthesis = { config: Object.fromEntries(['genre','style','word_count_range','protagonist','supporting_characters','worldview','core_conflict'].map(key => [key, '合成设定'])), assets: { outline: '合成大纲', characters: '合成人物' } };
+      value.phase = 'ready'; await store.putImport(value.id, value); window.showImport();
+    });
+    await restoreDraft(/编辑中的导入标题/);
+    await page.getByRole('button', { name: '创建可续写作品 · 从第 2 章开始', exact: true }).click();
+    await until(async () => (await store.listImports())[0].phase === 'committed');
+    const deletedRef = await page.evaluate(async () => {
+      const value = (await store.listImports())[0];
+      await store.deleteProject(value.project_ref); return value.project_ref;
+    });
+    const retained = await page.evaluate(async () => {
+      const value = (await store.listImports())[0];
+      return { projects: (await store.listProjects()).length, phase: value.phase,
+        hasReference: Boolean(value.project_ref), reviewed: value.results['1'].reviewed,
+        source: Boolean(value.original_base64), outline: value.synthesis.assets.outline };
+    });
+    assert.deepEqual(retained, { projects: 0, phase: 'ready', hasReference: false, reviewed: true, source: true, outline: '合成大纲' });
+    await page.evaluate(() => window.leaveImport());
+    await page.getByLabel('导入小说文件').waitFor({ state: 'detached' });
+    await page.evaluate(() => window.showImport()); await restoreDraft(/编辑中的导入标题/);
+    assert.equal(await page.getByRole('button', { name: '打开作品', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '创建可续写作品 · 从第 2 章开始', exact: true }).click();
+    await until(async () => (await store.listImports())[0].phase === 'committed');
+    const rebuilt = await page.evaluate(async () => ({ count: (await store.listProjects()).length, ref: (await store.listImports())[0].project_ref }));
+    assert.equal(rebuilt.count, 1); assert.notEqual(rebuilt.ref, deletedRef); assert.equal(calls.length, modelCalls);
   });
   assert.deepEqual(errors, []); assert.deepEqual(external, []);
   await page.screenshot({ path: join(report, 'import.png'), fullPage: true });

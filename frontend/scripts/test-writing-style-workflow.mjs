@@ -117,6 +117,119 @@ test('连续生成固定文风池，库内修订不影响后续章节', async ()
   assert.equal(saved.chapters[2].frozen_context.writing_style_context.card.rules, a.rules);
   assert.equal((await f.store.listWritingStyles())[0].revision, 2);
 });
+function approvedPlanning(project, number) {
+  const task = { id: `task-${number}`, revision: 1, status: 'approved', chapter_number: number };
+  const plan = { id: `plan-${number}`, revision: 1, status: 'approved', chapter_number: number,
+    source_chapter_task_id: task.id, source_chapter_task_revision: task.revision, scenes: [] };
+  project.chapter_tasks[number] = { approved: task }; project.scene_plans[number] = { approved: plan };
+}
+async function settledBatch(f, ref) {
+  for (let i = 0; i < 300; i++) {
+    const saved = await f.store.getProject(ref);
+    if (!['running', 'stopping'].includes(saved.batch.status)) return saved;
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error('批次未完成');
+}
+
+test('连续生成逐章传入批准场景，与单章一致且兼容独立场景和无计划章节', async () => {
+  const f = fixture(), p = await f.project();
+  await f.store.updateProject(p.project_ref, d => {
+    approvedPlanning(d, 1); approvedPlanning(d, 2); approvedPlanning(d, 3);
+    delete d.chapter_tasks[3];
+    Object.assign(d.scene_plans[3].approved, { source_chapter_task_id: null, source_chapter_task_revision: null });
+  });
+  const before = await f.store.getProject(p.project_ref);
+  await f.workflow.startLocalBatch(p.project_ref, { ...f.request, start_chapter: 1, end_chapter: 4 });
+  const saved = await settledBatch(f, p.project_ref);
+  assert.equal(saved.batch.status, 'completed', saved.batch.error);
+  const calls = f.calls.filter(call => call.operation === 'generate_chapter');
+  assert.equal(calls.length, 4);
+  for (const [index, call] of calls.entries()) {
+    const number = index + 1, plan = before.scene_plans[number]?.approved;
+    const single = f.workflow.contextInput(before, number, { ...f.request, scene_plan_id: plan?.id }, 'generate');
+    assert.deepEqual(call.input.scene_plan, structuredClone(single.scene_plan));
+    assert.equal(call.input.request.scene_plan_id, plan?.id);
+    assert.equal(call.input.request.chapter_task_id, before.chapter_tasks[number]?.approved.id);
+  }
+});
+
+test('连续生成在模型调用前拒绝首章和后续章过期的场景任务绑定', async () => {
+  for (const [number, change] of [[1, { source_chapter_task_id: 'old-task' }], [1, { source_chapter_task_revision: 2 }], [1, { source_chapter_task_id: null, source_chapter_task_revision: null }], [2, { source_chapter_task_revision: 2 }]]) {
+    const f = fixture(), p = await f.project();
+    await f.store.updateProject(p.project_ref, d => { approvedPlanning(d, number); Object.assign(d.scene_plans[number].approved, change); });
+    const request = { ...f.request, start_chapter: 1, end_chapter: number };
+    if (number === 1) await assert.rejects(f.workflow.startLocalBatch(p.project_ref, request), /场景计划.*任务单/);
+    else {
+      await f.workflow.startLocalBatch(p.project_ref, request);
+      const saved = await settledBatch(f, p.project_ref);
+      assert.equal(saved.batch.status, 'failed'); assert.match(saved.batch.error, /场景计划.*任务单/);
+    }
+    assert.equal(f.calls.filter(call => call.operation === 'generate_chapter').length, number - 1);
+    assert.equal((await f.store.getProject(p.project_ref)).chapters[number], undefined);
+  }
+});
+
+test('连续生成中断后恢复仍使用当前章匹配的批准场景', async () => {
+  const f = fixture(), p = await f.project();
+  await f.store.updateProject(p.project_ref, d => approvedPlanning(d, 1));
+  f.setStream(async () => { throw new Error('模拟生成断线'); });
+  const request = { ...f.request, start_chapter: 1, end_chapter: 1 };
+  await f.workflow.startLocalBatch(p.project_ref, request);
+  assert.equal((await settledBatch(f, p.project_ref)).batch.status, 'failed');
+  f.setStream(undefined);
+  await f.workflow.startLocalBatch(p.project_ref, request, true);
+  assert.equal((await settledBatch(f, p.project_ref)).batch.status, 'completed');
+  const calls = f.calls.filter(call => call.operation === 'generate_chapter');
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(call => call.input.scene_plan?.id), ['plan-1', 'plan-1']);
+});
+
+test('连续生成恢复完整正文时保留原场景，包括旧批次无场景且当前计划已过期的结果', async () => {
+  for (const legacy of [false, true]) {
+    const f = fixture(), p = await f.project(), request = { ...f.request, start_chapter: 1, end_chapter: 1 };
+    await f.store.updateProject(p.project_ref, d => {
+      approvedPlanning(d, 1);
+      if (legacy) d.chapter_tasks[1].approved.revision = 2;
+      const input = f.workflow.contextInput(d, 1, { ...request, scene_plan_id: legacy ? undefined : 'plan-1' }, 'generate');
+      d.runs.push({ run_id: 'saved-run', step_id: 'saved-step', attempt_id: 'saved-attempt', operation: 'generate_chapter',
+        input_revision: d.revision + 1, result_revision: d.revision + 1, status: 'interrupted', chapter_number: 1,
+        partial: '', error: '', started_at: new Date().toISOString(), input,
+        result: { content: '已保存的完整正文', title: '已保存章节', frozen_context: { chapter_task: input.chapter_task, scene_plan: input.scene_plan, writing_style_context: null } } });
+      Object.assign(d.batch, { id: 'saved-batch', status: 'stopped', request, start_chapter: 1, end_chapter: 1,
+        current_chapter: 1, input_revision: d.revision + 1 });
+    });
+    await f.workflow.startLocalBatch(p.project_ref, request, true);
+    const saved = await settledBatch(f, p.project_ref);
+    assert.equal(saved.batch.status, 'completed', saved.batch.error);
+    assert.equal(saved.chapters[1].content, '已保存的完整正文');
+    if (legacy) assert.equal(saved.chapters[1].frozen_context.scene_plan, null);
+    else assert.equal(saved.chapters[1].frozen_context.scene_plan.id, 'plan-1');
+    assert.deepEqual(f.calls.map(call => call.operation), ['summarize_chapter']);
+  }
+});
+
+test('连续生成恢复已有章节的摘要时沿用冻结规划，不受当前过期场景阻挡', async () => {
+  const f = fixture(), p = await f.project(), request = { ...f.request, start_chapter: 1, end_chapter: 1 };
+  await f.store.updateProject(p.project_ref, d => {
+    approvedPlanning(d, 1); f.workflow.setChapter(d, 1, '已经确认的旧正文');
+    const chapter = d.chapters[1];
+    chapter.frozen_context = { chapter_task: structuredClone(d.chapter_tasks[1].approved), scene_plan: structuredClone(d.scene_plans[1].approved) };
+    Object.assign(chapter.workflow, { status: 'confirmed', summary_status: 'failed', review_status: 'failed' });
+    d.chapter_tasks[1].approved.revision = 2;
+    Object.assign(d.batch, { id: 'summary-batch', status: 'stopped', request, start_chapter: 1, end_chapter: 1,
+      current_chapter: 1, input_revision: d.revision + 1 });
+  });
+  await f.workflow.startLocalBatch(p.project_ref, request, true);
+  const saved = await settledBatch(f, p.project_ref);
+  assert.equal(saved.batch.status, 'completed', saved.batch.error);
+  assert.equal(saved.chapters[1].content, '已经确认的旧正文');
+  assert.equal(saved.chapters[1].workflow.summary_status, 'ready');
+  assert.deepEqual(f.calls.map(call => call.operation), ['summarize_chapter']);
+  assert.equal(f.calls[0].input.frozen_context.chapter_task.revision, 1);
+  assert.equal(f.calls[0].input.frozen_context.scene_plan.source_chapter_task_revision, 1);
+});
+
 test('旧章首次续写中断后保存草稿，记录实际卡或显式禁用，再改项目默认也不漂移', async () => {
   for (const choice of ['project', 'none']) {
     const f = fixture(), p = await f.project(), a = f.card();

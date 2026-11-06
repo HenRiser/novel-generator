@@ -3,12 +3,18 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .work_limits import WorkloadLimitError
+
 
 ConsistencyWarning = dict[str, str]
 
 MAX_WARNINGS = 8
 MAX_CONSTRAINT_TEXT = 360
 MAX_EVIDENCE_TEXT = 220
+MAX_CONSTRAINTS = 128
+MAX_CHAPTER_CHECK_CHARS = 100_000
+MAX_CONSISTENCY_SCAN_UNITS = 4_000_000
+MAX_DATE_COMPARISON_PAIRS = 100_000
 
 HARD_SECTION_TITLE = "### Hard Continuity Constraints"
 NEXT_SECTION_RE = re.compile(r"^###\s+", re.MULTILINE)
@@ -70,11 +76,19 @@ def check_generated_chapter_consistency(
     constraints = extract_hard_constraints_from_prompt(narrative_context_text)
     if not constraints:
         return []
+    if len(chapter_text) > MAX_CHAPTER_CHECK_CHARS or len(chapter_text) * len(constraints) > MAX_CONSISTENCY_SCAN_UNITS:
+        raise WorkloadLimitError()
+
+    # Parse the chapter once, and bound dense date comparisons even when no warning is found.
+    constraint_dates = [_date_mentions_with_context(constraint) for constraint in constraints]
+    chapter_dates = _date_mentions_with_context(chapter_text) if any(constraint_dates) else []
+    if sum(map(len, constraint_dates)) * len(chapter_dates) > MAX_DATE_COMPARISON_PAIRS:
+        raise WorkloadLimitError()
 
     warnings: list[ConsistencyWarning] = []
     seen: set[tuple[str, str, str]] = set()
-    for constraint in constraints:
-        for warning in _check_constraint(constraint, chapter_text):
+    for constraint, dates in zip(constraints, constraint_dates):
+        for warning in _check_constraint(constraint, chapter_text, dates, chapter_dates):
             key = (warning["code"], warning["constraint"], warning["evidence"])
             if key in seen:
                 continue
@@ -104,6 +118,8 @@ def extract_hard_constraints_from_prompt(narrative_context_text: str | None) -> 
         if not item or item.lower().startswith("no selected"):
             return
         constraints.append(item)
+        if len(constraints) > MAX_CONSTRAINTS:
+            raise WorkloadLimitError()
 
     for raw_line in section.splitlines():
         line = raw_line.rstrip()
@@ -123,22 +139,21 @@ def extract_hard_constraints_from_prompt(narrative_context_text: str | None) -> 
     return constraints
 
 
-def _check_constraint(constraint: str, chapter_text: str) -> list[ConsistencyWarning]:
+def _check_constraint(
+    constraint: str, chapter_text: str, expected_dates: list[dict[str, Any]], actual_dates: list[dict[str, Any]],
+) -> list[ConsistencyWarning]:
     warnings: list[ConsistencyWarning] = []
-    warnings.extend(_check_date_conflicts(constraint, chapter_text))
+    warnings.extend(_check_date_conflicts(constraint, chapter_text, expected_dates, actual_dates))
     warnings.extend(_check_life_state_conflict(constraint, chapter_text))
     warnings.extend(_check_identity_conflict(constraint, chapter_text))
     warnings.extend(_check_organization_conflict(constraint, chapter_text))
     return warnings
 
 
-def _check_date_conflicts(constraint: str, chapter_text: str) -> list[ConsistencyWarning]:
-    expected_dates = _date_mentions_with_context(constraint)
-    if not expected_dates:
-        return []
-
-    actual_dates = _date_mentions_with_context(chapter_text)
-    if not actual_dates:
+def _check_date_conflicts(
+    constraint: str, chapter_text: str, expected_dates: list[dict[str, Any]], actual_dates: list[dict[str, Any]],
+) -> list[ConsistencyWarning]:
+    if not expected_dates or not actual_dates:
         return []
 
     warnings: list[ConsistencyWarning] = []

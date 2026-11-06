@@ -2,6 +2,148 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { memoryStyleStore } from './writing-style-test-helpers.mjs';
 
+function connectionDescriptor(id, protocol = 'chat_completions', base_url = 'https://example.invalid/v1') {
+  return { id, name: id, enabled: true, deleted: false, epoch: 4, key_version: 'archived-version', head: 1,
+    revisions: [{ profile_id: id, revision: 1, protocol, base_url, auth_mode: 'key', model: 'archived-model', policy: {}, destination_fingerprint: 'synthetic-destination', execution_fingerprint: 'synthetic-execution' }],
+    test: { revision: 1, key_version: 'archived-version', at: '2026-01-01', result: {} } };
+}
+
+test('空浏览器打开工作区恢复文字、图片和未验证连接草稿，保持禁用且不恢复凭据', async () => {
+  const source = memoryStyleStore(), text = connectionDescriptor('text'), image = connectionDescriptor('image', 'openai_images');
+  const draft = connectionDescriptor('draft'); draft.draft = draft.revisions[0]; draft.revisions = []; draft.head = 0;
+  for (const profile of [text, image, draft]) await source.store.setSetting('connection:' + profile.id, profile);
+  await source.store.setSetting('vault:text', { api_key: 'SYNTHETIC_SOURCE_KEY' });
+  const p = source.types.emptyProject('连接恢复', { connection_id: text.id }); await source.store.putProject(p);
+  const fresh = memoryStyleStore(); await fresh.store.openWorkspace(JSON.stringify(await source.store.createBackup()));
+  for (const original of [text, image, draft]) {
+    const restored = await fresh.store.getSetting('connection:' + original.id);
+    assert.ok(restored); assert.equal(restored.id, original.id); assert.equal(restored.enabled, false); assert.equal(restored.deleted, false);
+    assert.equal(restored.epoch, 0); assert.notEqual(restored.key_version, original.key_version); assert.equal(restored.test, undefined);
+    assert.deepEqual(restored.revisions, original.revisions); assert.deepEqual(restored.draft, original.draft);
+  }
+  assert.equal(await fresh.store.getSetting('vault:text'), undefined); assert.equal(await fresh.store.getSetting('default_connection'), undefined);
+  const reopened = await fresh.store.createBackup(); assert.equal(reopened.connections.length, 3);
+  assert.equal(reopened.projects[0].config.connection_id, text.id); assert.equal(JSON.stringify(reopened).includes('SYNTHETIC_SOURCE_KEY'), false);
+  const again = memoryStyleStore(); await again.store.openWorkspace(JSON.stringify(reopened)); assert.equal((await again.store.createBackup()).connections.length, 3);
+});
+
+test('同ID同目的地保留浏览器最新模型、修订、状态和Key，不回滚归档配置', async () => {
+  const source = memoryStyleStore(), archived = connectionDescriptor('same'); await source.store.setSetting('connection:same', archived);
+  const fresh = memoryStyleStore(), current = structuredClone(archived);
+  current.head = 2; current.key_version = 'current-key-version'; current.epoch = 9;
+  current.revisions.push({ ...current.revisions[0], revision: 2, model: 'current-model' });
+  await fresh.store.setSetting('connection:same', current); const vault = { api_key: 'SYNTHETIC_LOCAL_KEY', key_version: current.key_version };
+  await fresh.store.setSetting('vault:same', vault); await fresh.store.setSetting('default_connection', current.id);
+  await fresh.store.openWorkspace(JSON.stringify(await source.store.createBackup()));
+  assert.deepEqual(await fresh.store.getSetting('connection:same'), current); assert.deepEqual(await fresh.store.getSetting('vault:same'), vault);
+  assert.equal(await fresh.store.getSetting('default_connection'), current.id);
+});
+
+test('同ID不同目的地拒绝整次打开，不添加其它连接或更换工作区', async () => {
+  const source = memoryStyleStore(); await source.store.setSetting('connection:new', connectionDescriptor('new'));
+  const archived = connectionDescriptor('collision'); await source.store.setSetting('connection:collision', archived);
+  const fresh = memoryStyleStore(), p = fresh.types.emptyProject('当前作品'); await fresh.store.putProject(p);
+  const current = connectionDescriptor('collision', 'chat_completions', 'https://current.invalid/v1');
+  await fresh.store.setSetting('connection:collision', current);
+  let changedBinding = false;
+  await assert.rejects(fresh.store.openWorkspace(JSON.stringify(await source.store.createBackup()), true, () => { changedBinding = true; }), /连接.*冲突|目的地/);
+  assert.equal(changedBinding, false); assert.equal(await fresh.store.getSetting('connection:new'), undefined);
+  assert.deepEqual(await fresh.store.getSetting('connection:collision'), current); assert.equal((await fresh.store.getProject(p.project_ref)).title, '当前作品');
+});
+
+test('连接目的地检查覆盖历史修订和草稿，不仅比较首个修订或指纹', async () => {
+  for (const field of ['revision', 'draft']) {
+    const source = memoryStyleStore(), profile = connectionDescriptor('collision');
+    const changed = { ...profile.revisions[0], revision: 2, base_url: 'https://other.invalid/v1' };
+    if (field === 'revision') profile.revisions.push(changed); else profile.draft = changed;
+    await source.store.setSetting('connection:collision', profile);
+    const fresh = memoryStyleStore(); await fresh.store.setSetting('connection:collision', connectionDescriptor('collision'));
+    await assert.rejects(fresh.store.openWorkspace(JSON.stringify(await source.store.createBackup())), /连接.*冲突|目的地/);
+  }
+});
+
+test('连接写入失败及打开前置检查失败不会改变当前工作区或留下新设置', async () => {
+  const source = memoryStyleStore(); await source.store.setSetting('connection:new', connectionDescriptor('new'));
+  const text = JSON.stringify(await source.store.createBackup());
+  let failWrite = false;
+  const fresh = memoryStyleStore({ beforeBrowserWrite: () => { if (failWrite) throw new Error('模拟连接写入失败'); } });
+  const p = fresh.types.emptyProject('保留作品'); await fresh.store.putProject(p); failWrite = true;
+  let changedBinding = false;
+  await assert.rejects(fresh.store.openWorkspace(text, true, () => { changedBinding = true; }), /写入失败/);
+  assert.equal(changedBinding, false); assert.equal(await fresh.store.getSetting('connection:new'), undefined); assert.equal((await fresh.store.getProject(p.project_ref)).title, '保留作品');
+  failWrite = false;
+  await assert.rejects(fresh.store.openWorkspace(text), /未保存/);
+  await assert.rejects(fresh.store.openWorkspace(text, true, undefined, async () => { throw new Error('源文件变更'); }), /源文件变更/);
+  assert.equal(await fresh.store.getSetting('connection:new'), undefined);
+  const empty = memoryStyleStore();
+  await assert.rejects(empty.store.openWorkspace(text, false, undefined, undefined, async () => { throw new Error('迁移写盘失败'); }), /迁移写盘失败/);
+  assert.equal(await empty.store.getSetting('connection:new'), undefined);
+});
+
+test('重复或损坏连接描述在打开前拒绝，历史无连接描述备份仍可打开', async () => {
+  const source = memoryStyleStore(), backup = await source.store.createBackup();
+  for (const connections of [[connectionDescriptor('duplicate'), connectionDescriptor('duplicate')], [{ id: 'broken', revisions: [] }], 'invalid']) {
+    const fresh = memoryStyleStore(); await assert.rejects(fresh.store.openWorkspace(JSON.stringify({ ...backup, connections })), /连接/);
+    assert.equal((await fresh.store.createBackup()).connections.length, 0);
+  }
+  const fresh = memoryStyleStore(); delete backup.connections; await fresh.store.openWorkspace(JSON.stringify(backup));
+  assert.equal((await fresh.store.createBackup()).connections.length, 0);
+});
+
+async function committedImport(f, id = 'source') {
+  const project = f.types.emptyProject('导入作品');
+  const data = { id, schema_version: 1, revision: 3, title: '原文档案', phase: 'ready',
+    original_base64: btoa('SYNTHETIC_SOURCE'), normalized_text: '合成导入原文', results: { '1': { summary: '已审核摘要', reviewed: true, candidates: [] } },
+    synthesis: { assets: { outline: '已审核大纲', characters: '已审核人物' } }, error: '', updated_at: '2026-01-01T00:00:00Z' };
+  await f.store.putImport(id, data); await f.store.commitImport(id, project);
+  const saved = { ...data, phase: 'committed', project_ref: project.project_ref }; await f.store.putImport(id, saved);
+  return { project, data: saved };
+}
+
+test('删除导入作品解除内外提交引用，保留已审核材料并可重新创建且保持幂等', async () => {
+  const f = memoryStyleStore(), { project, data } = await committedImport(f);
+  await f.store.deleteProject(project.project_ref);
+  const draft = await f.store.getImport(data.id), row = (await f.store.createBackup()).imports[0];
+  assert.equal(row.project_ref, undefined); assert.equal(draft.project_ref, undefined); assert.equal(draft.phase, 'ready');
+  assert.equal(draft.revision, data.revision + 1); assert.notEqual(draft.updated_at, data.updated_at);
+  assert.equal(draft.original_base64, data.original_base64); assert.equal(draft.normalized_text, data.normalized_text);
+  assert.deepEqual(draft.results, data.results); assert.deepEqual(draft.synthesis, data.synthesis); assert.equal((await f.store.listProjects()).length, 0);
+  const replacement = f.types.emptyProject('重新创建');
+  assert.equal(await f.store.commitImport(data.id, replacement), replacement.project_ref);
+  assert.equal(await f.store.commitImport(data.id, f.types.emptyProject('不应重复')), replacement.project_ref);
+  assert.equal((await f.store.listProjects()).length, 1);
+});
+
+test('删除导入作品写盘失败保留原项目与完成状态，重试才原子解除关联', async () => {
+  const f = memoryStyleStore(), { project, data } = await committedImport(f);
+  f.store.setWorkspaceWriter(async () => { throw new Error('模拟删除写盘失败'); });
+  await assert.rejects(f.store.deleteProject(project.project_ref), /写盘失败/);
+  assert.equal((await f.store.getProject(project.project_ref)).project_ref, project.project_ref);
+  assert.deepEqual(await f.store.getImport(data.id), data);
+  const pending = await f.store.createBackup(); assert.equal(pending.projects.length, 0);
+  assert.equal(pending.imports[0].project_ref, undefined); assert.equal(pending.imports[0].data.phase, 'ready');
+  let written; f.store.setWorkspaceWriter(async value => { written = value; }); await f.store.flushWorkspace();
+  assert.equal(written.projects.length, 0); assert.equal(written.imports[0].project_ref, undefined);
+  assert.equal((await f.store.listProjects()).length, 0); assert.equal((await f.store.getImport(data.id)).phase, 'ready');
+  assert.equal(f.store.workspaceHasUnsavedChanges(), false);
+});
+
+test('打开旧工作区只恢复悬空导入，保留有效提交和未提交草稿', async () => {
+  const f = memoryStyleStore(), lost = await committedImport(f, 'lost'), valid = await committedImport(f, 'valid');
+  const unfinished = { id: 'unfinished', schema_version: 1, phase: 'review', revision: 7, title: '待审核', results: {} };
+  await f.store.putImport(unfinished.id, unfinished);
+  const snapshot = await f.store.createBackup(); snapshot.projects = snapshot.projects.filter(p => p.project_ref !== lost.project.project_ref);
+  snapshot.imports.push({ id: 'inner-only', data: { ...lost.data, id: 'inner-only' } });
+  const fresh = memoryStyleStore(); await fresh.store.openWorkspace(JSON.stringify(snapshot));
+  for (const id of ['lost', 'inner-only']) {
+    const restored = await fresh.store.getImport(id); assert.equal(restored.phase, 'ready'); assert.equal(restored.project_ref, undefined);
+    assert.equal(restored.normalized_text, lost.data.normalized_text); assert.deepEqual(restored.results, lost.data.results);
+  }
+  assert.deepEqual(await fresh.store.getImport(valid.data.id), valid.data); assert.deepEqual(await fresh.store.getImport(unfinished.id), unfinished);
+  const saved = await fresh.store.createBackup(); assert.equal(saved.imports.find(row => row.id === 'lost').project_ref, undefined);
+  assert.equal(saved.imports.find(row => row.id === 'valid').project_ref, valid.project.project_ref);
+});
+
 test('创作记录只进入工作区，浏览器仍保存连接与Key', async () => {
   const f = memoryStyleStore(), p = f.types.emptyProject('文件作品');
   await f.store.setSetting('vault:example', { secret: 'SYNTHETIC_ONLY' });

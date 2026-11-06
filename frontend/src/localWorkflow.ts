@@ -423,6 +423,19 @@ export async function endLocalBatch(ref: string) {
   });
 }
 
+function batchChapterRequest(p: LocalProject, number: number, request: BatchGenerationRequest): GenerationRequest {
+  const task = p.chapter_tasks[number]?.approved, plan = p.scene_plans[number]?.approved;
+  if (plan && ((plan.source_chapter_task_id ?? null) !== (task?.id ?? null) ||
+      (plan.source_chapter_task_revision ?? null) !== (task?.revision ?? null))) {
+    throw new Error(`第 ${number} 章场景计划绑定的任务单已变更，请重新批准后继续。`);
+  }
+  return { ...request, chapter_task_id: task?.id, scene_plan_id: plan?.id };
+}
+
+function savedChapterResult(p: LocalProject, number: number): LocalRun | undefined {
+  return [...p.runs].reverse().find(r => r.operation === 'generate_chapter' && r.chapter_number === number && r.result && r.result_revision === p.revision && !['completed', 'discarded'].includes(r.status));
+}
+
 export async function startLocalBatch(ref: string, request: BatchGenerationRequest, resume = false): Promise<LocalProject['batch']> {
   if (!navigator.locks) throw new Error('当前浏览器不支持任务锁。');
   return new Promise((resolve, reject) => {
@@ -440,7 +453,12 @@ export async function startLocalBatch(ref: string, request: BatchGenerationReque
       const batchStyle = resume && Object.prototype.hasOwnProperty.call(p.batch, 'writing_style') ? p.batch.writing_style : selectWritingStyle(p, (request as GenerationRequest).writing_style);
       if (batchStyle) await requireWritingStyleSupport();
       const batchLease = await acquireConnection(connection);
-      try { prepareCompute('generate_chapter', contextInput(p, first, { ...request, writing_style: batchStyle || 'none' }, 'generate'), newIdentity(p.revision), batchLease); } finally { batchLease.close(); }
+      try {
+        const saved = p.chapters[first] ? undefined : savedChapterResult(p, first);
+        const firstRequest = p.chapters[first] || saved ? request : batchChapterRequest(p, first, request);
+        const input = saved?.input || contextInput(p, first, { ...firstRequest, writing_style: batchStyle || 'none' }, 'generate');
+        prepareCompute('generate_chapter', input, newIdentity(p.revision), batchLease);
+      } finally { batchLease.close(); }
       if (!resume) validateChapterStart(p, first);
       p = await updateProject(ref, draft => {
         draft.batch = { id: resume ? draft.batch.id : crypto.randomUUID(), status: 'running', stage: 'starting',
@@ -456,9 +474,9 @@ export async function startLocalBatch(ref: string, request: BatchGenerationReque
           if (p.batch.completed_chapters.includes(n)) continue;
           await updateProject(ref, d => { d.batch.current_chapter = n; d.batch.stage = 'generating'; }, undefined, false);
           if (!p.chapters[n]) {
-            const saved = [...p.runs].reverse().find(r => r.operation === 'generate_chapter' && r.chapter_number === n && r.result && r.result_revision === p.revision && !['completed', 'discarded'].includes(r.status));
+            const saved = savedChapterResult(p, n);
             if (saved) await applySavedResult(p, saved);
-            else await generateLocked(ref, n, request, {}, controller.signal);
+            else await generateLocked(ref, n, batchChapterRequest(p, n, request), {}, controller.signal);
           }
           p = await getProject(ref);
           // A graceful stop finishes confirmation and summary for this chapter.

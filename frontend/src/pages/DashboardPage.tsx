@@ -41,7 +41,7 @@ export default function DashboardPage() {
   };
   const handleDelete = (project: ProjectSummary) => {
     Modal.confirm({
-      title: `删除《${project.title}》？`, content: "这会删除该项目及其全部章节文件，无法撤销。", okText: "删除项目", cancelText: "保留", okButtonProps: { danger: true },
+      title: `删除《${project.title}》？`, content: "这会删除该项目及其全部章节，无法撤销。导入原文及审核记录会保留，可用于重新创建作品。", okText: "删除项目", cancelText: "保留", okButtonProps: { danger: true },
       onOk: async () => {
         setDeletingRef(project.project_ref);
         try {

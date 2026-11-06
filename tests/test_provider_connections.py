@@ -104,6 +104,75 @@ class NetworkBoundaryTests(unittest.IsolatedAsyncioTestCase):
         with patch.dict(os.environ,{'BRAIPEN_SELF_ADDRESSES':'not an ip'}):
             with self.assertRaises(DestinationRejected):configured_self_addresses(True)
 
+    async def test_connect_failure_falls_back_only_within_one_validated_address_set(self):
+        for first_error in (httpcore.ConnectError('unreachable'), httpcore.ConnectTimeout('timed out')):
+            backend=PinnedBackend('provider.example',443,set());backend.delegate=AsyncMock()
+            raw=AsyncMock();backend.delegate.connect_tcp.side_effect=[first_error,raw]
+            resolver=AsyncMock(return_value=['2606:4700:4700::1111','1.1.1.1'])
+            options=[(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)]
+            with patch('provider_transport.public_addresses',resolver):
+                result=await backend.connect_tcp('provider.example',443,.5,socket_options=options)
+            self.assertIs(result.stream,raw);resolver.assert_awaited_once_with('provider.example',443,set())
+            calls=backend.delegate.connect_tcp.call_args_list
+            self.assertEqual([call.args[0] for call in calls],['2606:4700:4700::1111','1.1.1.1'])
+            self.assertTrue(all(call.args[1]==443 and call.kwargs['socket_options']==options for call in calls))
+
+    async def test_all_validated_addresses_fail_without_resolving_again(self):
+        backend=PinnedBackend('provider.example',443,set());backend.delegate=AsyncMock()
+        last=httpcore.ConnectError('last address failed')
+        backend.delegate.connect_tcp.side_effect=[httpcore.ConnectError('first failed'),last]
+        resolver=AsyncMock(return_value=['1.1.1.1','9.9.9.9'])
+        with patch('provider_transport.public_addresses',resolver),self.assertRaises(httpcore.ConnectError) as caught:
+            await backend.connect_tcp('provider.example',443)
+        self.assertIs(caught.exception,last);self.assertEqual(resolver.await_count,1)
+        self.assertEqual(backend.delegate.connect_tcp.await_count,2)
+        self.assertTrue(all(call.args[2] is None for call in backend.delegate.connect_tcp.call_args_list))
+
+    async def test_fallback_budget_includes_dns_and_decreases_between_attempts(self):
+        backend=PinnedBackend('provider.example',443,set());backend.delegate=AsyncMock()
+        budgets=[]
+        async def resolve(*args):
+            await asyncio.sleep(.01);return ['1.1.1.1','9.9.9.9']
+        async def connect(host,port,timeout,**kwargs):
+            budgets.append(timeout)
+            if host=='1.1.1.1':
+                await asyncio.sleep(.01);raise httpcore.ConnectError('unreachable')
+            return AsyncMock()
+        backend.delegate.connect_tcp.side_effect=connect
+        with patch('provider_transport.public_addresses',resolve):
+            await backend.connect_tcp('provider.example',443,1)
+        self.assertEqual(len(budgets),2)
+        self.assertTrue(0<budgets[1]<budgets[0]<1,budgets)
+
+    async def test_connect_budget_expiring_in_dns_does_not_open_a_socket(self):
+        backend=PinnedBackend('provider.example',443,set());backend.delegate=AsyncMock()
+        async def resolve(*args):await asyncio.Event().wait()
+        with patch('provider_transport.public_addresses',resolve),self.assertRaises(httpcore.ConnectTimeout):
+            await asyncio.wait_for(backend.connect_tcp('provider.example',443,.02),.5)
+        backend.delegate.connect_tcp.assert_not_awaited()
+
+    async def test_expired_shared_budget_stops_before_the_next_address(self):
+        backend=PinnedBackend('provider.example',443,set());backend.delegate=AsyncMock()
+        shift=0
+        async def connect(*args,**kwargs):
+            nonlocal shift
+            shift=2;raise httpcore.ConnectError('unreachable')
+        backend.delegate.connect_tcp.side_effect=connect
+        clock=asyncio.get_running_loop().time
+        with patch('provider_transport.public_addresses',AsyncMock(return_value=['1.1.1.1','9.9.9.9'])), \
+             patch('provider_transport.anyio.current_time',side_effect=lambda:clock()+shift), \
+             self.assertRaises(httpcore.ConnectTimeout):
+            await backend.connect_tcp('provider.example',443,1)
+        self.assertEqual(backend.delegate.connect_tcp.await_count,1)
+
+    async def test_cancelled_connect_never_falls_back(self):
+        backend=PinnedBackend('provider.example',443,set());backend.delegate=AsyncMock()
+        backend.delegate.connect_tcp.side_effect=asyncio.CancelledError()
+        with patch('provider_transport.public_addresses',AsyncMock(return_value=['1.1.1.1','9.9.9.9'])), \
+             self.assertRaises(asyncio.CancelledError):
+            await backend.connect_tcp('provider.example',443,.5)
+        self.assertEqual(backend.delegate.connect_tcp.await_count,1)
+
     async def test_cancel_tls_closes_raw_stream(self):
         began=asyncio.Event();closed=asyncio.Event()
         class Raw:
