@@ -8,6 +8,7 @@ import { resolve, join } from 'node:path';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer } from 'vite';
 import { identity } from './provider-test-helpers.mjs';
+import { installTestWorkspace, openTestWorkspace } from './workspace-browser-test-helpers.mjs';
 
 const require = createRequire(import.meta.url), runtime = process.env.BRAIPEN_PLAYWRIGHT_PATH;
 const { chromium } = runtime ? await import(pathToFileURL(join(runtime, 'index.mjs')).href) : require('playwright');
@@ -23,7 +24,7 @@ const normalizeText = raw => pythonJson('import json,sys; from provider_catalog 
 const fingerprint = (payload, operation) => pythonJson('import json,sys; from provider_catalog import request_fingerprint; p=json.load(sys.stdin); print(json.dumps(request_fingerprint(p["connection"],p["operation"],p["input"])))', { connection: payload.connection, operation, input: payload.input });
 const report = resolve(process.env.BRAIPEN_REPORT_DIR || resolve(projectRoot, 'reports/controlled-cover-workflow-2026-10-08'));
 await mkdir(report, { recursive: true });
-const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, logLevel: 'error', server: { host: '127.0.0.1', port: 0 },
+const server = await createServer({ root, cacheDir: join(root, 'node_modules/.vite-cover-workflow'), define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, logLevel: 'error', server: { host: '127.0.0.1', port: 0 },
   plugins: [{ name: 'cover-test', configureServer(s) { s.middlewares.use('/__cover_test', (_, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><title>cover test setup</title>'); }); } }] });
 await server.listen();
 const origin = server.resolvedUrls.local[0].replace(/\/$/, ''), browser = await chromium.launch({ channel: 'msedge', headless: true });
@@ -34,6 +35,7 @@ let imageData, projectRef, profileId, textProfileId, modelsEmpty = false, abortN
 page.on('pageerror', error => pageErrors.push(error.message));
 page.on('console', event => { if (event.type() === 'error') consoleErrors.push(event.text()); });
 await context.addInitScript(() => localStorage.setItem('braipen:intro-hidden', 'true'));
+await installTestWorkspace(context);
 await context.route('**/*', route => { if (new URL(route.request().url()).origin === origin) return route.continue(); externalRequests.push(route.request().url()); return route.abort('blockedbyclient'); });
 await context.route('**/api/**', async route => {
   const url = route.request().url();
@@ -84,8 +86,15 @@ async function diagnoseApply(label) {
 }
 async function applyCover() { await diagnoseApply('before adopt ' + applyDiagnostics.length); await page.getByRole('button', { name: '设为作品封面', exact: true }).click(); }
 async function load() {
+  await openTestWorkspace(page);
+  if (projectRef) {
+    await page.evaluate(async ref => {
+      const { useAppStore } = await window.testModule('store/useAppStore.ts');
+      useAppStore.getState().selectProject(ref);
+    }, projectRef);
+  }
   await page.evaluate(async () => {
-    window.store = await import('/src/localStore.ts'); window.pc = await import('/src/providerConnections.ts'); window.ic = await import('/src/imageConnections.ts');
+    window.store = await window.testModule('localStore.ts'); window.pc = await window.testModule('providerConnections.ts'); window.ic = await window.testModule('imageConnections.ts');
     window.wait = async predicate => { for (let i = 0; i < 300; i++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 20)); } throw new Error('condition timed out'); };
   });
 }
@@ -100,7 +109,7 @@ async function capture(filename) {
 try {
   await page.goto(origin + '/__cover_test'); await load();
   ({ projectRef, imageData } = await page.evaluate(async ({ width, height }) => {
-    const { emptyProject } = await import('/src/localTypes.ts'), preferences = await import('/src/workspacePreferences.ts');
+    const { emptyProject } = await window.testModule('localTypes.ts'), preferences = await window.testModule('workspacePreferences.ts');
     const p = emptyProject('取反合成封面故事', { raw_story_idea: '合成白话设定：修钟青年发现影子来自未来。' });
     p.assets.characters = '姓名：江舟\n外貌特征：黑色短发，黑色眼睛\n过去经历：DO_NOT_USE_THIS_BIOGRAPHY'; p.assets.outline = 'DO_NOT_UPLOAD_THIS_OUTLINE';
     await store.putProject(p); preferences.rememberProject(p.project_ref);
@@ -115,7 +124,7 @@ try {
     return { projectRef: p.project_ref, imageData };
   }, { width: IMAGE_WIDTH, height: IMAGE_HEIGHT }));
   await step('图片设置query直达、四预设与建议模型无需 Key 直接可见', async () => {
-    await page.goto(origin + '/settings?tab=images'); await load();
+    await page.goto(origin + '/settings?tab=images', { waitUntil: 'networkidle' }); await load();
     await page.getByRole('heading', { name: '偏好设置', exact: true }).waitFor({ state: 'visible' });
     assert.equal(await page.getByRole('tab', { name: '图片模型连接', exact: true }).getAttribute('aria-selected'), 'true');
     await page.getByRole('button', { name: '选择图片模型 doubao-seedream-5-0-flash-260915', exact: true }).waitFor({ state: 'visible' });
@@ -237,12 +246,16 @@ try {
     if (kind !== 'stop') await page.evaluate(({ id, key }) => pc.storeConnectionKey(id, key), { id: kind === 'image' ? profileId : textProfileId, key: kind === 'image' ? 'SYNTHETIC_IMAGE_UI_KEY' : 'SYNTHETIC_TEXT_UI_KEY' });
   });
   await step('网络中断结果标记未知，收费请求不自动重试，刷新仍保留封面版本', async () => {
+    const previousAttempt = (await project()).cover.attempt?.id;
     abortNext = true;
     await page.getByRole('button', { name: '生成候选图片 · 调用模型', exact: true }).click();
-    await page.evaluate(ref => wait(async () => (await store.getProject(ref)).cover.attempt?.status === 'unknown'), projectRef);
+    await page.evaluate(({ ref, previousAttempt }) => wait(async () => {
+      const attempt = (await store.getProject(ref)).cover.attempt;
+      return attempt?.status === 'unknown' && attempt.id !== previousAttempt;
+    }), { ref: projectRef, previousAttempt });
     await page.waitForTimeout(300); assert.equal(paidCalls().length, 7); assert.equal((await project()).cover.versions.length, 6);
     assert.match((await project()).cover.attempt.error, /图片连接中断/);
-    await page.reload(); await load(); await page.getByRole('tab', { name: '作品封面', exact: true }).click(); await rendered('.cover-result canvas');
+    await page.reload({ waitUntil: 'networkidle' }); await load(); await page.getByRole('tab', { name: '作品封面', exact: true }).click(); await rendered('.cover-result canvas');
     const p = await project(); assert.equal(p.cover.versions.length, 6); assert.equal(p.cover.selected_id, p.cover.versions[0].id); assert.equal(p.cover.layout.title, '换一个封面书名'); assert.equal(p.cover.layout.author, '合成作者');
     assert.equal(p.cover.text_connection_id, textProfileId); assert.equal(p.cover.count, 4); assert.equal(p.cover.style_id, 'anime');
     await page.getByText('上次封面任务未完成', { exact: true }).waitFor({ state: 'visible' }); assert.equal(paidCalls().length, 7);
@@ -324,7 +337,7 @@ try {
   });
   await step('容量前检 existing+count：29版本不能再生成4张，不提交请求', async () => {
     await page.evaluate(async ref => {
-      let p = await store.getProject(ref); const { getCoverBlob } = await import('/src/coverStorage.ts'), blob = await getCoverBlob(p.cover.versions[0].media_id);
+      let p = await store.getProject(ref); const { getCoverBlob } = await window.testModule('coverStorage.ts'), blob = await getCoverBlob(p.cover.versions[0].media_id);
       const first = p.cover.versions[0], metadata = { source: first.source, width: first.width, height: first.height, style_id: first.style_id, template_version: 2, text_model: first.text_model, connection: first.connection };
       while (p.cover.versions.length < 29) { await store.saveCoverVersion(ref, metadata, blob); p = await store.getProject(ref); }
     }, projectRef);

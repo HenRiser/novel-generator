@@ -88,10 +88,22 @@ export function setWorkspaceDraft(key: string, value: unknown): void {
 
 export const workspaceHasUnsavedChanges = () => unsavedWorkspace || Boolean(pendingWorkspace);
 export function setWorkspaceWriter(writer?: (snapshot: WorkspaceBackup) => Promise<void>): void { workspaceWriter = writer; }
+// A reader of another tab's active snapshot can close or reopen its own workspace.
+let observedTasks = new Set<string>();
+function activeTaskIds(project: LocalProject): string[] {
+  const ref = project.project_ref;
+  const ids = project.runs.filter(run => run.status === 'running').map(run => `${ref}:run:${run.attempt_id || run.run_id}`);
+  if (['running', 'stopping'].includes(project.batch.status)) ids.push(`${ref}:batch:${project.batch.id}`);
+  if (project.cover?.attempt?.status === 'running') ids.push(`${ref}:cover:${project.cover.attempt.id}`);
+  return ids;
+}
+export function hasLocalProjectTask(project: LocalProject): boolean {
+  return activeTaskIds(project).some(id => !observedTasks.has(id));
+}
 function assertWorkspaceIdle(): void {
   if (hasWorkspaceActivity(workspaceEpoch)) throw new Error('创作请求仍在处理中，请等待完成，或取消并等待清理后再切换工作区。');
   for (const project of workspaceRows.projects.values() as Iterable<LocalProject>) {
-    if (project.runs.some(run => run.status === 'running') || ['running', 'stopping'].includes(project.batch.status) || project.cover?.attempt?.status === 'running') {
+    if (hasLocalProjectTask(project)) {
       throw new Error('请先结束正在运行的创作任务，再切换或关闭工作区。');
     }
   }
@@ -1003,8 +1015,14 @@ export async function openWorkspace(text: string, allowReplace = false, changeBi
         if (workspaceRows.projects.size || workspaceRows.imports.size || workspaceRows.cover_media.size || workspaceRows.settings.size || editorDrafts.size) throw new Error('工作区已新增内容，请在空工作区中重新迁移。');
         await writeEmptyWorkspace();
       }
-      // Persisted task markers are history, not live requests in this new session.
+      // Recover orphaned markers. A different tab may still hold the workflow or cover lock.
+      const locks = await globalThis.navigator?.locks?.query?.();
+      const held = new Set(locks?.held?.map(lock => lock.name));
       for (const project of projects) {
+        if (project.cover?.attempt?.status === 'running' && !held.has('braipen:cover:' + project.project_ref)) {
+          Object.assign(project.cover.attempt, { status: 'unknown', error: '上次图片请求结果未知，请检查已保存的候选图，避免重复调用。' });
+        }
+        if (held.has('braipen:project:' + project.project_ref)) continue;
         for (const run of project.runs) if (run.status === 'running') {
           run.status = 'interrupted'; run.error = run.result ? '结果已保存，确认后可直接应用，无需重新调用模型。' : '上次请求结果未知。手动重试可能再次计费。';
         }
@@ -1012,7 +1030,6 @@ export async function openWorkspace(text: string, allowReplace = false, changeBi
         for (const chapter of Object.values(project.chapters)) if (['pending', 'running'].includes(chapter.workflow.summary_status)) {
           Object.assign(chapter.workflow, { summary_status: 'failed', review_status: 'failed', error: '后台处理已中断，请手动继续。' });
         }
-        if (project.cover?.attempt?.status === 'running') Object.assign(project.cover.attempt, { status: 'unknown', error: '上次图片请求结果未知，请检查已保存的候选图，避免重复调用。' });
       }
       const projectRefs = new Set(projects.map(project => project.project_ref));
       for (const record of imports) {
@@ -1039,6 +1056,7 @@ export async function openWorkspace(text: string, allowReplace = false, changeBi
         } catch (error) { fail(error); } };
       });
       workspaceEpoch++;
+      observedTasks = new Set(projects.flatMap(activeTaskIds));
       const drafts = (raw.drafts || []) as Array<{ name: string; value: unknown }>;
       workspaceRows.projects = new Map(projects.map(project => [project.project_ref, project]));
       workspaceRows.cover_media = new Map(media.map(row => [row.id, row]));

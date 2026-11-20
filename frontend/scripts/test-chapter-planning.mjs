@@ -1,4 +1,4 @@
-// Real Edge/IndexedDB/Web Locks with offline planning responses and real pure Python contracts.
+// Real Edge, OPFS workspaces and Web Locks with offline planning responses and Python contracts.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer } from 'vite';
+import { installTestWorkspace, openTestWorkspace } from './workspace-browser-test-helpers.mjs';
 import { providerFixtures, identity } from './provider-test-helpers.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]+$/, '');
@@ -38,7 +39,7 @@ except ComputeError as exc:
  print(json.dumps({'status':exc.status,'error':{'code':exc.code,'message':exc.message}}))`, { operation, input });
 }
 
-const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error', plugins: [{ name: 'planning-test-page', configureServer(s) {
+const server = await createServer({ root, cacheDir: join(root, 'node_modules/.vite-chapter-planning'), define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error', plugins: [{ name: 'planning-test-page', configureServer(s) {
   s.middlewares.use('/__planning_test', (_, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><meta charset="utf-8"><title>Chapter planning core tests</title>'); });
 } }] });
 await server.listen();
@@ -89,18 +90,20 @@ async function test(name, body) {
   const page = await context.newPage();
   page.on('pageerror', error => pageErrors.push(error.message));
   page.setDefaultTimeout(10000);
+  await installTestWorkspace(context);
   await page.goto(origin + '/__planning_test');
-  async function load(target = page) {
-    await target.evaluate(async ({ key, candidate }) => {
-      window.store = await import('/src/localStore.ts');
-      window.wf = await import('/src/localWorkflow.ts');
-      window.pc = await import('/src/providerConnections.ts');
-      window.vault = await import('/src/keyVault.ts');
-      window.types = await import('/src/localTypes.ts');
-      window.planning = await import('/src/chapterPlanning.ts');
-      window.inputs = await import('/src/planningInput.ts');
-      window.api = await import('/src/api.ts');
-      window.client = await import('/src/computeClient.ts');
+  async function load(projectRef) {
+    await openTestWorkspace(page);
+    await page.evaluate(async ({ key, candidate }) => {
+      window.store = await window.testModule('localStore.ts');
+      window.wf = await window.testModule('localWorkflow.ts');
+      window.pc = await window.testModule('providerConnections.ts');
+      window.vault = await window.testModule('keyVault.ts');
+      window.types = await window.testModule('localTypes.ts');
+      window.planning = await window.testModule('chapterPlanning.ts');
+      window.inputs = await window.testModule('planningInput.ts');
+      window.api = await window.testModule('api.ts');
+      window.client = await window.testModule('computeClient.ts');
       window.fixed = { author_intent: '让林默和周岚恢复有限信任', canon_budget: 'none', required_characters: ['林默', '周岚'], forbidden_advances: ['揭示组织秘密'] };
       window.candidateForTest = candidate;
       for (const profile of await pc.connections()) if (profile.id !== 'legacy-deepseek' && profile.enabled && !profile.deleted) vault.loadProfileKey(profile, profile.revisions.find(r => r.revision === profile.head), key);
@@ -125,6 +128,10 @@ async function test(name, body) {
       };
       window.reject = async operation => { try { await operation(); } catch (error) { return error.message; } throw new Error('Unsafe operation unexpectedly succeeded'); };
     }, { key: KEY, candidate });
+    if (projectRef) await page.evaluate(async ref => {
+      const { useAppStore } = await window.testModule('store/useAppStore.ts');
+      useAppStore.getState().selectProject(ref);
+    }, projectRef);
   }
   await load();
   try {
@@ -381,16 +388,28 @@ try {
 
   await test('完整策划result已保存但提交失败：重载resume零新模型且仍无正式计划', async ({ page, load, calls }) => {
     const ref = await page.evaluate(async () => {
-      const ref = await makeProject(), original = IDBObjectStore.prototype.put; let writes = 0;
-      IDBObjectStore.prototype.put = function (...args) { if (this.name === 'projects' && ++writes === 3) throw new DOMException('injected planning apply failure', 'UnknownError'); return original.apply(this, args); };
-      try { await generate(ref); } catch {} finally { IDBObjectStore.prototype.put = original; }
-      const p = await store.getProject(ref);
-      if (!p.runs[0].result || p.runs[0].status !== 'interrupted') throw new Error('saved result recovery fixture failed');
+      const ref = await makeProject();
+      window.failTestWorkspaceWrite = snapshot => {
+        const run = snapshot.projects.find(project => project.project_ref === ref)?.runs.at(-1);
+        if (run?.operation === 'plan_chapter' && run.status === 'completed') {
+          window.failTestWorkspaceWrite = undefined;
+          throw new DOMException('Injected planning apply write failure', 'QuotaExceededError');
+        }
+      };
+      await reject(() => generate(ref));
+      if (window.failTestWorkspaceWrite) throw new Error('The completion write was never attempted');
       return ref;
     });
     const count = calls.filter(c => c.operation === 'plan_chapter').length;
+    assert.equal(count, 1);
     await page.reload(); await load();
-    const snapshot = await page.evaluate(async ref => { const p = await wf.recoverInterrupted(ref); await wf.resumeLocalRun(ref, p.runs[0].run_id); return store.getProject(ref); }, ref);
+    const interrupted = await page.evaluate(async ref => (await wf.recoverInterrupted(ref)).runs[0], ref);
+    assert.equal(interrupted.status, 'interrupted');
+    assert.ok(interrupted.result);
+    const snapshot = await page.evaluate(async ({ ref, id }) => {
+      await wf.resumeLocalRun(ref, id);
+      return store.getProject(ref);
+    }, { ref, id: interrupted.run_id });
     assert.equal(calls.filter(c => c.operation === 'plan_chapter').length, count); assert.equal(snapshot.runs[0].status, 'completed');
     assert.deepEqual(snapshot.chapter_tasks, {}); assert.deepEqual(snapshot.scene_plans, {});
   });
@@ -460,7 +479,7 @@ try {
       const ref = await makeProject();
       await store.updateProject(ref, p => { p.config.model = 'custom-project-model'; });
       const result = await generate(ref), before = await store.getProject(ref), original = before.runs[0].connection;
-      await pc.storeConnectionKey(original.profile_id, 'OFFLINE_PLANNING_TEST_KEY');
+      await pc.storeConnectionKey(original.profile_id, 'OFFLINE_REPLACEMENT_PLANNING_TEST_KEY');
       const denied = await reject(() => planning.savePlanningTask(ref, result.run_id));
       await planning.authorizePlanningRun(ref, result.run_id);
       const after = await store.getProject(ref);
@@ -488,13 +507,12 @@ try {
   });
 
   async function openUI(page, load, ref, path = '/review?chapter=2') {
-    await page.evaluate(async ref => {
-      const intro = await import('/src/appConfig.ts'); intro.setIntroHidden(true); intro.markIntroSeen();
-      const { useAppStore } = await import('/src/store/useAppStore.ts'); useAppStore.getState().selectProject(ref);
-    }, ref);
-    await page.goto(origin + path); await load();
     await page.evaluate(async () => {
-      const { useAppStore } = await import('/src/store/useAppStore.ts'); useAppStore.getState().setApiStatus('online');
+      const intro = await window.testModule('appConfig.ts'); intro.setIntroHidden(true); intro.markIntroSeen();
+    });
+    await page.goto(origin + path); await load(ref);
+    await page.evaluate(async () => {
+      const { useAppStore } = await window.testModule('store/useAppStore.ts'); useAppStore.getState().setApiStatus('online');
       window.appForTest = useAppStore;
     });
   }
@@ -521,7 +539,7 @@ try {
     await page.evaluate(ref => waitUntil(async () => (await store.getProject(ref)).runs.some(r => r.operation === 'plan_chapter' && r.status === 'completed')), ref);
     let p = await page.evaluate(ref => store.getProject(ref), ref);
     assert.deepEqual(p.chapter_tasks, {}); assert.deepEqual(p.scene_plans, {}); assert.equal(p.chapters[2], undefined);
-    await page.reload(); await load();
+    await page.reload(); await load(ref);
     const details = planPanel(page).getByTestId('planning-proposal-details');
     await details.locator(':scope > summary').click();
     assert.equal(await details.evaluate(element => element.open), false);

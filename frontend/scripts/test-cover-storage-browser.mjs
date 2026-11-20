@@ -13,7 +13,7 @@ const { chromium } = runtime ? await import(pathToFileURL(join(runtime, 'index.m
 const root = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]+$/, '');
 const report = resolve(process.env.BRAIPEN_REPORT_DIR || join(root, '../reports/functional-review-2026-10-23/cover/storage'));
 await mkdir(report, { recursive: true });
-const server = await createServer({ root, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error',
+const server = await createServer({ root, cacheDir: join(root, 'node_modules/.vite-cover-storage'), server: { host: '127.0.0.1', port: 0 }, logLevel: 'error',
   plugins: [{ name: 'cover-storage-check', configureServer(value) {
     value.middlewares.use('/__cover_storage', (_, response) => { response.setHeader('Content-Type', 'text/html; charset=utf-8'); response.end('<!doctype html><title>封面存储验证</title><p>封面存储事务验证</p>'); });
   } }] });
@@ -22,6 +22,13 @@ try {
   await server.listen();
   browser = await chromium.launch({ channel: process.env.BRAIPEN_BROWSER || 'msedge', headless: true });
   const context = await browser.newContext();
+  const origin = new URL(server.resolvedUrls.local[0]).origin;
+  const externalRequests = [];
+  await context.route('**/*', route => {
+    if (new URL(route.request().url()).origin === origin) return route.continue();
+    externalRequests.push(route.request().url());
+    return route.abort();
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -134,6 +141,10 @@ try {
     check((await store.getProject(ref)).cover.attempt.id === 'attempt_pending', 'A stale cleanup must not clear a newer image attempt');
     const backup = await store.createBackup();
     check(backup.version === 5 && backup.cover_media.length === 3, 'Only successful or explicitly retried candidates enter file backup');
+    let busyError = '';
+    try { await store.openWorkspace(JSON.stringify(backup), true); } catch (error) { busyError = error.message; }
+    check(busyError.includes('正在运行') && (await store.getProject(ref)).cover.attempt.id === 'attempt_pending', 'Opening a file must preserve a live cover attempt and refuse to switch');
+    await cover.saveCoverAttempt(ref, undefined, 'attempt_pending');
     const [copyRef] = await store.restoreBackup(JSON.stringify(backup));
     const copy = await store.getProject(copyRef);
     check(copy.cover.selected_id === copy.cover.versions[0].id && copy.cover.versions[1].parent_id === copy.cover.versions[0].id, 'Restore remaps selected and parent IDs');
@@ -150,8 +161,9 @@ try {
     check(dimensionError.includes('尺寸') && (await store.listProjects()).length === 2, 'Invalid dimensions reject restore before writes');
     const beforeFailedRestore = await store.createBackup();
     store.setWorkspaceWriter(async () => { throw new DOMException('本机存储空间不足', 'QuotaExceededError'); });
-    try { await store.restoreBackup(JSON.stringify(backup)); } catch (error) { quota = error.message; }
-    check(quota.includes('存储空间不足') && (await store.listProjects()).length === 2, 'Failed restore leaves no partial formal project');
+    let restoreQuota = '';
+    try { await store.restoreBackup(JSON.stringify(backup)); } catch (error) { restoreQuota = error.message; }
+    check(restoreQuota.includes('存储空间不足') && (await store.listProjects()).length === 2, 'Failed restore leaves no partial formal project');
     check((await store.createBackup()).cover_media.length === 9, 'Failed restore retains complete candidate for a recovery download');
     await store.openWorkspace(JSON.stringify(beforeFailedRestore), true);
     store.setWorkspaceWriter(writer);
@@ -166,6 +178,7 @@ try {
   assert.ok(result.changed >= 8);
   assert.equal(result.remainingProjects, 1);
   assert.deepEqual(errors, []);
+  assert.deepEqual(externalRequests, []);
   console.log('PASS explicit read-only legacy migration, memory/file candidate merge, selection/rollback/layout, guard revocation, atomic quota failure, byte-exact backup/restore, connection remapping, interrupted attempt, and cascade deletion');
   console.log(JSON.stringify(result));
   await writeFile(join(report, 'storage-browser-results.json'), JSON.stringify({ status:'passed', result, errors, credentials:'none', paid_calls:0, file_writer:'simulated' }, null, 2));

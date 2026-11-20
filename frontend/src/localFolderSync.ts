@@ -1,5 +1,6 @@
 import { createBackup, openWorkspace, flushWorkspace, setWorkspaceWriter, changeWorkspaceBinding, markWorkspaceSaved, workspaceHasUnsavedChanges, getWorkspaceEpoch,
-  readLegacyWorkspace, legacyWorkspaceDigest, clearLegacyWorkspace, listProjects, MAX_BACKUP_FILE_BYTES, type WorkspaceBackup } from './localStore';
+  readLegacyWorkspace, legacyWorkspaceDigest, clearLegacyWorkspace, hasLocalProjectTask, listProjects, MAX_BACKUP_FILE_BYTES, type WorkspaceBackup } from './localStore';
+import type { LocalProject } from './localTypes';
 import { hasWorkspaceActivity } from './workspaceActivity';
 
 export const LOCAL_FOLDER_FILE = 'braipen-workspace.json';
@@ -30,9 +31,8 @@ const subscribers = new Set<() => void>();
 const publish = (patch: Partial<LocalFolderSyncState>) => { state = { ...state, ...patch }; for (const fn of subscribers) fn(); };
 export const getLocalFolderSyncState = () => state;
 export function subscribeLocalFolderSync(fn: () => void) { subscribers.add(fn); return () => { subscribers.delete(fn); }; }
-type LocalProjectLike = { runs: Array<{ status: string }>; batch: { status: string }; cover?: { attempt?: { status: string } } };
-export function hasActiveFolderWork(projects: LocalProjectLike[]): boolean {
-  return hasWorkspaceActivity(getWorkspaceEpoch()) || projects.some(p => p.runs.some(r => r.status === 'running') || ['running', 'stopping'].includes(p.batch.status) || p.cover?.attempt?.status === 'running');
+export function hasActiveFolderWork(projects: LocalProject[]): boolean {
+  return hasWorkspaceActivity(getWorkspaceEpoch()) || projects.some(hasLocalProjectTask);
 }
 function failure(error: unknown) {
   const permission = error instanceof DOMException && ['NotAllowedError', 'SecurityError'].includes(error.name);

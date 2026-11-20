@@ -10,6 +10,9 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from uuid import uuid4
+
+from project_context import BOOK_ID_PATTERN
 
 BASE = "http://127.0.0.1:8000"
 PASS = 0
@@ -70,6 +73,14 @@ def check(name: str, ok: bool, detail: str = ""):
         print(f"  ✗ {name} — {detail}")
 
 
+def owns_test_project(ref: object, title: str) -> bool:
+    if not isinstance(ref, str) or not ref.startswith("book:") or not BOOK_ID_PATTERN.fullmatch(ref[5:]):
+        return False
+    code, project = req("GET", f"/api/projects/{ref}")
+    return (code == 200 and isinstance(project, dict)
+            and project.get("project_ref") == ref and project.get("title") == title)
+
+
 def main():
     print("=" * 60)
     print("Braipen 真实 API 全链路测试 (deepseek-v4-flash)")
@@ -78,18 +89,24 @@ def main():
     # 1. 健康检查
     print("\n[1] 健康检查")
     code, resp = req("GET", "/api/health")
-    check("GET /api/health", code == 200 and resp.get("status") == "ok", str(resp))
+    healthy = code == 200 and isinstance(resp, dict) and resp.get("status") == "ok"
+    check("GET /api/health", healthy, str(resp))
+    if not healthy:
+        return 1
 
     # 2. 项目列表（应为空）
     print("\n[2] 项目列表（清理后应为空）")
     code, resp = req("GET", "/api/projects")
     check("项目列表返回", code == 200, str(resp))
-    check("项目列表为空", isinstance(resp, list) and len(resp) == 0, f"发现 {len(resp)} 个项目")
+    empty = code == 200 and resp == []
+    check("项目列表为空", empty, "冒烟测试需要空工作区。")
+    if not empty:
+        return 1
 
     # 3. 创建项目
     print("\n[3] 创建测试项目")
     project_body = {
-        "title": "全链路测试《灰剧场》",
+        "title": f"全链路测试《灰剧场》-{uuid4().hex}",
         "seed_prompt": "一个在废弃剧场后台长大的少女，偶然发现剧场地下藏着一整座消失的城市。她要找出这座城消失的真相，并决定是否让整座城重现人间。",
         "genre": "悬疑",
         "style": "冷峻克制的悬疑笔调，短句，少用形容词",
@@ -98,11 +115,46 @@ def main():
         "temperature": 1.0,
     }
     code, resp = req("POST", "/api/projects", project_body)
-    check("POST /api/projects", code == 200 and resp.get("ok"), str(resp)[:200])
-    ref = resp.get("project_ref", "")
-    check("返回 project_ref", bool(ref), str(resp))
+    created = code == 200 and isinstance(resp, dict) and resp.get("ok") is True
+    check("POST /api/projects", created, str(resp)[:200])
+    if not created:
+        return 1
+    ref = resp.get("project_ref")
+    title = project_body["title"]
+    owned = resp.get("title") == title and owns_test_project(ref, title)
+    check("返回本轮创建的工作区项目", owned)
+    if not owned:
+        return 1
     print(f"    项目 ref: {ref}")
 
+    try:
+        exercise_project(ref)
+    finally:
+        print("\n[13] 清理测试项目")
+        try:
+            if owns_test_project(ref, title):
+                code, deleted = req("DELETE", f"/api/projects/{ref}")
+                removed = (code == 200 and isinstance(deleted, dict)
+                           and deleted.get("ok") is True and deleted.get("project_ref") == ref)
+                check("DELETE project", removed, str(deleted)[:200])
+            else:
+                check("清理前核对项目归属", False, "无法确认本轮创建的项目，已停止清理。")
+        except Exception as exc:
+            check("DELETE project", False, str(exc))
+    code, resp = req("GET", "/api/projects")
+    check("项目列表回到空", code == 200 and resp == [])
+
+    print("\n" + "=" * 60)
+    print(f"结果: {PASS} 通过 / {FAIL} 失败")
+    if FAILURES:
+        print("失败项:")
+        for name in FAILURES:
+            print(f"  - {name}")
+    print("=" * 60)
+    return 1 if FAIL else 0
+
+
+def exercise_project(ref: str):
     # 4. 生成大纲与人物卡
     print("\n[4] 生成大纲与人物卡（真实 DeepSeek 调用）")
     gen_body = {"model": "deepseek-v4-flash", "temperature": 1.0}
@@ -130,7 +182,6 @@ def main():
     t0 = time.time()
     code, lines = req_stream("POST", f"/api/projects/{ref}/chapters/1/generate/stream", stream_body)
     elapsed = time.time() - t0
-    raw = "\n".join(lines)
     check("流式接口 HTTP 200", code == 200, f"HTTP {code}")
     delta_chars = 0
     done_event = None
@@ -221,48 +272,6 @@ def main():
         check("导出第 1 章 TXT", resp.status == 200 and len(text) > 200, f"HTTP {resp.status}, {len(text)} 字符")
     except Exception as e:
         check("导出第 1 章 TXT", False, str(e))
-
-    # 13. 清理测试项目（删除）
-    print("\n[13] 清理测试项目")
-    try:
-        code, resp = req("DELETE", f"/api/projects/{ref}")
-        # 本环境沙箱会拦截目录删除（SAFE_DELETE_FAIL_CLOSED），返回错误属预期；
-        # 真实环境（无沙箱）删除会成功。接口逻辑正确性以 404 场景与错误响应为准。
-        if code == 200:
-            check("DELETE project", True, str(resp)[:200])
-        elif "could not be removed" in str(resp):
-            check("DELETE project（逻辑正确，本环境沙箱拦截删除）", True, str(resp)[:150])
-        else:
-            check("DELETE project", False, str(resp)[:200])
-    except Exception as e:
-        check("DELETE project", False, str(e))
-    # 兜底清理测试项目文件（接口因沙箱未能删除时）
-    import shutil
-    from pathlib import Path
-
-    test_dir = Path(r"D:\vibecoding\novel-generator\workspace\books") / ref.split(":")[-1]
-    if test_dir.exists():
-        try:
-            shutil.rmtree(test_dir)
-        except OSError:
-            import os
-
-            archive = Path(r"D:\vibecoding\archive\novel-generator-test-runs")
-            archive.mkdir(parents=True, exist_ok=True)
-            os.replace(str(test_dir), str(archive / test_dir.name))
-            print("    测试项目已归档清理（沙箱拦截）")
-    code, resp = req("GET", "/api/projects")
-    check("项目列表回到空", isinstance(resp, list) and len(resp) == 0, f"发现 {len(resp)} 个项目")
-
-    # 汇总
-    print("\n" + "=" * 60)
-    print(f"结果: {PASS} 通过 / {FAIL} 失败")
-    if FAILURES:
-        print("失败项:")
-        for f in FAILURES:
-            print(f"  - {f}")
-    print("=" * 60)
-    return 1 if FAIL else 0
 
 
 if __name__ == "__main__":

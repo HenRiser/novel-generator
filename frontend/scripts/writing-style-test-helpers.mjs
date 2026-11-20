@@ -19,7 +19,7 @@ export function loadActivityModule() {
 }
 
 /** Transactional event adapter, including rollback, for the real localStore module. */
-export function memoryStyleStore({ beforeBrowserWrite } = {}) {
+export function memoryStyleStore({ beforeBrowserWrite, navigator } = {}) {
   const rows = { projects: new Map(), settings: new Map(), imports: new Map(), cover_media: new Map() };
   const db = { transaction(names, mode) {
     if (mode === 'readwrite') beforeBrowserWrite?.();
@@ -54,7 +54,7 @@ export function memoryStyleStore({ beforeBrowserWrite } = {}) {
   const indexedDB = { open() { const r = { result: db }; queueMicrotask(() => r.onsuccess?.()); return r; } };
   const style = loadStyleModule(), activity = loadActivityModule(), exports = {};
   const source = ts.transpileModule(readFileSync(new URL('../src/localStore.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
-  runInNewContext(source, { exports, indexedDB, structuredClone, queueMicrotask, Blob, TextEncoder, DOMException, crypto: webcrypto, atob, btoa,
+  runInNewContext(source, { exports, indexedDB, navigator, structuredClone, queueMicrotask, Blob, TextEncoder, DOMException, crypto: webcrypto, atob, btoa,
     require: name => { if (name === './writingStyle') return style; if (name === './workspaceActivity') return activity; if (name === './planningTrace') return {}; throw new Error(name); },
   });
   const types = {};

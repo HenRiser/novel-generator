@@ -1,4 +1,4 @@
-// Real Edge, IndexedDB and chunked localhost NDJSON; no provider requests.
+// Real Edge, OPFS workspaces and chunked localhost NDJSON; no provider requests.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createServer } from 'vite';
+import { installTestWorkspace, openTestWorkspace } from './workspace-browser-test-helpers.mjs';
 import { providerFixtures, identity } from './provider-test-helpers.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]+$/, '');
@@ -48,7 +49,7 @@ print(json.dumps(asyncio.run(compute(p['operation'],p['input'],{},{}))))`, { ope
 
 let capabilities, streamHandler, calls, fixtureErrors, capabilityRequests;
 const sessions = new Set();
-const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error', plugins: [{ name: 'offline-planning-progress', configureServer(vite) {
+const server = await createServer({ root, cacheDir: join(root, 'node_modules/.vite-planning-progress'), define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, server: { host: '127.0.0.1', port: 0 }, logLevel: 'error', plugins: [{ name: 'offline-planning-progress', configureServer(vite) {
   vite.middlewares.use('/__planning_progress', (_, response) => { response.setHeader('Content-Type', 'text/html'); response.end('<!doctype html><meta charset="utf-8"><title>Offline planning progress tests</title>'); });
   vite.middlewares.use('/api', (request, response) => {
     void (async () => {
@@ -104,12 +105,14 @@ async function test(name, body) {
   const violations = [], pageErrors = [];
   await context.route('**/*', route => { if (new URL(route.request().url()).origin !== origin) { violations.push(route.request().url()); return route.abort('blockedbyclient'); } return route.continue(); });
   page.on('pageerror', error => pageErrors.push(error.message)); page.setDefaultTimeout(12000);
+  await installTestWorkspace(context);
   await page.goto(origin + '/__planning_progress');
-  async function load() {
+  async function load(projectRef) {
+    await openTestWorkspace(page);
     await page.evaluate(async ({ key, fixed }) => {
-      window.store = await import('/src/localStore.ts'); window.wf = await import('/src/localWorkflow.ts');
-      window.pc = await import('/src/providerConnections.ts'); window.vault = await import('/src/keyVault.ts');
-      window.types = await import('/src/localTypes.ts'); window.planning = await import('/src/chapterPlanning.ts'); window.api = await import('/src/api.ts');
+      window.store = await window.testModule('localStore.ts'); window.wf = await window.testModule('localWorkflow.ts');
+      window.pc = await window.testModule('providerConnections.ts'); window.vault = await window.testModule('keyVault.ts');
+      window.types = await window.testModule('localTypes.ts'); window.planning = await window.testModule('chapterPlanning.ts'); window.api = await window.testModule('api.ts');
       window.fixed = fixed;
       for (const profile of await pc.connections()) if (profile.id !== 'legacy-deepseek' && profile.enabled && !profile.deleted) vault.loadProfileKey(profile, profile.revisions.find(revision => revision.revision === profile.head), key);
       window.waitUntil = async predicate => { for (let index = 0; index < 500; index++) { if (await predicate()) return; await new Promise(done => setTimeout(done, 20)); } throw new Error('Browser condition timed out'); };
@@ -121,14 +124,17 @@ async function test(name, body) {
         await store.putProject(project); return project.project_ref;
       };
     }, { key: KEY, fixed });
+    if (projectRef) await page.evaluate(async ref => {
+      const { useAppStore } = await window.testModule('store/useAppStore.ts');
+      useAppStore.getState().selectProject(ref);
+    }, projectRef);
   }
   async function openUI(ref) {
-    await page.evaluate(async ref => {
-      const intro = await import('/src/appConfig.ts'); intro.setIntroHidden(true); intro.markIntroSeen();
-      const { useAppStore } = await import('/src/store/useAppStore.ts'); useAppStore.getState().selectProject(ref);
-    }, ref);
-    await page.goto(origin + '/review?chapter=2'); await load();
-    await page.evaluate(async () => { const { useAppStore } = await import('/src/store/useAppStore.ts'); useAppStore.getState().setApiStatus('online'); });
+    await page.evaluate(async () => {
+      const intro = await window.testModule('appConfig.ts'); intro.setIntroHidden(true); intro.markIntroSeen();
+    });
+    await page.goto(origin + '/review?chapter=2'); await load(ref);
+    await page.evaluate(async () => { const { useAppStore } = await window.testModule('store/useAppStore.ts'); useAppStore.getState().setApiStatus('online'); });
   }
   async function generateUI() {
     await page.getByRole('textbox', { name: '本章策划意图', exact: true }).fill(fixed.author_intent);
@@ -167,7 +173,7 @@ try {
       assert.ok(!JSON.stringify(active).includes(KEY));
       await page.getByTestId('planning-trace').locator(':scope > summary').click();
       await mkdir(report, { recursive: true }); await page.screenshot({ path: join(report, 'planning-live-progress.png'), fullPage: true });
-      await page.reload(); await load(); await bounded(session.closed, 'Reload did not close the socket');
+      await page.reload(); await load(ref); await bounded(session.closed, 'Reload did not close the socket');
       await page.getByTestId('planning-current-node').filter({ hasText: /中断.*未知/ }).waitFor();
       const recovered = await page.evaluate(ref => store.getProject(ref), ref);
       assert.equal(recovered.revision, before.revision); assert.deepEqual(recovered.runs.at(-1).planning_trace, active.runs.at(-1).planning_trace);

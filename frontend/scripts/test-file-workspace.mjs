@@ -248,6 +248,44 @@ test('旧工作区导入异步结果不能写入新工作区或污染应急副�
   assert.equal((await f.store.listImports()).length, 1);
 });
 
+test('重开工作区按项目锁与封面锁分别识别活跃任务，读者可以再打开文件，恢复副本独立中断', async () => {
+  const source = memoryStyleStore(), project = source.types.emptyProject('正在执行');
+  const ref = project.project_ref;
+  project.runs.push({ run_id: 'run_1', attempt_id: 'attempt_1', input: {}, status: 'running' });
+  Object.assign(project.batch, { id: 'batch_1', status: 'stopping' });
+  await source.store.putProject(project);
+  await source.store.saveCoverAttempt(ref, { id: 'attempt_cover', status: 'running', started_at: new Date().toISOString() });
+  const text = JSON.stringify(await source.store.createBackup());
+  let held = [];
+  const reader = memoryStyleStore({ navigator: { locks: { query: async () => ({ held }) } } });
+  const projectLock = { name: 'braipen:project:' + ref }, coverLock = { name: 'braipen:cover:' + ref };
+  const statuses = p => [p.runs[0].status, p.batch.status, p.cover.attempt.status];
+
+  held = [projectLock, coverLock];
+  await reader.store.openWorkspace(text, false, undefined, async () => { held = []; });
+  assert.deepEqual(statuses(await reader.store.getProject(ref)), ['interrupted', 'stopped', 'unknown']);
+
+  for (const [locks, expected] of [
+    [[projectLock], ['running', 'stopping', 'unknown']],
+    [[coverLock], ['interrupted', 'stopped', 'running']],
+    [[{ name: 'braipen:project:other' }], ['interrupted', 'stopped', 'unknown']],
+    [[projectLock, coverLock], ['running', 'stopping', 'running']],
+  ]) {
+    held = locks;
+    await reader.store.openWorkspace(text);
+    const opened = await reader.store.getProject(ref);
+    assert.deepEqual(statuses(opened), expected);
+    assert.equal(reader.store.hasLocalProjectTask(opened), false);
+    await reader.store.changeWorkspaceBinding(() => {});
+  }
+  const [copyRef] = await reader.store.restoreBackup(text);
+  assert.notEqual(copyRef, ref);
+  assert.deepEqual(statuses(await reader.store.getProject(copyRef)), ['interrupted', 'stopped', 'unknown']);
+  assert.deepEqual(statuses(await reader.store.getProject(ref)), ['running', 'stopping', 'running']);
+  await reader.store.updateProject(ref, p => { p.runs[0].attempt_id = 'new-local-attempt'; });
+  await assert.rejects(reader.store.changeWorkspaceBinding(() => {}), /正在运行/);
+});
+
 test('切换真正执行前复查当前工作区的任务，不拒绝载入文件中的旧运行状态', async () => {
   for (const kind of ['run', 'batch', 'cover']) {
     const f = memoryStyleStore(), p = f.types.emptyProject('当前作品'); await f.store.putProject(p);

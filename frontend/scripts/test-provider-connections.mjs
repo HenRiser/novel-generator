@@ -1,3 +1,4 @@
+import { installTestWorkspace, openTestWorkspace } from './workspace-browser-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -7,15 +8,16 @@ import {createServer} from 'vite';
 import {providerFixtures,identity} from './provider-test-helpers.mjs';
 const require=createRequire(import.meta.url),runtime=process.env.BRAIPEN_PLAYWRIGHT_PATH;
 const {chromium}=runtime?await import(pathToFileURL(join(runtime,'index.mjs')).href):require('playwright');
-const root=fileURLToPath(new URL('../',import.meta.url)).replace(/[\\/]+$/,'');
+const root=fileURLToPath(new URL('../',import.meta.url)).replace(/\\/g,'/').replace(/\/$/,'');
 const fixtures=providerFixtures(root),report=resolve(process.env.BRAIPEN_REPORT_DIR||resolve(root,'../reports/provider-connections-2026-09-28'));await mkdir(report,{recursive:true});
-const server=await createServer({root,define:{'import.meta.env.VITE_API_BASE_URL':'""'},logLevel:'error',server:{host:'127.0.0.1',port:0},plugins:[{name:'provider-test',configureServer(s){s.middlewares.use('/__provider_test',(_,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>provider tests</title>');});}}]});
+const server=await createServer({root, cacheDir: join(root, 'node_modules/.vite-provider-connections'),define:{'import.meta.env.VITE_API_BASE_URL':'""'},logLevel:'error',server:{host:'127.0.0.1',port:0},plugins:[{name:'provider-test',configureServer(s){s.middlewares.use('/__provider_test',(_,res)=>{res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>provider tests</title>');});}}]});
 await server.listen();const origin=server.resolvedUrls.local[0].replace(/\/$/,'');
 const browser=await chromium.launch({channel:'msedge',headless:true});let results=[];
 async function visibleTooltip(page,text){await page.getByRole('tooltip').filter({hasText:text}).waitFor({state:'visible'});await page.waitForFunction(text=>Array.from(document.querySelectorAll('.ant-tooltip')).some(e=>{const r=e.getBoundingClientRect();return e.textContent.includes(text)&&getComputedStyle(e).opacity==='1'&&r.width>0&&r.top>=0&&r.bottom<=innerHeight;}),text);}
 async function test(name,fn,contextOptions={}){
  if(process.env.BRAIPEN_TEST_FILTER&&!name.includes(process.env.BRAIPEN_TEST_FILTER))return;
  const ctx=await browser.newContext({acceptDownloads:true,...contextOptions}),calls=[];let handler;
+ await installTestWorkspace(ctx);
  await ctx.route('**/api/**',async route=>{const req=route.request();
   if(req.url().endsWith('/health'))return route.fulfill({json:{status:'ok'}});
   if(req.url().endsWith('/capabilities'))return route.fulfill({json:fixtures.catalog});
@@ -33,7 +35,7 @@ async function test(name,fn,contextOptions={}){
  });
  const page=await ctx.newPage();await page.goto(origin+'/__provider_test');
  async function load(target=page){await target.evaluate(async()=>{
-   window.store=await import('/src/localStore.ts');window.pc=await import('/src/providerConnections.ts');window.vault=await import('/src/keyVault.ts');window.wf=await import('/src/localWorkflow.ts');window.types=await import('/src/localTypes.ts');window.compute=await import('/src/computeClient.ts');window.api=await import('/src/localApi.ts');
+   window.store=await window.testModule('localStore.ts');window.pc=await window.testModule('providerConnections.ts');window.vault=await window.testModule('keyVault.ts');window.wf=await window.testModule('localWorkflow.ts');window.types=await window.testModule('localTypes.ts');window.compute=await window.testModule('computeClient.ts');window.api=await window.testModule('localApi.ts');
    window.wait=async pred=>{for(let i=0;i<300;i++){if(await pred())return;await new Promise(r=>setTimeout(r,20));}throw new Error('condition timed out');};
    window.newProfile=async(url='https://a.example/v1',model='org/model:fast',key='NON_SK_KEY_A')=>{const raw={profile_id:crypto.randomUUID(),revision:1,preset:'custom',protocol:'chat_completions',base_url:url,model,policy:{...pc.defaultPolicy(),structured:'prompt_only'},auth_mode:'key',destination_fingerprint:'',execution_fingerprint:''};const p=await pc.saveConnection('测试连接',raw);await pc.storeConnectionKey(p.id,key);return pc.getConnection(p.id);};
    window.encryptedProfile=async(profile,value,password)=>{const snapshot=profile.revisions.find(r=>r.revision===profile.head),salt=crypto.getRandomValues(new Uint8Array(16)),iv=crypto.getRandomValues(new Uint8Array(12));const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);const derived=await crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:600000,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt']);const aad=new TextEncoder().encode(profile.id+'\n'+snapshot.protocol+'\n'+snapshot.base_url);const cipher=await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:aad},derived,new TextEncoder().encode(value));await store.setSetting('vault:'+profile.id,{version:2,iterations:600000,salt:[...salt],iv:[...iv],ciphertext:[...new Uint8Array(cipher)],destination:snapshot.destination_fingerprint});};
@@ -59,6 +61,7 @@ await test('密钥缺失区分无会话和旧版加密待迁移，无认证连�
 });
 
 await test('实际设定扩写页面显示具体密钥原因，失败后按钮恢复且不调用模型',async({page,load,calls})=>{
+ await openTestWorkspace(page);
  const output=resolve(process.env.BRAIPEN_REPORT_DIR||report);await mkdir(output,{recursive:true});
  for(const remembered of [false,true]){
   await load();const ref=await page.evaluate(async remembered=>{
@@ -68,8 +71,9 @@ await test('实际设定扩写页面显示具体密钥原因，失败后按钮�
    await pc.manageConnection(profile.id,'lock');localStorage.setItem('braipen:intro-hidden','true');
    return ref;
   },remembered);
-  await page.goto(origin+'/writing?tab=assets');await load();
-  await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+  await page.goto(origin+'/writing?tab=assets');await openTestWorkspace(page);await load();
+  await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+  await page.getByRole('tab',{name:'创作设定',exact:true}).click();
   const button=page.getByRole('button',{name:'用白话生成世界观',exact:true});
   await button.click();
   const expected=remembered?'模型连接「测试连接」保存的是旧版加密 Key。请前往「偏好设置 → 模型连接」迁移旧版 Key，或重新填写 API Key 并保存。':'模型连接「测试连接」没有可用的 API Key。请前往「偏好设置 → 模型连接」填写并保存；勾选「在此浏览器记住 API Key」后，重新打开网页会自动使用。';
@@ -199,14 +203,14 @@ await test('模型连接可用性：手机首次轻点问号可见且不修改�
 },{hasTouch:true,isMobile:true,viewport:{width:390,height:844}});
 
 await test('修复Custom结构化策略后，实际恢复入口创建新摘要而不重写正文',async({page,load,calls})=>{
- await load();const state=await page.evaluate(async()=>{
+ await openTestWorkspace(page);await load();const state=await page.evaluate(async()=>{
    let profile=await newProfile();profile=await pc.saveConnection('待修复',{...profile.revisions[0],policy:{...profile.revisions[0].policy,structured:'unsupported'}});const ref=await newProject(profile);
    await wf.generateLocalChapter(ref,1,{model:profile.revisions[1].model,max_tokens:4000,temperature:.7});const c=(await store.getProject(ref)).chapters[1];await wf.confirmLocalChapter(ref,1,c.content+'修改',c.revision);
    await wait(async()=>(await store.getProject(ref)).chapters[1].workflow.summary_status==='failed');
    const snapshot=profile.revisions.find(r=>r.revision===profile.head);profile=await pc.saveConnection('已修复',{...snapshot,policy:{...snapshot.policy,structured:'prompt_only'}});return{id:profile.id,ref,content:c.content+'修改'};
  });
- await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/settings');await load();await page.evaluate(id=>pc.storeConnectionKey(id,'NON_SK_KEY_A'),state.id);
- await page.evaluate(async({ref})=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().setProjects([{project_ref:ref,title:'测试作品',storage_type:'browser'}]);useAppStore.getState().selectProject(ref);},state);
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/settings');await openTestWorkspace(page);await load();await page.evaluate(id=>pc.storeConnectionKey(id,'NON_SK_KEY_A'),state.id);
+ await page.evaluate(async({ref})=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().setProjects([{project_ref:ref,title:'测试作品',storage_type:'browser'}]);useAppStore.getState().selectProject(ref);},state);
  await page.getByText(/任务与恢复/).first().click();await page.getByText(/修复连接关联或采用新配置/).click();await page.getByRole('combobox',{name:'恢复连接关联'}).click();await page.getByTitle('已修复',{exact:true}).last().click();
  await page.getByRole('button',{name:'采用所选连接新建摘要检查',exact:true}).first().click();await page.getByRole('button',{name:/确.*定|OK/}).last().click();
  await page.evaluate(ref=>wait(async()=>(await store.getProject(ref)).chapters[1].workflow.summary_status==='ready'),state.ref);
@@ -231,12 +235,12 @@ await test('无模型ID可先获取目录；离线草稿可转为验证连接',a
 });
 
 await test('导入草稿可显式关联同一目的地的新连接，原文和已存进度保留',async({page,load,calls})=>{
- await load();const state=await page.evaluate(async()=>{
+ await openTestWorkspace(page);await load();const state=await page.evaluate(async()=>{
    const old=await newProfile(),next=await newProfile();next.name='导入替代连接';await store.setSetting('connection:'+next.id,next);
-   const parser=await import('/src/novelImport.ts');const draft=await parser.createImportDraft('待恢复小说.txt',new TextEncoder().encode('第一章 开始\n甲来到城里。\n第二章 后文\n秘密在后面。'));
+   const parser=await window.testModule('novelImport.ts');const draft=await parser.createImportDraft('待恢复小说.txt',new TextEncoder().encode('第一章 开始\n甲来到城里。\n第二章 后文\n秘密在后面。'));
    draft.connection=old.revisions[0];draft.phase='extract';await store.putImport(draft.id,draft);await pc.manageConnection(old.id,'delete');return{id:draft.id,newId:next.id,source:draft.original_base64};
  });
- await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/library');await load();
+ await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/library');await openTestWorkspace(page);await load();
  await page.getByRole('combobox',{name:'恢复导入草稿'}).click();await page.getByTitle(/待恢复小说/).last().click();await page.getByText('恢复时原连接失效或需要采用修复后的能力？',{exact:true}).click();
  await page.getByRole('combobox',{name:'导入恢复连接'}).click();await page.getByTitle('导入替代连接',{exact:true}).last().click();await page.getByRole('button',{name:'明确采用此连接当前配置',exact:true}).click();
  await page.evaluate(({id,newId})=>wait(async()=>(await store.getImport(id)).connection.profile_id===newId),state);

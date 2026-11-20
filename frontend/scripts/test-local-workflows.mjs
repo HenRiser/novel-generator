@@ -1,20 +1,22 @@
+import { installTestWorkspace, openTestWorkspace } from './workspace-browser-test-helpers.mjs';
 import {providerFixtures,identity as v2Identity,wrapFulfill} from './provider-test-helpers.mjs';
-// Real IndexedDB/Web Locks tests with deterministic mock compute responses; no paid API calls.
+// Real local workspace files, IndexedDB and Web Locks with deterministic mock compute responses; no paid API calls.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { createServer } from 'vite';
 
 const require = createRequire(import.meta.url);
 const runtime = process.env.BRAIPEN_PLAYWRIGHT_PATH;
 const { chromium } = runtime ? await import(pathToFileURL(join(runtime, 'index.mjs')).href) : require('playwright');
-const root = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]+$/, '');
+const root = fileURLToPath(new URL('../', import.meta.url)).replace(/\\/g, '/').replace(/\/$/, '');
 const fixtures=providerFixtures(root);
+const report = resolve(process.env.BRAIPEN_REPORT_DIR || resolve(root, '../reports/workflow-reliability-2026-09-24'));
 let wireHandler; const openResponses = new Set();
 const bounded = (promise, label) => Promise.race([promise, new Promise((_,reject) => { const t=setTimeout(()=>reject(new Error(label)),5000);t.unref(); })]);
-const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, server: {host:'127.0.0.1',port:0}, logLevel:'error',
+const server = await createServer({ root, cacheDir: join(root, 'node_modules/.vite-local-workflows'), define: { 'import.meta.env.VITE_API_BASE_URL': '""' }, server: {host:'127.0.0.1',port:0}, logLevel:'error',
   plugins:[{name:'workflow-test-http',configureServer(s){
     s.middlewares.use('/api/capabilities',(_,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(fixtures.catalog));});
     s.middlewares.use('/api/compute/validate_connection',async(req,res)=>{let text='';for await(const chunk of req)text+=chunk;const p=JSON.parse(text);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({...v2Identity(p),result:{connection:fixtures.normalize(p.connection)}}));});
@@ -23,7 +25,7 @@ const server = await createServer({ root, define: { 'import.meta.env.VITE_API_BA
   }}]
 });
 await server.listen();
-await mkdir(resolve(root,'../reports/workflow-reliability-2026-09-24'),{recursive:true});
+await mkdir(report, {recursive:true});
 const origin = server.resolvedUrls.local[0].replace(/\/$/, '');
 const browser = await chromium.launch({ channel: process.env.BRAIPEN_BROWSER || 'msedge', headless: true });
 const KEY = 'sk-' + 'a'.repeat(32);
@@ -34,6 +36,7 @@ const results = [];
 async function test(name, fn) {
   if (process.env.BRAIPEN_TEST_FILTER && !name.includes(process.env.BRAIPEN_TEST_FILTER)) return;
   const context = await browser.newContext({ acceptDownloads: true });
+  await installTestWorkspace(context);
   const calls = [];
   let handler;
   await context.route('**/api/**', async route => {
@@ -58,10 +61,11 @@ async function test(name, fn) {
   });
   const page = await context.newPage(); await page.goto(origin + '/__workflow_test');
   async function load(target = page) {
+    await openTestWorkspace(target);
     await target.evaluate(async key => {
-      window.store = await import('/src/localStore.ts'); window.workflow = await import('/src/localWorkflow.ts');
-      window.api = await import('/src/localApi.ts'); window.client = await import('/src/computeClient.ts'); window.vault = await import('/src/keyVault.ts');
-      window.types = await import('/src/localTypes.ts'); window.vault.setSessionKey(key);
+      window.store = await window.testModule('localStore.ts'); window.workflow = await window.testModule('localWorkflow.ts');
+      window.api = await window.testModule('localApi.ts'); window.client = await window.testModule('computeClient.ts'); window.vault = await window.testModule('keyVault.ts');
+      window.types = await window.testModule('localTypes.ts'); window.vault.setSessionKey(key);
       window.spec = { model: 'test-model', max_tokens: 4000, temperature: .7 };
       window.waitUntil = async check => { for (let i = 0; i < 300; i++) { if (await check()) return; await new Promise(r => setTimeout(r, 20)); } throw new Error('condition timed out'); };
       window.makeProject = async () => {
@@ -95,12 +99,10 @@ await test('新建故事保留白话起点，空设定不复制且不调用模�
   assert.equal(result.project.config.max_tokens, 4096); assert.equal(result.project.config.temperature, 1);
   assert.equal(result.project.runs.length, 0); assert.equal(result.readiness.can_generate_assets, false);
   assert.ok(result.readiness.blockers.some(blocker => blocker.code === 'project_settings_missing'));
-  assert.equal(result.blocked, '请先补全设定并解锁 Key。');
+  assert.equal(result.blocked, '请先补全设定，并在模型连接中配置可用的 API Key。');
 });
 
 await test('实际创建页面引导手动扩写，模型分别填写四项设定', async ({ page, load, calls, setHandler, origin }) => {
-  const report = resolve(process.env.BRAIPEN_REPORT_DIR || resolve(root, '../reports/workflow-reliability-2026-09-24'));
-  await mkdir(report, { recursive: true });
   const seed = '灵气复苏，主角能反转他人的能力。';
   const expanded = { protagonist_setting: '模型主角：反转能力的普通青年', supporting_characters_setting: '模型配角：调查异常的同学', world_setting: '模型世界：现代城市出现能力者', core_conflict: '模型冲突：反转失控与保护同伴', title_candidates: ['反向能力'], recommended_title: '反向能力' };
   setHandler(route => {
@@ -128,9 +130,9 @@ await test('实际创建页面引导手动扩写，模型分别填写四项设�
   for (const [label, key] of [['主角', 'protagonist_setting'], ['配角', 'supporting_characters_setting'], ['世界观', 'world_setting'], ['核心冲突', 'core_conflict']]) assert.equal(await field(label).inputValue(), expanded[key]);
   assert.equal(await field('白话故事设想').inputValue(), seed);
   const saved = await page.evaluate(async () => {
-    const { useAppStore } = await import('/src/store/useAppStore.ts');
-    const project = await (await import('/src/localStore.ts')).getProject(useAppStore.getState().selectedProjectRef);
-    return { project, readiness: await (await import('/src/localApi.ts')).readiness(project, 1) };
+    const { useAppStore } = await window.testModule('store/useAppStore.ts');
+    const project = await (await window.testModule('localStore.ts')).getProject(useAppStore.getState().selectedProjectRef);
+    return { project, readiness: await (await window.testModule('localApi.ts')).readiness(project, 1) };
   });
   assert.equal(saved.project.title, '设想页面测试'); assert.equal(saved.project.config.seed_prompt, seed);
   assert.equal(saved.project.config.genre, '未指定'); assert.equal(saved.project.config.style, '未指定');
@@ -160,11 +162,11 @@ await test('手动扩写失败或返回缺字段时，不用白话设想伪造�
 });
 
 await test('世界观单项生成保留手写人物和冲突，并一次保存新白话', async ({page,load,calls,setHandler,origin})=>{
- const report=resolve(process.env.BRAIPEN_REPORT_DIR||resolve(root,'../reports/workflow-reliability-2026-09-24'));await mkdir(report,{recursive:true});
  setHandler(route=>{const payload=route.request().postDataJSON();calls.push({url:route.request().url(),data:payload});return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'仅生成的世界观',protagonist_setting:'不应覆盖主角',core_conflict:'不应覆盖冲突'}},metrics:{call_count:1}}});});
  const state=await page.evaluate(async()=>{const ref=await makeProject();const p=await store.getProject(ref);return{ref,revision:p.revision};});
  await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
- await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},state.ref);
+ await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},state.ref);
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('白话故事设想',{exact:true}).fill('新白话：青年收到未来来信。');
  await page.getByLabel('主角',{exact:true}).fill('作者手写主角');await page.getByLabel('配角',{exact:true}).fill('作者手写配角');await page.getByLabel('核心冲突',{exact:true}).fill('作者手写冲突');
  await page.getByLabel('风格',{exact:true}).fill('作者新文风');
@@ -191,7 +193,8 @@ await test('选择多项整体应用，非法选择和草稿在调用前拒绝',
 await test('实际页面勾选多项才启用批量生成，未选手稿保留',async({page,load,calls,setHandler,origin})=>{
  setHandler(route=>{const payload=route.request().postDataJSON();calls.push(payload);return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'批量生成世界',core_conflict:'批量生成冲突'}},metrics:{}}});});
  const ref=await page.evaluate(()=>makeProject());await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
- await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+ await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('白话故事设想',{exact:true}).fill('批量生成的新设想');await page.getByLabel('主角',{exact:true}).fill('批量前的手写主角');
  const button=page.getByRole('button',{name:'生成所选设定 · 调用模型',exact:true});assert.equal(await button.isDisabled(),true);
  await page.getByRole('checkbox',{name:'选择生成世界观',exact:true}).check();await page.getByRole('checkbox',{name:'选择生成核心冲突',exact:true}).check();
@@ -203,13 +206,15 @@ await test('所选字段缺失失败不改配置，页面草稿在往返设置�
  setHandler(route=>{const payload=route.request().postDataJSON();calls.push(payload);return route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{protagonist_setting:'错误字段'}},metrics:{}}});});
  const state=await page.evaluate(async()=>{const ref=await makeProject();return{ref,before:await store.getProject(ref)};});
  await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
- await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},state.ref);
+ await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},state.ref);
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('白话故事设想',{exact:true}).fill('未保存的新白话');await page.getByLabel('主角',{exact:true}).fill('未保存的手写主角');
  await page.getByRole('button',{name:'用白话生成世界观',exact:true}).click();await page.getByText('扩写结果字段不完整。',{exact:true}).waitFor({state:'visible'});
  assert.equal(await page.getByLabel('主角',{exact:true}).inputValue(),'未保存的手写主角');
  const failed=await page.evaluate(ref=>store.getProject(ref),state.ref);assert.deepEqual(failed.config,state.before.config);assert.equal(failed.revision,state.before.revision);assert.equal(failed.runs[0].status,'interrupted');assert.equal(calls.length,1);
  await page.getByRole('link',{name:/偏好设置/}).click();await page.getByRole('heading',{name:'偏好设置',exact:true}).waitFor({state:'visible'});
  await page.getByRole('link',{name:/创作台/}).click();await page.getByRole('tab',{name:'故事设定',exact:true}).click();
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('主角',{exact:true}).waitFor({state:'visible'});assert.equal(await page.getByLabel('主角',{exact:true}).inputValue(),'未保存的手写主角');assert.equal(await page.getByLabel('白话故事设想',{exact:true}).inputValue(),'未保存的新白话');
 });
 
@@ -230,17 +235,20 @@ await test('等待生成时切换作品，旧请求不污染新作品且新表�
  let release;const gate=new Promise(resolve=>{release=resolve;});
  setHandler(async route=>{const payload=route.request().postDataJSON();await gate;await route.fulfill({json:{...v2Identity(payload),result:{expanded_data:{world_setting:'迟到旧世界'}},metrics:{}}}).catch(()=>{});});
  const refs=await page.evaluate(async()=>[await makeProject(),await makeProject()]);await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
- await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},refs[0]);
+ await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},refs[0]);
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('白话故事设想',{exact:true}).fill('旧作品白话');await page.getByRole('button',{name:'用白话生成世界观',exact:true}).click();
  await page.evaluate(ref=>waitUntil(async()=>(await store.getProject(ref)).runs.some(run=>run.status==='running')),refs[0]);
- await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},refs[1]);release();
+ await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},refs[1]);release();
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('白话故事设想',{exact:true}).fill('新作品白话');assert.equal(await page.getByLabel('世界观',{exact:true}).inputValue(),'已有设定');
  assert.equal(await page.getByRole('button',{name:'用白话生成世界观',exact:true}).isEnabled(),true);const saved=await page.evaluate(ref=>store.getProject(ref),refs[1]);assert.equal(saved.runs.length,0);assert.equal(saved.config.worldview,'已有设定');
 });
 
 await test('实际恢复按钮同步设定表单，再保存不会覆盖已恢复的模型结果',async({page,load,calls,origin})=>{
  const ref=await page.evaluate(()=>makeProject());await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));await page.goto(origin+'/writing?tab=assets');await load();
- await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+ await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().selectProject(ref);},ref);
+ await page.getByRole('tab',{name:'创作设定',exact:true}).click();
  await page.getByLabel('世界观',{exact:true}).fill('不应覆盖恢复结果的旧草稿');
  await page.evaluate(async ref=>{
   const p=await store.getProject(ref),id=client.newIdentity(p.revision);
@@ -284,13 +292,29 @@ await test('未解锁Key、输入过大、HTTP429都不提前锁定前章', asyn
 
 await test('重复提交由WebLock拒绝；另一标签不会误恢复活任务', async ({ page, context, load, setHandler }) => {
   let release; const gate = new Promise(r => { release = r; });
-  setHandler(async route => { await gate; const p = route.request().postDataJSON(); await route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ...p, credentials: undefined, result: { content: '大纲' }, metrics: {} } }); });
+  let modelCalls = 0;
+  setHandler(async route => { modelCalls++; await gate; const p = route.request().postDataJSON(); await route.fulfill({ headers: { 'access-control-allow-origin': '*' }, json: { ...p, credentials: undefined, result: { content: '大纲' }, metrics: {} } }); });
   const ref = await page.evaluate(async () => { const ref = await makeProject(); window.done = workflow.runOperation(await store.getProject(ref), 'generate_outline', {}); return ref; });
   await page.evaluate(ref => waitUntil(async () => (await store.getProject(ref)).runs.some(r => r.status === 'running')), ref);
   const other = await context.newPage(); await other.goto(origin + '/__workflow_test'); await load(other);
   assert.equal(await other.evaluate(async ref => (await workflow.recoverInterrupted(ref)).runs[0].status, ref), 'running');
   assert.match(await other.evaluate(async ref => { try { await workflow.runOperation(await store.getProject(ref), 'generate_outline', {}); } catch (e) { return e.message; } }, ref), /计算/);
+  await openTestWorkspace(other);
+  assert.equal(await other.evaluate(async ref => (await store.getProject(ref)).runs[0].status, ref), 'running');
   release(); await page.evaluate(() => window.done);
+  assert.equal(modelCalls, 1);
+  await assert.rejects(other.evaluate(ref => store.updateProject(ref, p => { p.assets.outline = '过期大纲'; }), ref), /工作区文件已被外部修改/);
+  await assert.rejects(openTestWorkspace(other), /未保存/);
+  await openTestWorkspace(other, true);
+  const reopened = await other.evaluate(ref => store.getProject(ref), ref);
+  assert.equal(reopened.assets.outline, '大纲');
+  assert.equal(reopened.runs[0].status, 'completed');
+  const reader = await context.newPage();
+  await reader.goto(origin + '/__workflow_test');
+  await load(reader);
+  const saved = await reader.evaluate(ref => store.getProject(ref), ref);
+  assert.equal(saved.runs[0].status, 'completed');
+  assert.equal(saved.assets.outline, '大纲');
 });
 
 await test('旧摘要晚到拒绝覆盖新正文', async ({ page, setHandler }) => {
@@ -309,9 +333,15 @@ await test('旧摘要晚到拒绝覆盖新正文', async ({ page, setHandler }) 
 
 await test('模型结果已保存但正式应用失败：刷新后零调用恢复', async ({ page, load, calls }) => {
   const ref = await page.evaluate(async () => {
-    const ref = await makeProject(); let writes = 0; const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function(...args) { if (this.name === 'projects' && ++writes === 3) throw new DOMException('injected apply failure', 'UnknownError'); return put.apply(this, args); };
-    try { await workflow.runOperation(await store.getProject(ref), 'generate_outline', {}); } catch {} finally { IDBObjectStore.prototype.put = put; }
+    const ref = await makeProject();
+    let applyFailed = false;
+    window.failTestWorkspaceWrite = snapshot => {
+      if (snapshot.projects[0].runs[0]?.status !== 'completed') return;
+      applyFailed = true;
+      throw new DOMException('injected apply failure', 'UnknownError');
+    };
+    try { await workflow.runOperation(await store.getProject(ref), 'generate_outline', {}); } catch {}
+    if (!applyFailed || !(await store.getProject(ref)).runs[0].result?.content) throw new Error('Expected a durable result before the failed apply');
     return ref;
   });
   const count = calls.length;
@@ -323,9 +353,11 @@ await test('模型结果已保存但正式应用失败：刷新后零调用恢�
 
 await test('持续Quota错误最终应急下载保留完整结果，恢复副本可直接应用', async ({ page, load, calls }) => {
   await page.evaluate(async () => {
-    const ref = await makeProject(); let writes = 0; const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function(...args) { if (this.name === 'projects' && ++writes >= 2) throw new DOMException('quota', 'QuotaExceededError'); return put.apply(this, args); };
-    try { await workflow.runOperation(await store.getProject(ref), 'generate_outline', {}); } catch {} finally { IDBObjectStore.prototype.put = put; }
+    const ref = await makeProject();
+    window.failTestWorkspaceWrite = snapshot => {
+      if (snapshot.projects[0].runs[0]?.result) throw new DOMException('injected quota', 'QuotaExceededError');
+    };
+    try { await workflow.runOperation(await store.getProject(ref), 'generate_outline', {}); } catch {}
   });
   const downloaded = page.waitForEvent('download'); await page.evaluate(() => store.downloadRescue());
   const download = await downloaded, backup = await readFile(await download.path(), 'utf8');
@@ -400,7 +432,7 @@ await test('连续生成在正文已提交后暂停，刷新续跑只补摘要�
 });
 
 await test('本机记住的Key可自动恢复且完整备份排除Key', async ({page})=>{
-  const result=await page.evaluate(async()=>{await makeProject();const key=vault.getSessionKey(),pc=await import('/src/providerConnections.ts');await pc.storeConnectionKey('legacy-deepseek',key,true);const profile=await pc.getConnection('legacy-deepseek');return{key:vault.profileKey(profile,profile.revisions[0]),backup:JSON.stringify(await store.createBackup()),stored:await store.getSetting('vault:legacy-deepseek')};});
+  const result=await page.evaluate(async()=>{await makeProject();const key=vault.getSessionKey(),pc=await window.testModule('providerConnections.ts');await pc.storeConnectionKey('legacy-deepseek',key,true);const profile=await pc.getConnection('legacy-deepseek');return{key:vault.profileKey(profile,profile.revisions[0]),backup:JSON.stringify(await store.createBackup()),stored:await store.getSetting('vault:legacy-deepseek')};});
   assert.equal(result.key,KEY);assert.equal(result.stored.version,3);assert.ok(!result.backup.includes(KEY));
 });
 
@@ -411,6 +443,7 @@ await test('真实网络流中刷新：连接取消、部分正文保留、未�
   setWire(async (req, res) => {
     let body = ''; for await (const chunk of req) body += chunk;
     const p = JSON.parse(body), id = v2Identity(p);
+    calls.push({url:req.url, data:p});
     res.writeHead(200, { 'Content-Type':'application/x-ndjson' });
     res.write(JSON.stringify({ ...id, type:'started', frozen_context:{narrative_context_text:'冻结规则'} }) + '\n');
     res.write(JSON.stringify({ ...id, type:'delta', text:'已保存的第一段' }) + '\n');
@@ -420,7 +453,8 @@ await test('真实网络流中刷新：连接取消、部分正文保留、未�
   await page.evaluate(ref=>waitUntil(async()=>(await store.getProject(ref)).runs[0]?.partial==='已保存的第一段'),ref);
   await page.reload();await bounded(closed,'stream connection was not closed on reload');await load();
   const p=await page.evaluate(ref=>workflow.recoverInterrupted(ref),ref);
-  assert.equal(p.runs[0].status,'interrupted');assert.equal(p.runs[0].partial,'已保存的第一段');assert.equal(Object.keys(p.chapters).length,0);assert.equal(calls.length,0);
+  assert.equal(p.runs[0].status,'interrupted');assert.equal(p.runs[0].partial,'已保存的第一段');assert.equal(Object.keys(p.chapters).length,0);
+  assert.equal(calls.length,1);assert.ok(calls[0].url.includes('/generate_chapter/'));
 });
 
 await test('真实网络摘要中刷新：批次恢复不重生成已提交正文', async ({context,page,load,setWire,calls})=>{
@@ -453,34 +487,35 @@ await test('实际页面的任务恢复入口可以应用已保存结果，离�
   });
   await page.goto(origin+'/dashboard');await load();
   await page.evaluate(async ref=>{
-    const config=await import('/src/appConfig.ts');config.setIntroHidden(true);config.markIntroSeen();
-    const {useAppStore}=await import('/src/store/useAppStore.ts');
+    const config=await window.testModule('appConfig.ts');config.setIntroHidden(true);config.markIntroSeen();
+    const {useAppStore}=await window.testModule('store/useAppStore.ts');
     const p=await store.getProject(ref);useAppStore.getState().setProjects([{project_ref:ref,title:p.title,storage_type:'browser'}]);useAppStore.getState().selectProject(ref);
   },ref);
   // Dismiss the intro if it had already mounted; its visible skip control is user-operable.
   const skip=page.getByRole('button',{name:/跳过/});if(await skip.count())await skip.first().click();
   await page.getByText(/任务与恢复/).first().click();
   await page.getByRole('button',{name:'应用已保存结果',exact:true}).waitFor({state:'visible'});
-  await page.screenshot({path:resolve(root,'../reports/workflow-reliability-2026-09-24/recovery-pending-ui.png'),fullPage:true});
+  await page.screenshot({path:join(report,'recovery-pending-ui.png'),fullPage:true});
   await page.getByRole('button',{name:'应用已保存结果',exact:true}).click();
   await page.getByRole('button',{name:/确.*定|OK/}).last().click();
   await page.evaluate(ref=>waitUntil(async()=>(await store.getProject(ref)).assets.outline==='无需模型调用的已保存大纲'),ref);
   assert.equal(calls.length,0);
   await page.evaluate(async ref=>{
     await store.updateProject(ref,p=>workflow.setChapter(p,1,'离线阅读样例正文'));
-    const {useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().setApiStatus('offline');
+    const {useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().setApiStatus('offline');
   },ref);
   await page.getByRole('link',{name:/阅读空间/}).click();
   await page.getByText('离线阅读样例正文',{exact:true}).first().waitFor({state:'visible'});
-  await page.screenshot({path:resolve(root,'../reports/workflow-reliability-2026-09-24/recovery-ui.png'),fullPage:true});
+  await page.screenshot({path:join(report,'recovery-ui.png'),fullPage:true});
 });
 
 await test('第二章配额失败的应急副本恢复后，第一章仍持续锁定', async ({page,load})=>{
   await page.evaluate(async()=>{
     const ref=await makeProject();await store.updateProject(ref,p=>{workflow.setChapter(p,1,'确认的前文');Object.assign(p.chapters[1].workflow,{status:'confirmed',summary_status:'ready'});});
-    let writes=0;const put=IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put=function(...args){if(this.name==='projects'&&++writes>=4)throw new DOMException('quota','QuotaExceededError');return put.apply(this,args);};
-    try{await workflow.generateLocalChapter(ref,2,spec);}catch{}finally{IDBObjectStore.prototype.put=put;}
+    window.failTestWorkspaceWrite = snapshot => {
+      if (snapshot.projects[0].runs[0]?.result) throw new DOMException('injected quota', 'QuotaExceededError');
+    };
+    try { await workflow.generateLocalChapter(ref,2,spec); } catch {}
   });
   const downloaded=page.waitForEvent('download');await page.evaluate(()=>store.downloadRescue());const backup=await readFile(await(await downloaded).path(),'utf8');
   const source=JSON.parse(backup).projects[0];assert.equal(source.chapters[1].workflow.locked_by_chapter,2);assert.ok(source.runs[0].result.content);
@@ -497,7 +532,7 @@ await test('实际页面可结束过期批次，保留草稿并解除单步操�
   });
   await page.evaluate(()=>localStorage.setItem('braipen:intro-hidden','true'));
   await page.goto(origin+'/dashboard');await load();
-  await page.evaluate(async ref=>{const{useAppStore}=await import('/src/store/useAppStore.ts');useAppStore.getState().setProjects([{project_ref:ref,title:'可靠性测试',storage_type:'browser'}]);useAppStore.getState().selectProject(ref);},ref);
+  await page.evaluate(async ref=>{const{useAppStore}=await window.testModule('store/useAppStore.ts');useAppStore.getState().setProjects([{project_ref:ref,title:'可靠性测试',storage_type:'browser'}]);useAppStore.getState().selectProject(ref);},ref);
   await page.getByText(/任务与恢复/).first().click();
   assert.equal(await page.getByRole('button',{name:'重新执行此步骤',exact:true}).isDisabled(),true);
   await page.getByRole('button',{name:'结束此批次',exact:true}).click();await page.getByRole('button',{name:/确.*定|OK/}).last().click();
@@ -505,12 +540,11 @@ await test('实际页面可结束过期批次，保留草稿并解除单步操�
   await page.waitForFunction(()=>Array.from(document.querySelectorAll('button')).some(button=>button.textContent?.trim()==='重新执行此步骤'&&!button.disabled));
   assert.equal(await page.getByRole('button',{name:'重新执行此步骤',exact:true}).isDisabled(),false);
   const p=await page.evaluate(ref=>store.getProject(ref),ref);assert.equal(p.runs[0].partial,'保留草稿');
-  await page.screenshot({path:resolve(root,'../reports/workflow-reliability-2026-09-24/stale-batch-ui.png'),fullPage:true});
+  await page.screenshot({path:join(report,'stale-batch-ui.png'),fullPage:true});
 });
 
 console.log(`PASS ${passed} browser workflow scenarios (${process.env.BRAIPEN_BROWSER||'msedge'})`);
 } finally {
-  await mkdir(resolve(root,'../reports/workflow-reliability-2026-09-24'),{recursive:true});
-  await (await import('node:fs/promises')).writeFile(resolve(root,`../reports/workflow-reliability-2026-09-24/browser-${process.env.BRAIPEN_BROWSER||'msedge'}.json`),JSON.stringify(results,null,2));
+  await writeFile(join(report,`browser-${process.env.BRAIPEN_BROWSER||'msedge'}.json`),JSON.stringify(results,null,2));
   await browser.close();await server.close();
 }
